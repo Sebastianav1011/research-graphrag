@@ -1,0 +1,30 @@
+pipeline_version: '1.0.0'
+encodings: [utf-8-sig, cp1252]
+delimiters: [',', ';', "\t", '|']
+normalization:
+  unicode_form: NFC
+  null_tokens: ['', 'NULL', 'null', 'N/A', 'n/a']
+  date_formats: ['%Y-%m-%d', '%d/%m/%Y', '%Y/%m/%d', '%Y-%m-%d %H:%M:%S']
+  keyword_separator: ';'
+validation:
+  required_columns:
+    proyectos: [source_project_id]
+    articulos: [title]
+    investigadores: [full_name]
+    indicadores: [indicator_id, indicator_name]
+  required_fields:
+    proyectos: [source_project_id]
+    articulos: [title]
+    investigadores: []
+    indicadores: [indicator_id, indicator_name]
+  year_min: 1500
+  year_max: 2100
+errors:
+  fail_on_error: false
+  max_anomalies: null
+  severity_overrides: {}
+directories:
+  staging: data/staging
+  canonical: data/canonical
+  outputs: outputs/layer1
+

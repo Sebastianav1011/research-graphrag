@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "relations",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "relation_id",
+    "source_entity_id",
+    "relation_type",
+    "target_entity_id",
+    "attributes_json",
+    "evidence_type",
+    "provenance_json",
+    "layer2_run_id"
+  ],
+  "properties": {
+    "relation_id": {
+      "type": "string"
+    },
+    "source_entity_id": {
+      "type": "string"
+    },
+    "relation_type": {
+      "type": "string",
+      "enum": [
+        "PROJECT_HAS_RESEARCHER",
+        "ARTICLE_HAS_RESEARCHER"
+      ]
+    },
+    "target_entity_id": {
+      "type": "string"
+    },
+    "attributes_json": {
+      "type": "string"
+    },
+    "evidence_type": {
+      "type": "string",
+      "const": "STRUCTURED_CANONICAL"
+    },
+    "provenance_json": {
+      "type": "string"
+    },
+    "layer2_run_id": {
+      "type": "string"
+    }
+  }
+}

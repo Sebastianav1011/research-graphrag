@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "entities",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "entity_id",
+    "entity_type",
+    "canonical_id",
+    "label",
+    "metadata_json",
+    "provenance_json",
+    "layer2_run_id"
+  ],
+  "properties": {
+    "entity_id": {
+      "type": "string"
+    },
+    "entity_type": {
+      "type": "string",
+      "enum": [
+        "PROJECT",
+        "ARTICLE",
+        "RESEARCHER",
+        "ORGANIZATION",
+        "INDICATOR"
+      ]
+    },
+    "canonical_id": {
+      "type": "string"
+    },
+    "label": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "metadata_json": {
+      "type": "string"
+    },
+    "provenance_json": {
+      "type": "string"
+    },
+    "layer2_run_id": {
+      "type": "string"
+    }
+  }
+}

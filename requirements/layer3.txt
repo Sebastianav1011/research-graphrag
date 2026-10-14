@@ -1,0 +1,6 @@
+# Portable dense embedding runtime. Windows/CUDA verified full lock is separate.
+-r ../requirements.txt
+sentence-transformers==5.2.3
+transformers==4.57.6
+huggingface_hub==0.36.2
+torch==2.11.0

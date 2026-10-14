@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "proyectos",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "project_id",
+    "source_project_id",
+    "title",
+    "summary",
+    "methodology",
+    "objectives",
+    "expected_results",
+    "socioeconomic_objective",
+    "knowledge_area",
+    "knowledge_subarea",
+    "start_date",
+    "end_date",
+    "keywords",
+    "record_source",
+    "source_row",
+    "source_record_id",
+    "etl_run_id",
+    "provenance_json"
+  ],
+  "properties": {
+    "project_id": {
+      "type": "string"
+    },
+    "source_project_id": {
+      "type": "string"
+    },
+    "title": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "summary": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "methodology": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "objectives": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "expected_results": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "socioeconomic_objective": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "knowledge_area": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "knowledge_subarea": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "start_date": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "end_date": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "keywords": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "string"
+      }
+    },
+    "record_source": {
+      "type": "string"
+    },
+    "source_row": {
+      "type": "integer"
+    },
+    "source_record_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "etl_run_id": {
+      "type": "string"
+    },
+    "provenance_json": {
+      "type": "string"
+    }
+  }
+}

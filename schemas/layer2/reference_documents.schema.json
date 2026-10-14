@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "reference_documents",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "document_id",
+    "source_id",
+    "source_type",
+    "title",
+    "canonical_dataset",
+    "canonical_run_id",
+    "metadata_json",
+    "provenance_json",
+    "layer2_run_id"
+  ],
+  "properties": {
+    "document_id": {
+      "type": "string"
+    },
+    "source_id": {
+      "type": "string"
+    },
+    "source_type": {
+      "type": "string",
+      "enum": [
+        "INDICATOR_REFERENCE"
+      ]
+    },
+    "title": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "canonical_dataset": {
+      "type": "string"
+    },
+    "canonical_run_id": {
+      "type": "string"
+    },
+    "metadata_json": {
+      "type": "string"
+    },
+    "provenance_json": {
+      "type": "string"
+    },
+    "layer2_run_id": {
+      "type": "string"
+    }
+  }
+}

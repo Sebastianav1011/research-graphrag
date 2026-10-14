@@ -1,0 +1,88 @@
+config_version: 3.2.0-source-level
+readiness:
+  layer2_status: FINAL_PROJECT_LAYER_2_READY
+  approved_layer2_manifest_sha256: b0ec6990c8dc9d38398c780af4d51ed9c16c80e5504d7d70abd548fbe62d472f
+execution:
+  allow_real_build: true
+input:
+  knowledge_manifest: data/knowledge/_manifest.json
+embeddings:
+  provider: sentence_transformers
+  model: BAAI/bge-m3
+  model_version: 5617a9f61b028005a4858fdac845db406aefb181
+  dimensions: 1024
+  batch_size: 64
+  normalize_embeddings: true
+  device: cuda
+  allow_model_download: false
+  normalization_version: layer3_embedding_input_v1
+  cache: outputs/layer3/cache
+  dtype: float16
+  max_seq_length: 8192
+  local_model_path: outputs/layer3/models/bge-m3/5617a9f61b028005a4858fdac845db406aefb181
+  weights_sha256: b5e0ce3470abf5ef3831aa1bd5553b486803e83251590ab7ff35a117cf6aad38
+vector_index:
+  backend: numpy_exact
+  top_k: 30
+graph:
+  backend: local_json
+  max_hops: 2
+  max_neighbors: 17
+  max_total_nodes: 600
+  allowed_relation_types:
+  - PROJECT_HAS_RESEARCHER
+  - ARTICLE_HAS_RESEARCHER
+  allowed_entity_types:
+  - PROJECT
+  - ARTICLE
+  - RESEARCHER
+  - ORGANIZATION
+  - INDICATOR
+  expand_ambiguous_researchers: false
+  researcher_bridge_policy: resolved_only
+  max_expanded_entities: 510
+  neighbor_priority: resolved_researchers_first
+hybrid:
+  calibration_status: TECHNICAL_REAL_PROFILE_NO_SEMANTIC_GROUND_TRUTH
+  vector_weight: 0.8
+  graph_weight: 0.2
+  structured_relation_weight: 0.0
+  diversity_weight: 0.0
+  candidate_pool: 50
+retrieval:
+  candidate_unit: SOURCE_INDICATOR
+  discovery_unit: CHUNK
+  aggregation: max_cosine_max_graph_v1
+  indicator_profiles_status: PENDING_GROUP_REVIEW
+  enabled: true
+  vector_top_k_per_reference_chunk: 30
+  max_chunks_per_source: 3
+  final_candidates_per_indicator: 50
+  graph_candidate_min_cosine: 0.0
+context:
+  max_chunks: 50
+  max_documents: 50
+  max_entities: 600
+  max_relations: 1200
+  max_reference_chunks: 5
+  max_characters: 30000
+  max_package_characters: 10000000
+evaluation:
+  k_values:
+  - 1
+  - 5
+  - 10
+  compare_modes:
+  - vector
+  - graph
+  - hybrid
+  queries: outputs/layer3/reports/technical_queries.json
+quality:
+  fail_on_orphan_relation: true
+  fail_on_missing_provenance: true
+outputs:
+  publication: data/graphrag
+  base: outputs/layer3
+  quality: outputs/layer3/quality
+  manifests: outputs/layer3/manifests
+  reports: outputs/layer3/reports

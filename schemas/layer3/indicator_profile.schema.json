@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Reserved indicator operational profile; group review pending",
+  "type": "object",
+  "properties": {
+    "indicator_id": {"type": "string"},
+    "status": {"const": "PENDING_GROUP_REVIEW"},
+    "operational_definition": {"type": "null"},
+    "decision_question": {"type": "null"},
+    "required_evidence": {"type": "null"},
+    "insufficient_evidence": {"type": "null"},
+    "applicability": {"type": "null"},
+    "preferred_substantive_fields": {"type": "null"},
+    "exclusions": {"type": "null"}
+  },
+  "required": ["indicator_id", "status"],
+  "additionalProperties": false
+}

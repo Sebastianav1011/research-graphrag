@@ -1,0 +1,90 @@
+﻿dataset,field,type,nullable,description,source,transformation
+proyectos,project_id,string,false,Clave canónica estable del proyecto,config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+proyectos,source_project_id,string,false,Identificador explícito del proyecto en la fuente,config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+proyectos,title,string,true,Título original; proyectos: miembros.titulo por id_actividad consistente; conflicto/ausencia NULL; nunca convocatoria,config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+proyectos,summary,string,true,Resumen textual original normalizado,config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+proyectos,methodology,string,true,Metodología textual proporcionada,config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+proyectos,objectives,string,true,Objetivos textuales proporcionados,config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+proyectos,expected_results,string,true,Resultados de investigación proporcionados; sin inferencia de cumplimiento,config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+proyectos,socioeconomic_objective,string,true,Objetivo socioeconómico declarado,config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+proyectos,knowledge_area,string,true,Gran área declarada,config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+proyectos,knowledge_subarea,string,true,Área de conocimiento declarada,config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+proyectos,start_date,string,true,Fecha inicial ISO 8601,config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+proyectos,end_date,string,true,Fecha final ISO 8601,config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+proyectos,keywords,array,true,Lista de palabras clave separadas por delimitador configurado,config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+proyectos,record_source,string,false,Ruta absoluta al archivo original de la primera ocurrencia,config/sources.yaml; provenance_json.field_mapping,provenance.py
+proyectos,source_row,integer,false,Primera línea física del registro CSV o fila Excel (base 1),config/sources.yaml; provenance_json.field_mapping,provenance.py
+proyectos,source_record_id,string,true,Identificador original cuando existe; opcional,config/sources.yaml; provenance_json.field_mapping,provenance.py
+proyectos,etl_run_id,string,false,Identificador único de ejecución UTC; no es identidad de entidad,config/sources.yaml; provenance_json.field_mapping,provenance.py
+proyectos,provenance_json,string,false,"JSON con ocurrencias, hoja, originales, mapeos y soporte de enriquecimiento por llave explícita",config/sources.yaml; provenance_json.field_mapping,provenance.py
+articulos,article_id,string,false,Clave canónica estable del artículo/producto,config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+articulos,source_article_id,string,true,"Identificador explícito de producción, si existe",config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+articulos,title,string,false,Título original; proyectos: miembros.titulo por id_actividad consistente; conflicto/ausencia NULL; nunca convocatoria,config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+articulos,abstract,string,true,Resumen/abstract de producción,config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+articulos,doi,string,true,DOI sin prefijo URL/doi y en minúsculas,config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+articulos,eid,string,true,EID Scopus válido estructuralmente,config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+articulos,issn_isbn,string,true,"ISSN/ISBN sin guiones ni espacios; validación de forma, no de registro",config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+articulos,journal,string,true,Revista o libro declarado,config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+articulos,document_type,string,true,Tipo de documento personal en investigadores; tipo documental en artículos,config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+articulos,publication_year,integer,true,Año de publicación entero dentro del rango configurado,config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+articulos,keywords,array,true,Lista de palabras clave separadas por delimitador configurado,config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+articulos,record_source,string,false,Ruta absoluta al archivo original de la primera ocurrencia,config/sources.yaml; provenance_json.field_mapping,provenance.py
+articulos,source_row,integer,false,Primera línea física del registro CSV o fila Excel (base 1),config/sources.yaml; provenance_json.field_mapping,provenance.py
+articulos,source_record_id,string,true,Identificador original cuando existe; opcional,config/sources.yaml; provenance_json.field_mapping,provenance.py
+articulos,etl_run_id,string,false,Identificador único de ejecución UTC; no es identidad de entidad,config/sources.yaml; provenance_json.field_mapping,provenance.py
+articulos,provenance_json,string,false,"JSON con ocurrencias, hoja, originales, mapeos y soporte de enriquecimiento por llave explícita",config/sources.yaml; provenance_json.field_mapping,provenance.py
+investigadores,researcher_id,string,false,Clave determinística de identidad o de ocurrencia no resuelta,config/sources.yaml; provenance_json.field_mapping,identity.py
+investigadores,institutional_id,string,true,Identificador institucional personal: id_empleado ≡ id_investigador; aliases compatibles; sensible,config/sources.yaml; provenance_json.field_mapping,identity.py
+investigadores,document_type,string,true,Tipo de documento personal en investigadores; tipo documental en artículos,config/sources.yaml; provenance_json.field_mapping,identity.py
+investigadores,document_number,string,true,Documento personal: cedula/documento/id_documento/numero_documento según mapping; distinto de institutional_id; sensible,config/sources.yaml; provenance_json.field_mapping,identity.py
+investigadores,external_id,string,true,Identificador externo configurado en un único espacio de nombres,config/sources.yaml; provenance_json.field_mapping,identity.py
+investigadores,full_name,string,true,Nombre de persona conservando mayúsculas y acentos,config/sources.yaml; provenance_json.field_mapping,identity.py
+investigadores,normalized_name,string,true,"Nombre en Unicode NFC, espacios simples y casefold",config/sources.yaml; provenance_json.field_mapping,identity.py
+investigadores,email,string,true,Correo normalizado en minúsculas; sensible,config/sources.yaml; provenance_json.field_mapping,identity.py
+investigadores,identity_status,string,false,resolved: evidencia suficiente; ambiguous: candidatos múltiples/contradicción; unresolved: evidencia insuficiente,config/sources.yaml; provenance_json.field_mapping,identity.py
+investigadores,identity_rule,string,false,Regla determinística que justifica el estado,config/sources.yaml; provenance_json.field_mapping,identity.py
+investigadores,record_source,string,false,Ruta absoluta al archivo original de la primera ocurrencia,config/sources.yaml; provenance_json.field_mapping,provenance.py
+investigadores,source_row,integer,false,Primera línea física del registro CSV o fila Excel (base 1),config/sources.yaml; provenance_json.field_mapping,provenance.py
+investigadores,source_record_id,string,true,Identificador original cuando existe; opcional,config/sources.yaml; provenance_json.field_mapping,provenance.py
+investigadores,etl_run_id,string,false,Identificador único de ejecución UTC; no es identidad de entidad,config/sources.yaml; provenance_json.field_mapping,provenance.py
+investigadores,provenance_json,string,false,"JSON con ocurrencias, hoja, originales, mapeos y soporte de enriquecimiento por llave explícita",config/sources.yaml; provenance_json.field_mapping,provenance.py
+organizaciones,organization_id,string,false,"Hash del tipo, nombre normalizado, contexto y país",config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+organizaciones,organization_name,string,false,Nombre explícito de organización,config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+organizaciones,organization_name_normalized,string,false,Nombre institucional normalizado sin inferir equivalencias,config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+organizaciones,organization_type,string,false,Tipo declarado en configuración del campo estructurado,config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+organizaciones,parent_name,string,true,"Nombre del contexto organizacional explícito, si existe",config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+organizaciones,country,string,true,País estructurado opcional,config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+organizaciones,record_source,string,false,Ruta absoluta al archivo original de la primera ocurrencia,config/sources.yaml; provenance_json.field_mapping,provenance.py
+organizaciones,source_row,integer,false,Primera línea física del registro CSV o fila Excel (base 1),config/sources.yaml; provenance_json.field_mapping,provenance.py
+organizaciones,source_record_id,string,true,Identificador original cuando existe; opcional,config/sources.yaml; provenance_json.field_mapping,provenance.py
+organizaciones,etl_run_id,string,false,Identificador único de ejecución UTC; no es identidad de entidad,config/sources.yaml; provenance_json.field_mapping,provenance.py
+organizaciones,provenance_json,string,false,"JSON con ocurrencias, hoja, originales, mapeos y soporte de enriquecimiento por llave explícita",config/sources.yaml; provenance_json.field_mapping,provenance.py
+proyecto_investigador,project_id,string,false,Clave canónica estable del proyecto,config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+proyecto_investigador,researcher_id,string,false,Clave determinística de identidad o de ocurrencia no resuelta,config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+proyecto_investigador,role,string,true,Rol explícito de membresía,config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+proyecto_investigador,is_responsible,boolean,true,Booleano declarado; null si no interpretable,config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+proyecto_investigador,record_source,string,false,Ruta absoluta al archivo original de la primera ocurrencia,config/sources.yaml; provenance_json.field_mapping,provenance.py
+proyecto_investigador,source_row,integer,false,Primera línea física del registro CSV o fila Excel (base 1),config/sources.yaml; provenance_json.field_mapping,provenance.py
+proyecto_investigador,source_record_id,string,true,Identificador original cuando existe; opcional,config/sources.yaml; provenance_json.field_mapping,provenance.py
+proyecto_investigador,etl_run_id,string,false,Identificador único de ejecución UTC; no es identidad de entidad,config/sources.yaml; provenance_json.field_mapping,provenance.py
+proyecto_investigador,provenance_json,string,false,"JSON con ocurrencias, hoja, originales, mapeos y soporte de enriquecimiento por llave explícita",config/sources.yaml; provenance_json.field_mapping,provenance.py
+articulo_investigador,article_id,string,false,Clave canónica estable del artículo/producto,config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+articulo_investigador,researcher_id,string,false,Clave determinística de identidad o de ocurrencia no resuelta,config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+articulo_investigador,author_position,integer,true,Posición explícita de autor; no se deduce del orden de filas,config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+articulo_investigador,affiliation,string,true,Afiliación estructurada explícita de la relación,config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+articulo_investigador,record_source,string,false,Ruta absoluta al archivo original de la primera ocurrencia,config/sources.yaml; provenance_json.field_mapping,provenance.py
+articulo_investigador,source_row,integer,false,Primera línea física del registro CSV o fila Excel (base 1),config/sources.yaml; provenance_json.field_mapping,provenance.py
+articulo_investigador,source_record_id,string,true,Identificador original cuando existe; opcional,config/sources.yaml; provenance_json.field_mapping,provenance.py
+articulo_investigador,etl_run_id,string,false,Identificador único de ejecución UTC; no es identidad de entidad,config/sources.yaml; provenance_json.field_mapping,provenance.py
+articulo_investigador,provenance_json,string,false,"JSON con ocurrencias, hoja, originales, mapeos y soporte de enriquecimiento por llave explícita",config/sources.yaml; provenance_json.field_mapping,provenance.py
+indicadores,indicator_id,string,false,Código estable conservado del catálogo,config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+indicadores,category,string,true,Categoría literal del catálogo,config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+indicadores,dimension,string,true,Ámbito/dimensión literal o null,config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+indicadores,indicator_name,string,false,Texto oficial del indicador; no inventa una etiqueta abreviada,config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+indicadores,indicator_description,string,true,Descripción adicional si existe en la fuente,config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+indicadores,indicator_type,string,true,Tipo literal del catálogo,config/sources.yaml; provenance_json.field_mapping,normalize.py; canonicalize.py
+indicadores,record_source,string,false,Ruta absoluta al archivo original de la primera ocurrencia,config/sources.yaml; provenance_json.field_mapping,provenance.py
+indicadores,source_row,integer,false,Primera línea física del registro CSV o fila Excel (base 1),config/sources.yaml; provenance_json.field_mapping,provenance.py
+indicadores,source_record_id,string,true,Identificador original cuando existe; opcional,config/sources.yaml; provenance_json.field_mapping,provenance.py
+indicadores,etl_run_id,string,false,Identificador único de ejecución UTC; no es identidad de entidad,config/sources.yaml; provenance_json.field_mapping,provenance.py
+indicadores,provenance_json,string,false,"JSON con ocurrencias, hoja, originales, mapeos y soporte de enriquecimiento por llave explícita",config/sources.yaml; provenance_json.field_mapping,provenance.py

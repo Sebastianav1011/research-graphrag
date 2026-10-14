@@ -1,0 +1,102 @@
+config_version: '2.0.0-real'
+readiness:
+  publication_kind: real
+  approved_layer1_manifest_sha256: b4484ed51f84fe2293912f4b809c554eadadd5ba18e4c991258d35d13c00b297
+  mappings_verified: true
+  chunking_calibrated: true
+input:
+  canonical: data/canonical
+  manifest_run_id_field: run_id
+  manifest_files_field: canonical_files
+  manifest_success_status: SUCCESS
+field_types:
+  keywords: list_string
+  publication_year: integer
+  source_row: integer
+  author_position: integer
+  is_responsible: boolean
+datasets:
+  proyectos:
+    entity_type: PROJECT
+    id_field: project_id
+    label_field: title
+    required_fields: [project_id, source_project_id]
+    text_fields: [title, summary, methodology, objectives, expected_results, keywords]
+    metadata_fields: [source_project_id, socioeconomic_objective, knowledge_area, knowledge_subarea, start_date, end_date]
+  articulos:
+    entity_type: ARTICLE
+    id_field: article_id
+    label_field: title
+    required_fields: [article_id, title]
+    text_fields: [title, abstract, keywords]
+    metadata_fields: [doi, eid, issn_isbn, journal, publication_year, document_type]
+  investigadores:
+    entity_type: RESEARCHER
+    id_field: researcher_id
+    label_field: full_name
+    required_fields: [researcher_id, identity_status, identity_rule]
+    allowed_identity_statuses: [resolved, ambiguous, unresolved]
+    metadata_fields: [institutional_id, identity_status, identity_rule]
+  organizaciones:
+    entity_type: ORGANIZATION
+    id_field: organization_id
+    label_field: organization_name
+    required_fields: [organization_id, organization_name, organization_type]
+    metadata_fields: [organization_type, parent_name, country]
+  indicadores:
+    entity_type: INDICATOR
+    id_field: indicator_id
+    label_field: indicator_name
+    required_fields: [indicator_id, indicator_name]
+    text_fields: [indicator_name, category, dimension, indicator_description]
+    metadata_fields: [category, dimension, indicator_type]
+    reference_attributes:
+      name: indicator_name
+      category: category
+      dimension: dimension
+      description: indicator_description
+relations:
+  proyecto_investigador:
+    relation_type: PROJECT_HAS_RESEARCHER
+    source_dataset: proyectos
+    source_field: project_id
+    target_dataset: investigadores
+    target_field: researcher_id
+    attribute_fields: [role, is_responsible]
+  articulo_investigador:
+    relation_type: ARTICLE_HAS_RESEARCHER
+    source_dataset: articulos
+    source_field: article_id
+    target_dataset: investigadores
+    target_field: researcher_id
+    attribute_fields: [author_position, affiliation]
+excluded_sensitive_fields: [document_number, cedula, cédula, documento, email, birth_date, fecha_nacimiento, marital_status, estado_civil, sex, sexo]
+excluded_corpus_fields: [institutional_id, doi, eid, issn_isbn, researcher_id, project_id, article_id]
+chunking:
+  strategy: hierarchical_words_v1
+  # Calibrated on the approved real snapshot; see reports/chunking_analysis.md.
+  target_words: 220
+  max_words: 340
+  overlap_words: 20
+  preserve_paragraphs: true
+  preserve_sentences: true
+normalization:
+  unicode: NFC
+  whitespace: true
+  linebreaks: true
+  remove_invisible: true
+privacy:
+  email_policy: mask
+  email_marker: '[EMAIL_EXCLUDED]'
+  authorization: 'User explicitly approved email-only masking on 2026-10-05; canonical remains immutable.'
+quality:
+  fail_on_orphan: true
+  fail_on_provenance_issue: true
+  fail_on_pii: true
+  # Real snapshot: 3/11379 empty documents retained; require >=99.9% usable coverage.
+  max_empty_document_ratio: 0.001
+outputs:
+  knowledge: data/knowledge
+  quality: outputs/layer2/quality
+  manifests: outputs/layer2/manifests
+  reports: outputs/layer2/reports

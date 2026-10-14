@@ -1,0 +1,8 @@
+id,documento,tipo,nombre,email,proyecto,rol,responsable,facultad
+EMP001,DOC001,TEST,Persona Alfa,alfa@example.invalid,P001,Responsable,si,Facultad Sintética
+EMP001,DOC001,TEST,Persona Alfa,alfa@example.invalid,P002,Miembro,no,Facultad Sintética
+EMP002,DOC002,TEST,Persona Beta,beta@example.invalid,P001,Miembro,no,Facultad Sintética
+,,,Persona Gamma,,P001,Miembro,no,Facultad Sintética
+,,,Persona Gamma,,P002,Miembro,no,Facultad Sintética
+,,,Persona Delta,,,Miembro,no,
+

@@ -1,0 +1,4 @@
+id,titulo,resumen,doi,eid,anio,revista,documento,nombre,facultad
+A001,Artículo sintético de agua,Abstract sintético,https://doi.org/10.1234/AGUA,2-s2.0-123456,2025,Revista ficticia,DOC001,Persona Alfa,Facultad Sintética
+A002,Artículo sintético de aire,,10.1234/aire,2-s2.0-123457,2024,Revista ficticia,DOC002,Persona Beta,Facultad Sintética
+

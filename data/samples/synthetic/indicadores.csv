@@ -1,0 +1,4 @@
+id,categoria,dimension,nombre,tipo
+SYN-01,CATEGORIA_SINTETICA,,Indicador exclusivamente sintético,CUALITATIVO
+SYN-02,CATEGORIA_SINTETICA,DIMENSION_SINTETICA,Otro indicador de prueba,CUALITATIVO
+

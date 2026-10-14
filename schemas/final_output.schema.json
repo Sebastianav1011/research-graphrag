@@ -1,0 +1,262 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Future Layer 4 output, empty in Layer 1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "Proyectos",
+    "Artículos"
+  ],
+  "properties": {
+    "Proyectos": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source_id",
+              "source_type",
+              "title",
+              "indicator_id",
+              "indicator_name",
+              "indicator_category",
+              "indicator_dimension",
+              "evidence_text",
+              "evidence_source_field",
+              "evidence_explanation",
+              "confidence_score",
+              "confidence_level",
+              "researcher_id",
+              "researcher_name",
+              "territory",
+              "territory_type"
+            ],
+            "properties": {
+              "source_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "source_type": {
+                "enum": [
+                  "PROJECT",
+                  "ARTICLE"
+                ]
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1
+              },
+              "indicator_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "indicator_name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "indicator_category": {
+                "type": "string",
+                "minLength": 1
+              },
+              "indicator_dimension": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "evidence_text": {
+                "type": "string",
+                "minLength": 1
+              },
+              "evidence_source_field": {
+                "type": "string",
+                "minLength": 1,
+                "not": {
+                  "pattern": "^\\s*(?:[gG][rR][aA][pP][hH][rR][aA][gG]|[lL][lL][mM]|[eE][mM][bB][eE][dD][dD][iI][nN][gG]|[mM][oO][dD][eE][lL][oO]|[iI][aA]|[oO][pP][eE][nN][aA][iI])\\s*$"
+                }
+              },
+              "evidence_explanation": {
+                "type": "string",
+                "minLength": 1
+              },
+              "confidence_score": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "Reserved; formula and scale not defined yet"
+              },
+              "confidence_level": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "researcher_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "researcher_name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "territory": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "territory_type": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          {
+            "properties": {
+              "source_type": {
+                "const": "PROJECT"
+              },
+              "source_id": {
+                "pattern": "^PROJ_"
+              }
+            }
+          }
+        ]
+      }
+    },
+    "Artículos": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source_id",
+              "source_type",
+              "title",
+              "indicator_id",
+              "indicator_name",
+              "indicator_category",
+              "indicator_dimension",
+              "evidence_text",
+              "evidence_source_field",
+              "evidence_explanation",
+              "confidence_score",
+              "confidence_level",
+              "researcher_id",
+              "researcher_name",
+              "territory",
+              "territory_type"
+            ],
+            "properties": {
+              "source_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "source_type": {
+                "enum": [
+                  "PROJECT",
+                  "ARTICLE"
+                ]
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1
+              },
+              "indicator_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "indicator_name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "indicator_category": {
+                "type": "string",
+                "minLength": 1
+              },
+              "indicator_dimension": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "evidence_text": {
+                "type": "string",
+                "minLength": 1
+              },
+              "evidence_source_field": {
+                "type": "string",
+                "minLength": 1,
+                "not": {
+                  "pattern": "^\\s*(?:[gG][rR][aA][pP][hH][rR][aA][gG]|[lL][lL][mM]|[eE][mM][bB][eE][dD][dD][iI][nN][gG]|[mM][oO][dD][eE][lL][oO]|[iI][aA]|[oO][pP][eE][nN][aA][iI])\\s*$"
+                }
+              },
+              "evidence_explanation": {
+                "type": "string",
+                "minLength": 1
+              },
+              "confidence_score": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "Reserved; formula and scale not defined yet"
+              },
+              "confidence_level": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "researcher_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "researcher_name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "territory": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "territory_type": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          {
+            "properties": {
+              "source_type": {
+                "const": "ARTICLE"
+              },
+              "source_id": {
+                "pattern": "^ART_"
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

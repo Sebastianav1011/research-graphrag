@@ -1,0 +1,56 @@
+proyectos:
+  enabled: true
+  path: data/samples/synthetic/proyectos.csv
+  type: csv
+  mapping:
+    source_project_id: id
+    title: titulo
+    summary: resumen
+    methodology: metodologia
+    objectives: objetivos
+    start_date: inicio
+    end_date: fin
+    keywords: palabras
+articulos:
+  enabled: true
+  path: data/samples/synthetic/articulos.csv
+  type: csv
+  mapping:
+    source_article_id: id
+    title: titulo
+    abstract: resumen
+    doi: doi
+    eid: eid
+    publication_year: anio
+    journal: revista
+  researcher_mapping:
+    document_number: documento
+    full_name: nombre
+  organizations:
+    - {column: facultad, type: facultad}
+investigadores:
+  enabled: true
+  paths: [data/samples/synthetic/investigadores.csv]
+  type: csv
+  mapping:
+    institutional_id: id
+    document_number: documento
+    document_type: tipo
+    full_name: nombre
+    email: email
+    source_project_id: proyecto
+    role: rol
+    is_responsible: responsable
+  organizations:
+    - {column: facultad, type: facultad}
+indicadores:
+  enabled: true
+  path: data/samples/synthetic/indicadores.csv
+  type: csv
+  mapping:
+    indicator_id: id
+    category: categoria
+    dimension: dimension
+    indicator_name: nombre
+    indicator_type: tipo
+

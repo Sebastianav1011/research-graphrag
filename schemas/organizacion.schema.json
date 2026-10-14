@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "organizaciones",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "organization_id",
+    "organization_name",
+    "organization_name_normalized",
+    "organization_type",
+    "parent_name",
+    "country",
+    "record_source",
+    "source_row",
+    "source_record_id",
+    "etl_run_id",
+    "provenance_json"
+  ],
+  "properties": {
+    "organization_id": {
+      "type": "string"
+    },
+    "organization_name": {
+      "type": "string"
+    },
+    "organization_name_normalized": {
+      "type": "string"
+    },
+    "organization_type": {
+      "type": "string"
+    },
+    "parent_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "country": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "record_source": {
+      "type": "string"
+    },
+    "source_row": {
+      "type": "integer"
+    },
+    "source_record_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "etl_run_id": {
+      "type": "string"
+    },
+    "provenance_json": {
+      "type": "string"
+    }
+  }
+}

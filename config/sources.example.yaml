@@ -1,0 +1,76 @@
+# Copy to config/sources.yaml and configure authorized local files.
+proyectos:
+  enabled: true
+  path: data/raw/proyectos/descriptores-limpio.csv
+  type: csv
+  delimiter: ','
+  mapping:
+    source_project_id: id_actividad
+    summary: resumen
+    methodology: metodologia
+    objectives: objetivos
+    expected_results: resultados_investigacion
+    keywords: palabras_clave
+    socioeconomic_objective: objetivo_socioeconomico
+    knowledge_area: gran_area
+    knowledge_subarea: area_conocimiento
+articulos:
+  enabled: true
+  path: data/raw/articulos/produccion-limpio.csv
+  type: csv
+  delimiter: ','
+  mapping:
+    title: nombre_producto
+    abstract: resumen
+    keywords: palabras_clave
+    doi: doi
+    eid: eid
+    issn_isbn: issn_isbn
+    journal: nombre_revista_libro
+    publication_year: anio
+    document_type: tipo_documental
+  researcher_mapping:
+    document_number: cedula
+    full_name: investigador_docente
+  organizations:
+  - column: facultad
+    type: facultad
+investigadores:
+  enabled: true
+  unwrap_quoted_fields:
+  - institutional_id
+  - document_number
+  - document_type
+  - full_name
+  paths:
+  - data/raw/investigadores/miembros-doc-limpio.csv
+  type: csv
+  delimiter: ','
+  mapping:
+    institutional_id:
+    - id_empleado
+    - id_investigador
+    document_type: tipo_documento
+    document_number: documento
+    full_name: nombre_completo
+    source_project_id: id_actividad
+    project_title: titulo
+    role: rol_miembro
+    is_responsible: responsable
+  organizations:
+  - column: facultad
+    type: facultad
+  - column: departamento_academico
+    type: departamento
+    parent_column: facultad
+indicadores:
+  enabled: true
+  path: data/reference/indicadores/catalogo_indicadores.xlsx
+  type: xlsx
+  sheet: Catalogo_Indicadores
+  mapping:
+    indicator_id: id_indicador
+    category: categoria
+    dimension: ambito
+    indicator_name: indicador
+    indicator_type: tipo

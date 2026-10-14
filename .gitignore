@@ -1,0 +1,41 @@
+# Local environment and recreatable tooling caches
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+node_modules/
+.tmp/
+*.tmp
+.layer1.lock
+
+# Secrets and local input mappings
+.env
+.env.*
+!.env.example
+config/sources.yaml
+config/*.local.yaml
+
+# Institutional data; only documented static synthetic test fixtures are shared
+data/**
+!data/raw/
+!data/raw/README.md
+!data/samples/
+!data/samples/synthetic/
+!data/samples/synthetic/*.csv
+!data/samples/synthetic/README.md
+outputs/
+
+# Private model/vector/table payloads and interrupted transfers
+*.log
+*.npy
+*.npz
+*.parquet
+*.bin
+*.safetensors
+*.part
+*.candidate
+~$*.xlsx
+

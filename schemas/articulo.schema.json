@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "articulos",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "article_id",
+    "source_article_id",
+    "title",
+    "abstract",
+    "doi",
+    "eid",
+    "issn_isbn",
+    "journal",
+    "document_type",
+    "publication_year",
+    "keywords",
+    "record_source",
+    "source_row",
+    "source_record_id",
+    "etl_run_id",
+    "provenance_json"
+  ],
+  "properties": {
+    "article_id": {
+      "type": "string"
+    },
+    "source_article_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "title": {
+      "type": "string"
+    },
+    "abstract": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "doi": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "eid": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "issn_isbn": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "journal": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "document_type": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "publication_year": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "keywords": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "string"
+      }
+    },
+    "record_source": {
+      "type": "string"
+    },
+    "source_row": {
+      "type": "integer"
+    },
+    "source_record_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "etl_run_id": {
+      "type": "string"
+    },
+    "provenance_json": {
+      "type": "string"
+    }
+  }
+}

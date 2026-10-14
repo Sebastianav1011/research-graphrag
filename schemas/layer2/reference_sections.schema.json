@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "reference_sections",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "section_id",
+    "document_id",
+    "source_id",
+    "source_type",
+    "field_name",
+    "text_original",
+    "text_normalized",
+    "text_hash",
+    "text_hash_original",
+    "text_hash_normalized",
+    "provenance_json",
+    "layer2_run_id",
+    "field_order",
+    "char_count",
+    "word_count"
+  ],
+  "properties": {
+    "section_id": {
+      "type": "string"
+    },
+    "document_id": {
+      "type": "string"
+    },
+    "source_id": {
+      "type": "string"
+    },
+    "source_type": {
+      "type": "string",
+      "enum": [
+        "INDICATOR_REFERENCE"
+      ]
+    },
+    "field_name": {
+      "type": "string"
+    },
+    "text_original": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "text_normalized": {
+      "type": "string"
+    },
+    "text_hash": {
+      "type": "string"
+    },
+    "text_hash_original": {
+      "type": "string"
+    },
+    "text_hash_normalized": {
+      "type": "string"
+    },
+    "provenance_json": {
+      "type": "string"
+    },
+    "layer2_run_id": {
+      "type": "string"
+    },
+    "field_order": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "char_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "word_count": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}

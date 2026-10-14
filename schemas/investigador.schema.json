@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "investigadores",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "researcher_id",
+    "institutional_id",
+    "document_type",
+    "document_number",
+    "external_id",
+    "full_name",
+    "normalized_name",
+    "email",
+    "identity_status",
+    "identity_rule",
+    "record_source",
+    "source_row",
+    "source_record_id",
+    "etl_run_id",
+    "provenance_json"
+  ],
+  "properties": {
+    "researcher_id": {
+      "type": "string"
+    },
+    "institutional_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "document_type": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "document_number": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "external_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "full_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "normalized_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "email": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "identity_status": {
+      "type": "string",
+      "enum": [
+        "resolved",
+        "ambiguous",
+        "unresolved"
+      ]
+    },
+    "identity_rule": {
+      "type": "string"
+    },
+    "record_source": {
+      "type": "string"
+    },
+    "source_row": {
+      "type": "integer"
+    },
+    "source_record_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "etl_run_id": {
+      "type": "string"
+    },
+    "provenance_json": {
+      "type": "string"
+    }
+  }
+}

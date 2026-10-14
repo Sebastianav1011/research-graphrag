@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "layer2_run_id",
+    "pipeline_version",
+    "started_at",
+    "finished_at",
+    "status",
+    "layer1_manifest_path",
+    "layer1_run_id",
+    "layer1_manifest_hash",
+    "layer2_config_hash",
+    "publication_kind",
+    "input_row_counts",
+    "input_hashes",
+    "output_files",
+    "output_hashes",
+    "payload_hashes",
+    "quality_summary",
+    "code_hashes",
+    "runtime",
+    "source_documents_created",
+    "source_sections_created",
+    "source_chunks_created",
+    "reference_documents_created",
+    "reference_sections_created",
+    "reference_chunks_created",
+    "entities_created",
+    "relations_created",
+    "input_datasets"
+  ],
+  "properties": {
+    "layer2_run_id": {
+      "type": "string"
+    },
+    "pipeline_version": {
+      "type": "string"
+    },
+    "started_at": {
+      "type": "string"
+    },
+    "finished_at": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "const": "SUCCESS"
+    },
+    "layer1_manifest_path": {
+      "type": "string"
+    },
+    "layer1_run_id": {
+      "type": "string"
+    },
+    "layer1_manifest_hash": {
+      "type": "string"
+    },
+    "layer2_config_hash": {
+      "type": "string"
+    },
+    "publication_kind": {
+      "type": "string",
+      "const": "real"
+    },
+    "input_row_counts": {
+      "type": "object"
+    },
+    "input_hashes": {
+      "type": "object"
+    },
+    "output_files": {
+      "type": "object"
+    },
+    "output_hashes": {
+      "type": "object"
+    },
+    "payload_hashes": {
+      "type": "object"
+    },
+    "quality_summary": {
+      "type": "object"
+    },
+    "code_hashes": {
+      "type": "object"
+    },
+    "runtime": {
+      "type": "object"
+    },
+    "source_documents_created": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "source_sections_created": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "source_chunks_created": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "reference_documents_created": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "reference_sections_created": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "reference_chunks_created": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "entities_created": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "relations_created": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "input_datasets": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "indicadores",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "indicator_id",
+    "category",
+    "dimension",
+    "indicator_name",
+    "indicator_description",
+    "indicator_type",
+    "record_source",
+    "source_row",
+    "source_record_id",
+    "etl_run_id",
+    "provenance_json"
+  ],
+  "properties": {
+    "indicator_id": {
+      "type": "string"
+    },
+    "category": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "dimension": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "indicator_name": {
+      "type": "string"
+    },
+    "indicator_description": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "indicator_type": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "record_source": {
+      "type": "string"
+    },
+    "source_row": {
+      "type": "integer"
+    },
+    "source_record_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "etl_run_id": {
+      "type": "string"
+    },
+    "provenance_json": {
+      "type": "string"
+    }
+  }
+}

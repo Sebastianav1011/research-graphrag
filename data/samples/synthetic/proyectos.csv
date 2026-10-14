@@ -1,0 +1,7 @@
+id,titulo,resumen,metodologia,objetivos,inicio,fin,palabras
+P001,Proyecto sintético de agua,Resumen de prueba,Muestreo,Medir agua,2025-01-01,2025-12-31,agua; territorio
+P001,Proyecto sintético de agua,Resumen de prueba,Muestreo,Medir agua,2025-01-01,2025-12-31,agua; territorio
+P002,Proyecto sintético de aire,Resumen sintético,Medición,Medir aire,2025-02-01,2025-09-30,aire
+,Proyecto sin ID,Resumen,Método,Objetivo,2025-01-01,2025-12-31,
+P003,Proyecto con fecha inválida,Resumen,Método,Objetivo,2025-02-30,2025-12-31,
+
