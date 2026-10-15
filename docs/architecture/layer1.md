@@ -3,7 +3,7 @@
 Proyecto: Analítica de datos para la caracterización de la investigación y la identificación
 de su impacto regional en la Vicerrectoría de Investigación de la Pontificia Universidad Javeriana.
 
-Flujo: fuentes → ingest.py → validate.py → staging → normalize.py → identity.py →
+Flujo: fuentes → ingestion.py (parsing y validación) → staging → normalize.py → identity.py →
 canonicalize.py → quality.py + provenance.py. pipeline.py coordina y scripts/run_layer1.py
 solo interpreta argumentos. Las etapas registradas son INGEST, VALIDATION, STAGING,
 NORMALIZATION, IDENTITY RESOLUTION, CANONICALIZATION y QUALITY + AUDIT.

@@ -1,11 +1,18 @@
-"""Provider-independent graph storage with a deterministic local JSON backend."""
+"""Represent/persist factual graph, project upstream records and report graph/identity topology."""
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from copy import deepcopy
 import json
 from pathlib import Path
+from .security import remove_personal_identifiers
+from .provenance import serialize
+from collections import Counter
+import numpy as np
 
+
+
+# Provider-independent graph storage with a deterministic local JSON backend.
 ENTITY_TYPES = frozenset({"PROJECT", "ARTICLE", "RESEARCHER", "ORGANIZATION", "INDICATOR"})
 RELATION_ENDPOINTS = {
     "PROJECT_HAS_RESEARCHER": ("PROJECT", "RESEARCHER"),
@@ -144,3 +151,67 @@ class LocalGraphStore(GraphStore):
         if not validation["valid"]:
             raise ValueError(f"Invalid stored graph: {validation['errors']}")
         return result
+
+# Build only structured edges supplied by an approved knowledge snapshot.
+def build_graph(snapshot, settings=None):
+    settings = settings or {}
+    nodes, relations = {}, {}
+    for row in snapshot.tables["entities"]:
+        entity_id = row.get("entity_id")
+        if not entity_id or entity_id in nodes:
+            raise ValueError(f"Missing or duplicate entity ID: {entity_id}")
+        node = dict(row)
+        for field in ('metadata_json', 'provenance_json'):
+            original = json.loads(node[field])
+            cleaned = remove_personal_identifiers(original)
+            if cleaned != original:
+                node[field] = serialize(cleaned)
+        nodes[entity_id] = node
+    for row in snapshot.tables["relations"]:
+        relation_id = row.get("relation_id")
+        if not relation_id or relation_id in relations:
+            raise ValueError(f"Missing or duplicate relation ID: {relation_id}")
+        relations[relation_id] = row
+    store = LocalGraphStore(nodes, relations)
+    report = store.validate()
+    failures = [error for error in report["errors"]
+                if error["code"] != "ORPHAN_RELATION" or settings.get("fail_on_orphan_relation", True)]
+    if failures:
+        raise ValueError(f"Graph integrity validation failed: {failures}")
+    # Isolation is a reported property, not an invented relationship.
+    return store
+
+# Physical graph topology and identity bridge profile, without inferred facts.
+def profile_graph(graph):
+    parents = {k: k for k in graph.nodes}
+    degrees = Counter()
+    def find(k):
+        while parents[k] != k:
+            parents[k] = parents[parents[k]]
+            k = parents[k]
+        return k
+    statuses = {k: str(json_object(v.get('metadata_json')).get('identity_status', '')).upper()
+        for k, v in graph.nodes.items() if v['entity_type'] == 'RESEARCHER'}
+    status_edges = Counter()
+    for relation in graph.relations.values():
+        a, b = relation['source_entity_id'], relation['target_entity_id']
+        parents[find(a)] = find(b)
+        degrees[a] += 1
+        degrees[b] += 1
+        status_edges[statuses.get(b, 'UNKNOWN')] += 1
+    components = Counter(find(k) for k in graph.nodes)
+    values = [degrees[k] for k in graph.nodes]
+    researcher_degree = [degrees[k] for k, status in statuses.items() if status == 'RESOLVED']
+    return {'nodes_total': len(graph.nodes), 'edges_total': len(graph.relations),
+        'nodes_by_type': dict(Counter(v['entity_type'] for v in graph.nodes.values())),
+        'edges_by_type': dict(Counter(v['relation_type'] for v in graph.relations.values())),
+        'connected_components': len(components), 'largest_component': max(components.values(), default=0),
+        'isolated_nodes': sum(v == 0 for v in values),
+        'degree': {'min': min(values, default=0), 'max': max(values, default=0),
+            **{f'p{p}': float(np.percentile(values, p)) if values else 0 for p in (50, 90, 95, 99)}},
+        'researchers': dict(Counter(statuses.values())), 'resolved_bridge_edges': status_edges['RESOLVED'],
+        'blocked_ambiguous_bridges': sum(status == 'AMBIGUOUS' and degrees[k] >= 2 for k, status in statuses.items()),
+        'blocked_unresolved_bridges': sum(status == 'UNRESOLVED' and degrees[k] >= 2 for k, status in statuses.items()),
+        'blocked_ambiguous_bridge_edges': status_edges['AMBIGUOUS'],
+        'blocked_unresolved_bridge_edges': status_edges['UNRESOLVED'],
+        'resolved_researcher_degree_p95': float(np.percentile(researcher_degree, 95)) if researcher_degree else 0}

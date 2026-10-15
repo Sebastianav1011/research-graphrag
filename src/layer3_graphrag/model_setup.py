@@ -18,7 +18,7 @@ import torch
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'src'))
 from .provenance import file_hash
-from .embedding_provider import SentenceTransformersProvider
+from .embeddings import SentenceTransformersProvider
 
 REVISION = '5617a9f61b028005a4858fdac845db406aefb181'
 REPORTS = ROOT / 'outputs/layer3/reports'

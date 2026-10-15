@@ -10,7 +10,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from layer3_graphrag.contracts import KNOWLEDGE_TABLES, KnowledgeSnapshot
-from layer3_graphrag.embedding_provider import EmbeddingProvider
+from layer3_graphrag.embeddings import EmbeddingProvider
 from layer3_graphrag.provenance import file_hash, serialize, text_hash
 
 ROOT = Path(__file__).resolve().parents[2]

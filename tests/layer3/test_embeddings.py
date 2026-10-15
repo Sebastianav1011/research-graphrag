@@ -5,11 +5,8 @@ import sys
 import numpy as np
 import pytest
 
-from layer3_graphrag.embedding_pipeline import (
-    EmbeddingCache, build_embeddings, cache_key, embedding_config_hash,
-    load_bundle, save_bundle, validate_vectors,
-)
-from layer3_graphrag.embedding_provider import create_provider
+from layer3_graphrag.embeddings import EmbeddingCache, build_embeddings, cache_key, embedding_config_hash, load_bundle, save_bundle, validate_vectors
+from layer3_graphrag.embeddings import create_provider
 
 
 def settings(config, provider):

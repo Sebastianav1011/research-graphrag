@@ -4,7 +4,7 @@ import json
 import pytest
 from layer3_graphrag.source_context import SourceContextResolver, FIELD_ROLES
 from layer3_graphrag.provenance import text_hash
-from layer3_graphrag.embedding_pipeline import build_embeddings,save_bundle,reuse_bundle
+from layer3_graphrag.embeddings import build_embeddings, save_bundle, reuse_bundle
 from layer3_graphrag.indicator_retrieval import write_outputs
 from layer3_graphrag.contracts import source_candidate_arrow_schema,source_context_arrow_schema
 
@@ -97,7 +97,7 @@ def test_graph_expanded_source_reconstructs_unretrieved_substantive_section(snap
     import numpy as np
     from layer3_graphrag.indicator_retrieval import IndicatorRetriever
     from layer3_graphrag.vector_index import NumpyVectorIndex
-    from layer3_graphrag.graph_builder import build_graph
+    from layer3_graphrag.graph import build_graph
     # A deterministic synthetic provider gives ARTICLE partial query similarity;
     # PROJECT remains the sole top-1 vector seed, then factual graph expands ARTICLE.
     class PartialProvider(type(fake_provider)):

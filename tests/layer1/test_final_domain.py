@@ -11,7 +11,7 @@ from layer1_data.identity import resolve
 from layer1_data.normalize import normalize_record
 from layer1_data.pipeline import run
 from layer1_data.quality import production_conflicts
-from layer1_data.validate import map_rows, validate_columns, validate_rows
+from layer1_data.ingestion import map_rows, validate_columns, validate_rows
 from conftest import record
 
 

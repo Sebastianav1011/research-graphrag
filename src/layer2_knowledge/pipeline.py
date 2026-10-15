@@ -10,12 +10,12 @@ from jsonschema import Draft202012Validator
 from . import PIPELINE_VERSION
 from .contracts import SCHEMAS, arrow_schema, logical_schema, manifest_schema
 from .validate_inputs import load_config, require_approval, validate_inputs, assert_unchanged, WaitingForLayer1, ConfigurationPending
-from .document_builder import build_documents
-from .section_builder import build_sections, normalize_sections
+from .documents import build_documents
+from .documents import build_sections, normalize_sections
 from .chunking import build_chunks
-from .reference_builder import build_reference
-from .entity_builder import build_entities
-from .relation_builder import build_relations
+from .documents import build_reference
+from .graph_data import build_entities
+from .graph_data import build_relations
 from .quality import evaluate, write_reports, profile_sections, write_text_profile
 from .provenance import file_hash, now, payload_hash, serialize
 

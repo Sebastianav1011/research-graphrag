@@ -9,11 +9,11 @@ import pyarrow.parquet as pq
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src'))
-from common.config import read_config
+from layer1_data.runtime import read_config
 from layer1_data.identity import STRONG, evidence_values, resolve
 from layer1_data.normalize import header, identifier, normalize_record, text
 from layer1_data.provenance import file_hash
-from layer1_data.validate import map_rows
+from layer1_data.ingestion import map_rows
 
 
 def clean(value):

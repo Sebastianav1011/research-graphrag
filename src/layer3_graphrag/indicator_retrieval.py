@@ -4,9 +4,9 @@ from time import perf_counter
 import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
-from .embedding_pipeline import EmbeddingCache, embedding_config_hash, validate_vectors
+from .embeddings import EmbeddingCache, embedding_config_hash, validate_vectors
 from .graph_retriever import GraphRetriever
-from .graph_store import json_object
+from .graph import json_object
 from .provenance import digest, lineage, serialize, stable_id
 from .source_context import SourceContextResolver
 

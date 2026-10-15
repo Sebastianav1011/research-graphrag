@@ -10,18 +10,18 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from jsonschema import Draft202012Validator, FormatChecker
 
-from common.config import read_config
-from common.logging import get_logger
-from common.paths import output_path, resolve_input
+from layer1_data.runtime import read_config
+from layer1_data.runtime import get_logger
+from layer1_data.runtime import output_path, resolve_input
 from .canonicalize import canonical_entities, canonical_researchers, organizations, relationships, write_parquet, enrich_project_titles
 from .contracts import FIELDS, KEYS, logical_schema
 from .identity import resolve
-from .ingest import ingest
+from .ingestion import ingest
 from .normalize import header, normalize_record, stable_hash, text
 from .provenance import anomaly, file_hash, now
 from .quality import RELEVANT, write_quality, write_csv
 from .provenance import ANOMALY_COLUMNS
-from .validate import map_rows, mapped_values, validate_columns, validate_rows
+from .ingestion import map_rows, mapped_values, validate_columns, validate_rows
 
 DOMAINS = ("proyectos", "articulos", "investigadores", "indicadores")
 

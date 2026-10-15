@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from src.layer3_graphrag.vector_index import NumpyVectorIndex, create_vector_index
-from src.layer3_graphrag.vector_retriever import VectorRetriever
+from src.layer3_graphrag.retrieval import VectorRetriever
 
 
 def bundle(space="SOURCE", vectors=None):

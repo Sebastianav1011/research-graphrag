@@ -6,10 +6,10 @@ from tempfile import TemporaryDirectory
 import pytest
 
 from layer3_graphrag.configuration import load_config, require_approval
-from layer3_graphrag.embedding_provider import create_provider
+from layer3_graphrag.embeddings import create_provider
 from layer3_graphrag.evaluation import compare_engines, load_evaluation_queries
 from layer3_graphrag.pipeline import build_candidate
-from layer3_graphrag.query_engine import QueryEngine
+from layer3_graphrag.retrieval import QueryEngine
 from layer3_graphrag.validate_inputs import assert_unchanged, validate_inputs
 
 pytestmark = pytest.mark.skipif(os.getenv('LAYER3_RUN_REAL_INTEGRATION') != '1',
@@ -102,7 +102,7 @@ def test_provenance(real_artifacts, real_queries):
 
 
 def test_idempotence(real_artifacts):
-    from layer3_graphrag.embedding_pipeline import reuse_bundle
+    from layer3_graphrag.embeddings import reuse_bundle
     snapshot, config, artifacts, engine = real_artifacts
     # Reload the compatible real bundle, as production does; never force corpus inference.
     other = reuse_bundle(artifacts.candidate / 'embeddings/source', snapshot, 'SOURCE',
@@ -153,7 +153,7 @@ def test_real_numeric_embedding_integrity(real_artifacts, space):
 
 
 def test_real_graph_reload(real_artifacts):
-    from layer3_graphrag.graph_store import LocalGraphStore
+    from layer3_graphrag.graph import LocalGraphStore
     artifacts = real_artifacts[2]
     graph = LocalGraphStore.load(artifacts.candidate / 'graph')
     assert graph.nodes == artifacts.graph.nodes
@@ -176,7 +176,7 @@ def test_real_resolved_bridge_paths(real_artifacts):
 
 def test_real_all_indicators_candidates_context_provenance_privacy(real_artifacts):
     import pyarrow.parquet as pq
-    from layer3_graphrag.source_quality import validate_retrieval
+    from layer3_graphrag.quality import validate_retrieval
     snapshot, config, artifacts, _ = real_artifacts
     candidates = pq.read_table(artifacts.candidate / 'retrieval/source_indicator_candidates.parquet').to_pylist()
     packages = pq.read_table(artifacts.candidate / 'retrieval/source_context_packages.parquet').to_pylist()

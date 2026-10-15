@@ -1,4 +1,4 @@
-from layer1_data.validate import validate_columns, validate_rows
+from layer1_data.ingestion import validate_columns, validate_rows
 from conftest import record
 
 

@@ -1,7 +1,7 @@
 """Bounded deterministic expansion of existing facts; no identity resolution."""
 from collections import deque
 from copy import deepcopy
-from .graph_store import json_object
+from .graph import json_object
 
 
 class GraphRetriever:

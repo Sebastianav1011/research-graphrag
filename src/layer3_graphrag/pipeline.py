@@ -14,17 +14,17 @@ from uuid import uuid4
 
 from . import IMPLEMENTATION_STATUS
 from .configuration import inside, load_config, require_approval
-from .embedding_pipeline import EmbeddingCache, build_embeddings, embedding_config_hash, load_bundle, save_bundle, reuse_bundle
-from .embedding_provider import create_provider
+from .embeddings import EmbeddingCache, build_embeddings, embedding_config_hash, load_bundle, save_bundle, reuse_bundle
+from .embeddings import create_provider
 from .evaluation import compare_engines, load_evaluation_queries
-from .graph_builder import build_graph
-from .graph_store import LocalGraphStore
+from .graph import build_graph
+from .graph import LocalGraphStore
 from .manifest import create_manifest, now, validate_publication
 from .provenance import serialize, stable_id
 from .provenance import file_hash
-from .graph_profile import profile_graph
+from .graph import profile_graph
 from .quality import evaluate, write_reports
-from .query_engine import QueryEngine
+from .retrieval import QueryEngine
 from .validate_inputs import assert_unchanged, validate_inputs
 from .vector_index import NumpyVectorIndex, create_vector_index
 
@@ -88,7 +88,7 @@ def build_candidate(root, snapshot, config, config_hash, run_id, archive, provid
     candidates, packages, comparisons, metrics = [], [], [], []
     if config.get('retrieval', {}).get('enabled'):
         from .indicator_retrieval import IndicatorRetriever
-        from .source_quality import validate_retrieval
+        from .quality import validate_retrieval
         candidates, packages, comparisons, metrics = IndicatorRetriever(snapshot, indexes['SOURCE'], provider,
             graph, config, run_id).process()
         result, issues, anomalies, privacy = validate_retrieval(snapshot, graph, candidates, packages, config)

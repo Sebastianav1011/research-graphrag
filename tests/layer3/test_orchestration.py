@@ -7,11 +7,11 @@ from jsonschema import Draft202012Validator
 
 from layer3_graphrag.configuration import load_config
 from layer3_graphrag.contracts import context_schema, layer3_manifest_schema
-from layer3_graphrag.context_builder import build_context
+from layer3_graphrag.source_context import build_context
 from layer3_graphrag.manifest import validate_publication
 from layer3_graphrag.pipeline import run, publish_directory
 from layer3_graphrag.provenance import file_hash
-from layer3_graphrag.ranking import base_score, combine_hits, rank_hits
+from layer3_graphrag.retrieval import base_score, combine_hits, rank_hits
 
 
 def hit(chunk='x', source='P1', vector=1., distance=None, strength=0.):

@@ -3,7 +3,7 @@ from pathlib import Path
 import shutil
 import pytest
 import yaml
-from common.config import read_config
+from layer1_data.runtime import read_config
 
 ROOT = Path(__file__).resolve().parents[2]
 

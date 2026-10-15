@@ -13,16 +13,16 @@ import pyarrow.parquet as pq
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src'))
-from common.config import read_config
-from common.paths import resolve_input
+from layer1_data.runtime import read_config
+from layer1_data.runtime import resolve_input
 from layer1_data.canonicalize import canonical_entities, canonical_researchers
 from layer1_data.identity import STRONG, evidence_values, resolve
-from layer1_data.ingest import ingest
+from layer1_data.ingestion import ingest
 from layer1_data.normalize import header, identifier, name, normalize_record, text
 from layer1_data.pipeline import source_specs
 from layer1_data.provenance import file_hash
 from layer1_data.quality import write_csv
-from layer1_data.validate import map_rows, mapped_values, validate_rows
+from layer1_data.ingestion import map_rows, mapped_values, validate_rows
 
 OUT = ROOT / 'outputs/layer1/reports/identity_alias_forensics'
 CATEGORIES = ('SOURCE_ALREADY_CONFLICTING', 'TRANSFORMATION_CONFLICT', 'COLUMN_MAPPING_ERROR',

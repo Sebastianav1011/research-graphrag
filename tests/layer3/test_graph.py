@@ -3,8 +3,8 @@ import json
 from types import SimpleNamespace
 import pytest
 
-from src.layer3_graphrag.graph_builder import build_graph
-from src.layer3_graphrag.graph_store import LocalGraphStore
+from src.layer3_graphrag.graph import build_graph
+from src.layer3_graphrag.graph import LocalGraphStore
 from src.layer3_graphrag.graph_retriever import GraphRetriever
 
 

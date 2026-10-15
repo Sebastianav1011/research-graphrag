@@ -76,13 +76,10 @@ diccionario y schemas físicos inspeccionados; todos los campos configurados exi
 | --- | --- |
 | validate_inputs | Config segura, aprobación real, schemas, claves, hashes y referencias |
 | contracts | Contratos Arrow/JSON únicos para ocho outputs y manifest |
-| document_builder | Un documento por proyecto/artículo, metadata explícita |
-| section_builder | Campos separados, NULL y representación de listas |
+| documents | Documentos SOURCE/REFERENCE, secciones por campo y composición de referencia |
 | text_normalization | Unicode NFC y formato conservador |
 | chunking | Cortes jerárquicos, overlap y offsets reproducibles |
-| reference_builder | Documentos/secciones/chunks separados para indicadores |
-| entity_builder | Reutilización de identidad canónica sin resolver personas |
-| relation_builder | Dos clases de membresías explícitas |
+| graph_data | Entidades canónicas y dos clases de membresías explícitas, sin resolver personas |
 | provenance | IDs, hashes y extensión de lineage |
 | security | Exclusión de campos y detección de fugas textuales |
 | quality | Métricas, perfiles y validación de cadena completa |

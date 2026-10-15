@@ -2,11 +2,11 @@
 import copy
 import json
 import pytest
-from layer3_graphrag.embedding_pipeline import build_embeddings
-from layer3_graphrag.graph_builder import build_graph
+from layer3_graphrag.embeddings import build_embeddings
+from layer3_graphrag.graph import build_graph
 from layer3_graphrag.indicator_retrieval import IndicatorRetriever, diverse
 from layer3_graphrag.vector_index import NumpyVectorIndex
-from layer3_graphrag.source_quality import validate_retrieval
+from layer3_graphrag.quality import validate_retrieval
 
 
 def service(snapshot, fake_provider, layer3_config):

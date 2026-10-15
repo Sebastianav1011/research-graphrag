@@ -1,5 +1,5 @@
 import pytest
-from layer1_data.ingest import ingest
+from layer1_data.ingestion import ingest
 
 
 def load(path, settings, **spec):
