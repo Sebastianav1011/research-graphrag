@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "title": "Explicit Layer 4 confidence profile; does not replace pending Layer 3 profile",
+  "properties": {
+    "key_elements": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "preferred_evidence_fields": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "enum": [
+          "title",
+          "keywords",
+          "summary",
+          "methodology",
+          "objectives",
+          "expected_results"
+        ]
+      }
+    }
+  },
+  "additionalProperties": true
+}

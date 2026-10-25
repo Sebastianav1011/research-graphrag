@@ -1,0 +1,359 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "decision": {
+            "const": "SUPPORTED"
+          }
+        },
+        "required": [
+          "decision"
+        ]
+      },
+      "then": {
+        "properties": {
+          "support_strength": {
+            "enum": [
+              3,
+              4
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "decision": {
+            "const": "INSUFFICIENT_EVIDENCE"
+          }
+        },
+        "required": [
+          "decision"
+        ]
+      },
+      "then": {
+        "properties": {
+          "support_strength": {
+            "enum": [
+              1,
+              2
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "decision": {
+            "const": "NOT_SUPPORTED"
+          }
+        },
+        "required": [
+          "decision"
+        ]
+      },
+      "then": {
+        "properties": {
+          "support_strength": {
+            "enum": [
+              0
+            ]
+          }
+        }
+      }
+    },
+    {
+      "else": {
+        "properties": {
+          "confidence_raw_score": {
+            "type": "null"
+          },
+          "corroboration_score": {
+            "type": "null"
+          },
+          "field_relevance_score": {
+            "type": "null"
+          },
+          "key_element_coverage": {
+            "type": "null"
+          },
+          "support_strength_score": {
+            "type": "null"
+          }
+        }
+      },
+      "if": {
+        "properties": {
+          "confidence_status": {
+            "const": "COMPUTED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "confidence_raw_score": {
+            "type": "number"
+          },
+          "corroboration_score": {
+            "type": "number"
+          },
+          "field_relevance_score": {
+            "type": "number"
+          },
+          "key_element_coverage": {
+            "type": "number"
+          },
+          "support_strength_score": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    {
+      "else": {
+        "properties": {}
+      },
+      "if": {
+        "properties": {
+          "confidence_status": {
+            "const": "INVALID_ASSESSMENT"
+          }
+        }
+      },
+      "then": {
+        "properties": {}
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "decision": {
+            "enum": [
+              "NOT_SUPPORTED",
+              "INSUFFICIENT_EVIDENCE"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "confidence_raw_score": {
+            "type": "null"
+          },
+          "confidence_status": {
+            "enum": [
+              "NOT_APPLICABLE",
+              "INVALID_ASSESSMENT"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "confidence_status": {
+            "const": "COMPUTED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "decision": {
+            "const": "SUPPORTED"
+          },
+          "evidence_texts": {
+            "minItems": 1
+          },
+          "supported_key_elements": {
+            "minItems": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "decision": {
+            "const": "SUPPORTED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "confidence_status": {
+            "enum": [
+              "COMPUTED",
+              "NOT_COMPUTABLE",
+              "INVALID_ASSESSMENT"
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "properties": {
+    "assessment_engine": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "assessment_engine_status": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "confidence_level": {
+      "type": "null"
+    },
+    "confidence_probability": {
+      "type": "null"
+    },
+    "confidence_raw_score": {
+      "description": "Decimal quantized to 0.01 using ROUND_HALF_UP; serialize as a JSON number at the transport boundary.",
+      "maximum": 100,
+      "minimum": 0,
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "confidence_status": {
+      "enum": [
+        "COMPUTED",
+        "NOT_APPLICABLE",
+        "NOT_COMPUTABLE",
+        "INVALID_ASSESSMENT"
+      ]
+    },
+    "confidence_version": {
+      "const": "RAW_CONFIDENCE_V1"
+    },
+    "corroboration_score": {
+      "maximum": 1,
+      "minimum": 0,
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "decision": {
+      "enum": [
+        "SUPPORTED",
+        "INSUFFICIENT_EVIDENCE",
+        "NOT_SUPPORTED"
+      ]
+    },
+    "evidence_explanation": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "evidence_source_fields": {
+      "items": {
+        "enum": [
+          "title",
+          "keywords",
+          "summary",
+          "methodology",
+          "objectives",
+          "expected_results"
+        ]
+      },
+      "type": "array"
+    },
+    "evidence_texts": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "field_relevance_score": {
+      "maximum": 1,
+      "minimum": 0,
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "indicator_category": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "indicator_dimension": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "indicator_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "indicator_name": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "key_element_coverage": {
+      "maximum": 1,
+      "minimum": 0,
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "project_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "support_strength": {
+      "maximum": 4,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "support_strength_score": {
+      "maximum": 1,
+      "minimum": 0,
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "supported_key_elements": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "project_id",
+    "indicator_id",
+    "indicator_name",
+    "indicator_category",
+    "evidence_explanation",
+    "assessment_engine",
+    "assessment_engine_status",
+    "indicator_dimension",
+    "decision",
+    "support_strength",
+    "supported_key_elements",
+    "evidence_source_fields",
+    "evidence_texts",
+    "confidence_version",
+    "confidence_status",
+    "key_element_coverage",
+    "field_relevance_score",
+    "corroboration_score",
+    "support_strength_score",
+    "confidence_raw_score",
+    "confidence_probability",
+    "confidence_level"
+  ],
+  "title": "PROJECT_INDICATOR_V1",
+  "type": "object"
+}

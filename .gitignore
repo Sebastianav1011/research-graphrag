@@ -11,6 +11,16 @@ node_modules/
 *.tmp
 .layer1.lock
 
+# Regenerable local coverage reports; acceptance reports keep their own paths
+.coverage
+.coverage.*
+/htmlcov/
+/coverage.xml
+
+# Operating system generated metadata
+.DS_Store
+Thumbs.db
+
 # Secrets and local input mappings
 .env
 .env.*
@@ -26,7 +36,32 @@ data/**
 !data/samples/synthetic/
 !data/samples/synthetic/*.csv
 !data/samples/synthetic/README.md
-outputs/
+# Results stay local; only the curated Layer 4 navigation is shared.
+/outputs/*
+!/outputs/layer4/
+/outputs/layer4/*
+!/outputs/layer4/README.md
+!/outputs/layer4/pruebas/
+!/outputs/layer4/performance/
+!/outputs/layer4/territorios/
+!/outputs/layer4/auditoria/
+/outputs/layer4/pruebas/*
+!/outputs/layer4/pruebas/README.md
+!/outputs/layer4/pruebas/piloto_v2/
+!/outputs/layer4/pruebas/validacion_v3_3/
+/outputs/layer4/pruebas/piloto_v2/*
+!/outputs/layer4/pruebas/piloto_v2/README.md
+/outputs/layer4/pruebas/validacion_v3_3/*
+!/outputs/layer4/pruebas/validacion_v3_3/README.md
+/outputs/layer4/performance/*
+!/outputs/layer4/performance/README.md
+/outputs/layer4/territorios/*
+!/outputs/layer4/territorios/README.md
+/outputs/layer4/auditoria/*
+!/outputs/layer4/auditoria/README.md
+
+# Local recovery archives are not source or published deliverables.
+/archives/
 
 # Private model/vector/table payloads and interrupted transfers
 *.log

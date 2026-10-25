@@ -1,0 +1,125 @@
+{
+  "type": "object",
+  "properties": {
+    "assessment_version": {
+      "const": "ASSESSMENT_V2",
+      "type": "string"
+    },
+    "decision": {
+      "type": "string",
+      "enum": [
+        "SUPPORTED",
+        "INSUFFICIENT_EVIDENCE",
+        "NOT_SUPPORTED"
+      ]
+    },
+    "support_strength": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4
+    },
+    "criterion_assessments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "criterion_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "support": {
+            "type": "string",
+            "enum": [
+              "CLEAR",
+              "PARTIAL",
+              "NOT_DEMONSTRATED"
+            ]
+          },
+          "required_stage": {
+            "type": "string",
+            "enum": [
+              "ACTIVITY_PROPOSED",
+              "ACTIVITY_EXECUTED",
+              "RESULT_EXPECTED",
+              "RESULT_DEMONSTRATED",
+              "CONTEXT"
+            ]
+          },
+          "evidence_indices": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "uniqueItems": true
+          },
+          "explanation": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "criterion_id",
+          "support",
+          "required_stage",
+          "evidence_indices",
+          "explanation"
+        ],
+        "additionalProperties": false
+      },
+      "minItems": 1
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "field": {
+            "type": "string",
+            "enum": [
+              "title",
+              "keywords",
+              "summary",
+              "methodology",
+              "objectives",
+              "expected_results"
+            ]
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1
+          },
+          "stage": {
+            "type": "string",
+            "enum": [
+              "ACTIVITY_PROPOSED",
+              "ACTIVITY_EXECUTED",
+              "RESULT_EXPECTED",
+              "RESULT_DEMONSTRATED",
+              "CONTEXT"
+            ]
+          }
+        },
+        "required": [
+          "field",
+          "text",
+          "stage"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "explanation": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "required": [
+    "assessment_version",
+    "decision",
+    "support_strength",
+    "criterion_assessments",
+    "evidence",
+    "explanation"
+  ],
+  "additionalProperties": false
+}

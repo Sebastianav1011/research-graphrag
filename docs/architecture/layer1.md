@@ -107,3 +107,57 @@ quality/production_conflicts.csv agrupa la cuarentena existente como UNRESOLVED.
 config/resolutions/production_conflicts.csv es una reserva conceptual sin lector ni resoluciones.
 Se preservan RAW, Parquet, auditoría, manifests y plantilla vacía; Capa 2 solo lee canonical.
 Los detalles normativos están en docs/contracts/canonical_data_contract.md.
+
+## Referencia territorial independiente y código DANE integrado
+
+La extensión territorial se incorporó el 16 de octubre de 2026. Tras la unificación
+de código, `src/layer1_data/dane_reference.py` y `scripts/build_dane_reference.py` procesan exclusivamente
+el XLSX autorizado `data/reference/Codigos Dane/Tabla_Codigos_Dane.xlsx`.
+Esta extensión es posterior a la aceptación histórica: no añade tablas al
+snapshot canonical, no reescribe su manifest y no requiere reconstruir Capas 2–3.
+No existe un paquete territorial paralelo en Capa 1. El pipeline canonical no
+importa ni ejecuta automáticamente este constructor.
+
+La dimensión independiente se publica en `data/reference/processed/` como
+`dane_territories.parquet`, con `dane_reference_manifest.json`, auditoría,
+índice explícito de ambigüedad y copia del XLSX. `versions/<reference_id>/`
+conserva snapshots inmutables identificados por hashes de fuente, payload y código.
+La carga verifica hashes físicos/lógicos y schema antes de consumirlos.
+
+El archivo inspeccionado tiene Sheet1 con encabezados en filas 1–3, cuatro
+columnas y 1.120 municipios; Sheet2 y Sheet3 vacías. Contiene 33 unidades
+departamentales según su clasificación, incluida BOGOTA. La fila 611 está vacía;
+no hay códigos duplicados ni nulos en filas de datos. Los tipos XLSX numéricos
+y texto se documentan: únicamente se aceptan componentes con ancho DD/MMM y
+todos los códigos publicados son strings. El código municipal es DDMMM.
+Los valores originales y source_sheet/source_row permanecen trazables.
+Se registran 68 grupos de nombres municipales repetidos y nueve nombres DANE
+que cruzan nivel departamental/municipal. No se corrigen nombres ni se crean aliases.
+
+Por instrucción posterior del usuario, `ALCANCE_NACIONAL` añade explícitamente
+`000 | Colombia | COUNTRY`. Es una extensión `USER_DEFINED_COUNTRY`, no un
+código DANE de departamento o municipio. Sus campos departamentales, municipales
+y padre son NULL. Sheet1–Sheet3 permanecen intactas; el XLSX original se conserva
+en el snapshot anterior `701a2468c65a5d86dcfa7823f66741ddc8e7289db0a0e841f292651ee84b0176`.
+La política de publicación nacional pertenece a [Capa 4B](layer4.md).
+
+
+### Aceptación del constructor actual
+
+Los diez archivos canonical preexistentes, incluido `__init__.py`, conservaron
+sus bytes durante la unificación. Dimensión DANE, fuente autorizada y versiones
+siguen fuera de `data/canonical/`. El traslado cambió el fingerprint del
+constructor, no los datos publicados. La [aceptación de la unificación DANE](../status/layer1_dane_unification_acceptance.md)
+registra dos referencias aisladas idénticas y la revalidación real de su consumidor
+de Capa 4B, con 677 pruebas PASS en la validación conjunta. La referencia de prueba
+no sustituyó la dimensión vigente; los manifests y actas anteriores no se modificaron.
+
+### Entrypoints y herramientas auxiliares
+
+`scripts/run_layer1.py` ejecuta el ETL canónico y `scripts/build_dane_reference.py`
+construye la referencia independiente. `verify_layer1.py` y `build_contracts.py`
+permanecen en la raíz de `scripts/`. Las auditorías de aliases están en
+`scripts/auxiliary/audit_identity_aliases.py` y
+`scripts/auxiliary/audit_identity_alias_forensics.py`; no son etapas del ETL.
+Los comandos y sus efectos se detallan en el [README principal](../../README.md#ejecución-paso-a-paso)
+y el [índice de scripts](../../scripts/README.md).

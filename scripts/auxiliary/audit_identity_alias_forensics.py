@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pyarrow.parquet as pq
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'src'))
 from layer1_data.runtime import read_config
 from layer1_data.runtime import resolve_input

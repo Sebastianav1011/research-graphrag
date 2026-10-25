@@ -1,0 +1,85 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "project_id": {
+      "type": "string"
+    },
+    "assessments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "indicator_id",
+          "decision",
+          "support_strength",
+          "supported_key_elements",
+          "evidence",
+          "explanation"
+        ],
+        "properties": {
+          "indicator_id": {
+            "type": "string"
+          },
+          "decision": {
+            "enum": [
+              "SUPPORTED",
+              "INSUFFICIENT_EVIDENCE",
+              "NOT_SUPPORTED"
+            ],
+            "type": "string"
+          },
+          "support_strength": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4
+          },
+          "supported_key_elements": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "field",
+                "text"
+              ],
+              "properties": {
+                "field": {
+                  "enum": [
+                    "title",
+                    "keywords",
+                    "summary",
+                    "methodology",
+                    "objectives",
+                    "expected_results"
+                  ],
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "explanation": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "project_id",
+    "assessments"
+  ]
+}

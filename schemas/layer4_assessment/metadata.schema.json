@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "assessment_engine": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "assessment_engine_status": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "assessment_indicator_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "assessment_indicator_version": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "candidate_limit_per_project": {
+      "const": 2
+    },
+    "confidence_is_probability": {
+      "const": false
+    },
+    "confidence_version": {
+      "const": "RAW_CONFIDENCE_V1"
+    },
+    "country_internal_code": {
+      "const": "000"
+    },
+    "country_internal_code_system": {
+      "const": "INTERNAL"
+    },
+    "dane_reference_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "generated_at": {
+      "format": "date-time",
+      "type": "string"
+    },
+    "layer3_run": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "output_status": {
+      "enum": [
+        "PREPARED_NOT_EXECUTED",
+        "SYNTHETIC_TEST",
+        "PRELIMINARY",
+        "FINAL"
+      ]
+    },
+    "planned_project_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "project_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "retrieval_indicator_version": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "territory_ambiguous_mentions": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "territory_ambiguous_projects": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "territory_version": {
+      "minLength": 1,
+      "type": "string"
+    }
+  },
+  "required": [
+    "output_status",
+    "project_count",
+    "candidate_limit_per_project",
+    "layer3_run",
+    "retrieval_indicator_version",
+    "assessment_indicator_version",
+    "assessment_indicator_sha256",
+    "assessment_engine",
+    "assessment_engine_status",
+    "confidence_version",
+    "confidence_is_probability",
+    "territory_version",
+    "dane_reference_sha256",
+    "country_internal_code",
+    "country_internal_code_system",
+    "generated_at"
+  ],
+  "title": "LAYER4_EXPORT_METADATA_V1",
+  "type": "object"
+}

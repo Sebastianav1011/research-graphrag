@@ -1,0 +1,95 @@
+"""Read-only verification of the accepted historical preparation; never reopen its closure."""
+from collections import Counter
+import hashlib
+import json
+from pathlib import Path
+import subprocess
+import sys
+import xml.etree.ElementTree as ET
+import yaml
+
+ROOT=Path(__file__).resolve().parents[2]
+sys.path.insert(0,str(ROOT/'src'))
+sys.path.insert(0,str(ROOT/'scripts'))
+from layer4.indicators.contracts import check_contracts
+from layer4.indicators.profiles import load_profiles
+from layer4.indicators.profiles import inspect_catalog
+from layer4.history import verify_historical_files
+from territory_integrity import fingerprint
+
+
+def digest(path):return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+def read(path):return json.loads(Path(path).read_text(encoding='utf-8-sig'))
+
+
+def verify(root=ROOT):
+    root=Path(root).resolve();out=root/'outputs/layer4/auditoria/historicos/preparacion_inicial'
+    baseline=read(out/'integrity_before.json')
+    verify_historical_files(root,baseline)
+    old=read(root/'outputs/layer4/territorios/aceptacion/integrity_before.json')
+    if fingerprint(root)!=old:raise ValueError('Historical Layer 1/2/3 fingerprint changed')
+    integration=read(out/'confidence_integration.json')
+    for item in integration['files']:
+        verify_historical_files(root,{item['path']:item['source_sha256']})
+    if len(integration['files'])!=9 or integration['collisions']:raise ValueError('Unexpected confidence integration')
+    profiles,manifest=load_profiles(root)
+    derived,rules,mappings,audit=inspect_catalog(root)
+    if profiles!=derived or audit!=manifest['metrics']:raise ValueError('Operational profiles differ from deterministic source projection')
+    verify_historical_files(root,manifest['code_hashes'])
+    if any(r['rule_status']!='RULE_TEXT' or r['implemented_rule'] for r in rules['rules']):
+        raise ValueError('Textual rules incorrectly claimed implemented')
+    prepared=read(out/'prepared_inputs.json');metadata=read(out/'prepared_metadata.json')
+    if prepared['metadata']!=metadata or prepared['profile_reference_id']!=manifest['reference_id']:
+        raise ValueError('Prepared metadata is stale')
+    config=yaml.safe_load((root/'config/layer4_preliminary.yaml').read_text(encoding='utf-8'))
+    if any(config['execution'].values()):raise ValueError('Preparation cannot enable execution')
+    if (metadata['project_count']!=0 or metadata['planned_project_count']!=20
+            or metadata['assessment_engine_status']!='NOT_EXECUTED' or metadata['assessment_engine']!='UNCONFIGURED'
+            or prepared['selected_project_ids'] or prepared['assessment_rows_created'] or prepared['real_workbooks_created']
+            or prepared['provider_implementations']):raise ValueError('Unexpected selection/assessment/export during preparation')
+    layer3=read(root/'data/graphrag/_manifest.json')
+    if (prepared['layer3_manifest_sha256']!=digest(root/'data/graphrag/_manifest.json')
+            or metadata['layer3_run']!=layer3['layer3_run_id']
+            or metadata['retrieval_indicator_version']!='catalogo_indicadores.xlsx@L2_'+layer3['layer2_run_id']
+            or metadata['assessment_indicator_version']!='catalogo_indicadores_v2.xlsx'
+            or metadata['assessment_indicator_sha256']!=manifest['source_hash']):
+        raise ValueError('Indicator version lineage changed')
+    suite=ET.parse(out/'integrated-tests.xml').getroot().find('testsuite')
+    if suite is None or any(int(suite.attrib[k]) for k in ('failures','errors','skipped')):
+        raise ValueError('Integrated tests are missing or not completely passing')
+    test_counts=Counter()
+    for case in suite.findall('testcase'):
+        for label in ('layer4_confidence','territories','layer4_preparation'):
+            if '.'+label+'.' in case.attrib['classname']:test_counts[label]+=1
+    if test_counts['layer4_confidence']<128 or test_counts['territories']<101 or test_counts['layer4_preparation']<73:
+        raise ValueError('Required test coverage missing')
+    if not any(case.attrib['name']=='test_reference_exactly_87_50' for case in suite.findall('testcase')):
+        raise ValueError('87.50 contractual test missing')
+    schema_checks=[]
+    for script in ('build_layer2_contracts.py','build_layer3_contracts.py','build_layer4_contracts.py'):
+        done=subprocess.run([sys.executable,'-B',str(root/'scripts'/script),'--check'],cwd=root,
+            capture_output=True,text=True,encoding='utf-8',errors='replace')
+        if done.returncode:raise ValueError('Schema check failed: '+script+': '+done.stderr[-1000:])
+        schema_checks.append({'command':f'python -B scripts/{script} --check','status':'PASS','output':done.stdout.strip()})
+    check_contracts(root)
+    report=read(out/'preparation_acceptance.json')
+    if (report['status']!='LAYER4_PRELIMINARY_INPUTS_READY'
+            or report['metadata']!=metadata or report['profile_metrics']!=audit
+            or report['confidence_files']!=integration['files']
+            or report['tests']['passed']!=int(suite.attrib['tests'])
+            or report['protected_files']!=len(baseline)):
+        raise ValueError('Historical preparation acceptance does not reconcile')
+    # Return evidence about the original closure. Never rewrite its report/baseline.
+    return {**report, 'verification_scope':'HISTORICAL_PREPARATION',
+            'current_code_acceptance':'NOT_GRANTED_BY_HISTORICAL_VERIFICATION'}
+
+
+if __name__=='__main__':
+    try:
+        result=verify()
+        print(json.dumps({'status':result['status'],'tests':result['tests'],'protected_files':result['protected_files'],
+                          'integrity':result['integrity'],'verification_scope':result['verification_scope'],
+                          'current_code_acceptance':result['current_code_acceptance']},ensure_ascii=True))
+    except (ValueError,OSError) as exc:
+        print(json.dumps({'status':'BLOCKED','error':str(exc)},ensure_ascii=True))
+        raise SystemExit(2)

@@ -1,0 +1,17 @@
+version: LAYER4A_20_V2
+project_count: 20
+# Conservative initial budget. Compare 2/3/5 before approving the final cap.
+candidate_limit_per_project: 2
+batch_size: 5
+pilot_project_count: 5
+seed: LAYER4_FINAL_20_V2
+secondary_rank_window: 3
+engine: CODEX_CLI
+# Null records unobserved model honestly; set an explicit approved model before prepare if needed.
+model: null
+timeout_seconds: 600
+max_technical_retries: 1
+layer3_manifest: data/graphrag/_manifest.json
+territory_manifest: outputs/layer4/territorios/publicacion/territory_manifest.json
+sample_source: outputs/layer4/pruebas/piloto_v2/muestra_20/selection_manifest.json
+output_directory: outputs/layer4/pruebas/piloto_v2/preparacion_20

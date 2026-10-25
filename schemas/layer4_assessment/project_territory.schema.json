@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "else": {
+        "properties": {
+          "code_system": {
+            "const": "DANE"
+          },
+          "department_code": {
+            "pattern": "^[0-9]{2}$",
+            "type": "string"
+          },
+          "department_name": {
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      },
+      "if": {
+        "properties": {
+          "territory_type": {
+            "const": "COUNTRY"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "code_system": {
+            "const": "INTERNAL"
+          },
+          "department_code": {
+            "type": "null"
+          },
+          "department_name": {
+            "type": "null"
+          },
+          "territory_code": {
+            "const": "000"
+          },
+          "territory_name": {
+            "const": "Colombia"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "territory_type": {
+            "const": "DEPARTMENT"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "territory_code": {
+            "pattern": "^[0-9]{2}$"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "territory_type": {
+            "const": "MUNICIPALITY"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "territory_code": {
+            "pattern": "^[0-9]{5}$"
+          }
+        }
+      }
+    }
+  ],
+  "properties": {
+    "code_system": {
+      "enum": [
+        "DANE",
+        "INTERNAL"
+      ]
+    },
+    "department_code": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "department_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "project_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "territory_code": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "territory_name": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "territory_type": {
+      "enum": [
+        "COUNTRY",
+        "DEPARTMENT",
+        "MUNICIPALITY"
+      ]
+    }
+  },
+  "required": [
+    "project_id",
+    "territory_type",
+    "territory_code",
+    "territory_name",
+    "department_code",
+    "department_name",
+    "code_system"
+  ],
+  "title": "PROJECT_TERRITORY_CONSUMPTION_V1",
+  "type": "object"
+}

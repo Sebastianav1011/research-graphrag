@@ -1,5 +1,10 @@
 # Clonar y ejecutar — Windows / PowerShell
 
+Para el cierre actual de Capa 4, seguir el [procedimiento único V2](methodology/layer4_closure_v2.md).
+Define prepare/verify, autorización, piloto/lotes, comparación, revisión, desempeño
+y finalize/verify-final. Los procedimientos de preliminares o pilotos V1 conservados
+en este documento son históricos y no publican el único workbook oficial V2.
+
 La raíz es el directorio del clon, sin requisito de nombre de usuario. No hay
 remote Git configurado todavía en la copia local: utiliza la URL que publique
 el grupo. No se ha hecho commit/push durante el refactor.
@@ -159,7 +164,7 @@ técnico registrado en el reporte final local, no una predicción de indicadores
 ## 7. Git y pendientes
 
 ```powershell
-python scripts/audit_repository.py --mode inventory
+# La herramienta histórica de inventario se retiró; consultar CODE_MAP para recuperación desde Git.
 git status --short
 git diff --check
 git check-ignore data/graphrag/_manifest.json config/sources.yaml
@@ -169,10 +174,137 @@ No añadas con -f datos privados, outputs, pesos, caches, logs o configuración
 local. El lock completo se conserva; pytest es dev/test, sentence-transformers
 y torch son runtime Capa 3. Módulos upstream permanecen sin cambios.
 Los perfiles siguen [PENDING_GROUP_REVIEW](pending/indicator_profiles.md).
-No hay benchmark final vigente, selección LLM ni Capa 4 final en este refactor.
+No hay benchmark final vigente de indicadores, selección LLM ni Capa 4A final.
 
 El inventario registra función y consumidores por archivo: ejecutar
-python -B scripts/audit_repository.py --mode inventory. Los fixtures estáticos
+La herramienta de inventario anterior se conserva en el historial Git y no representa la estructura vigente. Los fixtures estáticos
 de tests están en data/samples/synthetic; no son datasets institucionales.
+## 8. Rama territorial independiente de Capa 4B
+
+Esta ruta consume todos los PROJECT de `data/knowledge` y la referencia territorial
+autorizada, sin repetir Capas 1–3 ni leer RAW. El XLSX de referencia debe conservar
+su estructura DANE inspeccionada y la hoja adicional autorizada `ALCANCE_NACIONAL`
+con encabezados `code,name,type` y fila textual `000,Colombia,COUNTRY`.
+
+En una nueva sesión de aceptación, registra primero la integridad protegida.
+No sobrescribas un baseline de una aceptación que aún estés verificando.
+
+```powershell
+New-Item -ItemType Directory -Force outputs/layer4/territorios/aceptacion | Out-Null
+python -B scripts/territory_integrity.py | Out-File -Encoding utf8 outputs/layer4/territorios/aceptacion/integrity_before.json
+python -B scripts/build_dane_reference.py
+python -B scripts/run_territories.py
+python -B scripts/run_territories.py
+python -B scripts/verify_territories.py
+python -B -m pytest tests/territories -q --basetemp=outputs/layer4/territorios/aceptacion/tests-temp
+```
+
+`build_dane_reference` crea versiones inmutables y su manifest independiente en
+`data/reference/processed`, sin alterar canonical. La publicación territorial
+se encuentra en `outputs/layer4/territorios/publicacion`; las anteriores se archivan en
+`outputs/layer4/territorios/versiones`. `verify_territories` comprueba hashes físicos y
+lógicos, catálogo, todas las fuentes, offsets, workbook, CSV, idempotencia y
+baseline protegido. Las pruebas reales requieren los snapshots privados existentes;
+sin ellos se omiten explícitamente y no acreditan aceptación real.
+
+El exportador del workbook usa Artifact Tool local cuando está instalado.
+`TERRITORY_ARTIFACT_RUNTIME` puede apuntar al directorio padre de su node_modules;
+si Node o Artifact Tool no existen, el exportador usa openpyxl ya instalado.
+No instala paquetes ni llama a servicios. Las vistas `qa/` se generan con Artifact
+Tool; el fallback mantiene los mismos datos y hojas sin previews renderizadas.
+
+En Power BI importa `project_territories_powerbi.csv` y
+`data/reference/processed/dane_territories.parquet`. Define los códigos como texto,
+incluido `000`, y relaciona PROJECT 1:N PROJECT_TERRITORY N:1 TERRITORY.
+No expandas filas de la tabla maestra ni incluyas AMBIGUOUS como relaciones.
+
+## 9. Cierre de preparación de Capa 4, sin muestra ni engines
+
+RAW_CONFIDENCE_V1 ya está integrado en el repositorio principal. Su configuración
+versionada es `config/layer4_confidence.yaml`; no necesita instalar un proveedor.
+La preparación usa el XLSX v2 autorizado de indicadores y los manifests/outputs
+históricos existentes. No reconstruyas capas upstream ni ejecutes retrieval.
+
+```powershell
+python -B scripts/build_layer4_contracts.py --check
+python -B scripts/build_indicator_assessment_profiles.py
+python -B scripts/prepare_layer4_inputs.py
+python -B -m pytest tests/layer4_confidence tests/territories tests/layer4_preparation -q -p no:cacheprovider --basetemp=outputs/layer4/auditoria/historicos/preparacion_inicial/integrated-test-temp --junitxml=outputs/layer4/auditoria/historicos/preparacion_inicial/integrated-tests.xml
+python -B scripts/build_layer2_contracts.py --check
+python -B scripts/build_layer3_contracts.py --check
+python -B scripts/auxiliary/verify_layer4_preparation.py
+```
+
+`layer4_preliminary.yaml` conserva tres flags de ejecución en false y engine
+UNCONFIGURED/NOT_EXECUTED. La metadata preparada registra project_count=0 y
+planned_project_count=20. El verificador del cierre actual consume el baseline
+previo a integración de `outputs/layer4/auditoria/historicos/preparacion_inicial/integrity_before.json`; nunca
+lo sobrescribas para hacer pasar una diferencia. Ese baseline y el registro de
+integración de confidence son evidencia local, no un permiso para modificar upstream.
+
+Los perfiles y reglas se publican independientemente bajo data/reference/processed,
+con versiones inmutables. Los 48 fuentes_relevantes narrativos quedan UNMAPPED y
+preferred_evidence_fields=[], sin mappings semánticos. Las 12 reglas son RULE_TEXT,
+no lógica declarada implementada. Consulta los contratos layer4_assessment,
+layer4_indicator_profiles y layer4_output en docs/contracts.
+
+El generador de cuatro hojas está en layer4.indicators.export; las pruebas solo
+exportan un fixture sintético a test-temp. No hay provider implementado ni comando
+para assessment real. No ejecutar Codex CLI, seleccionar proyectos o crear
+resultado_preliminar_20_proyectos.xlsx en esta fase. El siguiente paso autorizado
+por separado será PRELIMINARY_LAYER4_20_PROJECTS.
+
 El entorno, outputs y datos reales permanecen privados. Las carpetas generadas
 se crean en runtime y no necesitan placeholders vacíos en Git.
+
+
+## Código actual de Capa 4 y verificación histórica
+
+Los imports activos son `layer4.indicators` y `layer4.territories`; las rutas de
+scripts, schemas, configuración y outputs se conservan. Confidence se importa
+desde `layer4.indicators.confidence`; el protocolo está en
+`layer4.indicators.assessment`. No se necesita el worktree confidence para
+ejecutar el código migrado ni para comprobar su copia histórica archivada.
+
+`python -B scripts/auxiliary/verify_layer4_preparation.py` verifica la preparación histórica,
+sin reabrir su cierre ni exigir que el preliminar posterior no exista.
+`python -B scripts/verify_territories.py` verifica la publicación existente sin
+reescribir su acta. `python -B scripts/run_layer4_preliminary.py --verify`
+verifica el preliminar persistido sin ejecutar el proveedor. Estas verificaciones
+pueden leer datos reales y no sustituyen una nueva aceptación del código actual.
+
+Los originales esperados en `archives/layer4/` no están incluidos en este árbol.
+Las verificaciones que comparan fingerprints históricos requieren obtenerlos
+por un canal autorizado; no forman parte de la instalación ni se añaden a
+PYTHONPATH.
+
+Un futuro build de perfiles o territorios y una futura ejecución preliminar
+registrarán rutas/hashes nuevos. Para aceptar territorialmente ese nuevo código
+habrá que ejecutar, con autorización separada, las integraciones reales, dos
+builds territoriales idénticos y su QA/idempotencia en una publicación nueva;
+no sobrescribir el cierre histórico. Esta migración no ejecuta esos pasos.
+
+
+## Referencia DANE integrada en Capa 1
+
+El código está en `layer1_data.dane_reference`; no se añade al ETL canonical.
+El comando `scripts/build_dane_reference.py` y la ubicación de sus outputs no cambian.
+La unificación se validó en aislamiento, sin sustituir la referencia vigente.
+Consultar [aceptación](status/layer1_dane_unification_acceptance.md) para código,
+datos, tests y alcance. No repetir builds sobre una publicación aceptada para
+"ajustar" sus fingerprints.
+
+Las auditorías trasladadas se ejecutan mediante `scripts/auxiliary/`.
+`verify_layer4_preparation.py` reproduce el cierre histórico en lectura;
+`create_source_level_review_workbook.py --help` conserva sus argumentos, pero
+generar el workbook exige el checkout/snapshot R8 exacto que validan sus guardias.
+Las dos auditorías de identidad se reservan para reproducción metodológica
+con inputs privados autorizados; no ejecutarlas para instalar el proyecto.
+
+Pruebas conjuntas: ejecutar `tests/layer1` por separado. En otro proceso usar
+`tests/layer2/test_unit.py tests/layer3 tests/layer4_confidence tests/layer4_preliminary
+tests/layer4_preparation tests/layer4_powerbi tests/territories`, excluyendo
+`tests/layer3/test_integration_pending.py` para no reconstruir embeddings.
+Usar `-B`, `-p no:cacheprovider`, basetemp y JUnit en una carpeta nueva de `.tmp/`.
+La suite territorial completa incluye datos reales; ejecutar contra una copia
+de snapshots si se están comprobando publicaciones nuevas.

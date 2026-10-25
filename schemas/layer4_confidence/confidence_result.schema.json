@@ -1,0 +1,159 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "title": "RAW_CONFIDENCE_V1 result; not a statistical probability",
+  "required": [
+    "confidence_version",
+    "confidence_status",
+    "key_element_coverage",
+    "field_relevance_score",
+    "corroboration_score",
+    "support_strength_score",
+    "confidence_raw_score",
+    "confidence_probability",
+    "confidence_level",
+    "validation_errors"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "confidence_version": {
+      "const": "RAW_CONFIDENCE_V1"
+    },
+    "confidence_status": {
+      "enum": [
+        "COMPUTED",
+        "NOT_APPLICABLE",
+        "NOT_COMPUTABLE",
+        "INVALID_ASSESSMENT"
+      ]
+    },
+    "key_element_coverage": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 1
+    },
+    "field_relevance_score": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 1
+    },
+    "corroboration_score": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 1
+    },
+    "support_strength_score": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 1
+    },
+    "confidence_raw_score": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Decimal quantized to 0.01 using ROUND_HALF_UP; serialize as a JSON number at the transport boundary."
+    },
+    "confidence_probability": {
+      "type": "null"
+    },
+    "confidence_level": {
+      "type": "null"
+    },
+    "validation_errors": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "confidence_status": {
+            "const": "COMPUTED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "key_element_coverage": {
+            "type": "number"
+          },
+          "field_relevance_score": {
+            "type": "number"
+          },
+          "corroboration_score": {
+            "type": "number"
+          },
+          "support_strength_score": {
+            "type": "number"
+          },
+          "confidence_raw_score": {
+            "type": "number"
+          },
+          "validation_errors": {
+            "maxItems": 0
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "key_element_coverage": {
+            "type": "null"
+          },
+          "field_relevance_score": {
+            "type": "null"
+          },
+          "corroboration_score": {
+            "type": "null"
+          },
+          "support_strength_score": {
+            "type": "null"
+          },
+          "confidence_raw_score": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "confidence_status": {
+            "const": "INVALID_ASSESSMENT"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "validation_errors": {
+            "minItems": 1
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "validation_errors": {
+            "maxItems": 0
+          }
+        }
+      }
+    }
+  ]
+}

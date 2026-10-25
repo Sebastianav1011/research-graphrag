@@ -1,0 +1,204 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "else": {
+        "properties": {
+          "key_elements": {
+            "maxItems": 0
+          }
+        }
+      },
+      "if": {
+        "properties": {
+          "key_elements_status": {
+            "const": "AVAILABLE"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "key_elements": {
+            "minItems": 1
+          }
+        }
+      }
+    },
+    {
+      "else": {
+        "properties": {
+          "preferred_evidence_fields": {
+            "maxItems": 0
+          }
+        }
+      },
+      "if": {
+        "properties": {
+          "preferred_fields_mapping_status": {
+            "const": "MAPPED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "preferred_evidence_fields": {
+            "minItems": 1
+          }
+        }
+      }
+    }
+  ],
+  "properties": {
+    "descripcion_ampliada": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "favorable_evidence": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "fuentes_relevantes_original": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "indicator_category": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "indicator_dimension": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "indicator_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "indicator_name": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "insufficient_evidence": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "key_elements": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "key_elements_original": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "key_elements_parse_method": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "key_elements_status": {
+      "enum": [
+        "AVAILABLE",
+        "MISSING"
+      ]
+    },
+    "preferred_evidence_fields": {
+      "items": {
+        "enum": [
+          "title",
+          "keywords",
+          "summary",
+          "methodology",
+          "objectives",
+          "expected_results"
+        ]
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
+    "preferred_fields_mapping_status": {
+      "enum": [
+        "MAPPED",
+        "PARTIALLY_MAPPED",
+        "UNMAPPED",
+        "EMPTY"
+      ]
+    },
+    "profile_version": {
+      "const": "INDICATOR_ASSESSMENT_PROFILES_V2"
+    },
+    "related_terms": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "relational_context": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source_catalog": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "source_hash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "source_record_json": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "source_row": {
+      "minimum": 2,
+      "type": "integer"
+    },
+    "source_sheet": {
+      "minLength": 1,
+      "type": "string"
+    }
+  },
+  "required": [
+    "indicator_id",
+    "indicator_name",
+    "indicator_category",
+    "indicator_dimension",
+    "descripcion_ampliada",
+    "key_elements_original",
+    "key_elements_status",
+    "key_elements_parse_method",
+    "favorable_evidence",
+    "insufficient_evidence",
+    "related_terms",
+    "relational_context",
+    "fuentes_relevantes_original",
+    "preferred_fields_mapping_status",
+    "source_catalog",
+    "source_sheet",
+    "source_hash",
+    "source_record_json",
+    "profile_version",
+    "key_elements",
+    "preferred_evidence_fields",
+    "source_row"
+  ],
+  "title": "INDICATOR_ASSESSMENT_PROFILE_V2",
+  "type": "object"
+}

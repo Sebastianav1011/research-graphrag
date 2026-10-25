@@ -35,7 +35,7 @@ Tests: 70 de Capa 1 + 51 unitarios de Capa 2 (47 originales y 4 adicionales) + 1
 integraciones reales: **133 PASS, 0 FAIL, 0 SKIPPED**. Código/config/tests de Capa 1,
 canonical y plantilla permanecen iguales según hashes antes/después.
 Plantilla: dos hojas, 16 columnas, cero filas. Dependencias funcionales legacy: cero.
-No se realizó commit/push ni se implementó Capa 3.
+En esa aceptación no se realizó commit/push ni se implementó Capa 3.
 
 Evidencia: outputs/layer2/reports/acceptance.json y tests.xml; perfiles y calibración
 en text_field_profile.csv, input_profile.json, chunking_candidates.json y chunking_analysis.md.
@@ -45,7 +45,11 @@ Repetir aceptación: `python scripts/verify_layer2.py` después de dos ejecucion
 
 Capa 1 publica hechos, identidades y procedencia. Capa 2 prepara documentos, campos
 independientes, unidades textuales y tablas de entidades/relaciones conocidas.
-Capa 3 hará embeddings, recuperación, grafo y GraphRAG. Capa 4 evaluará indicadores.
+La [Capa 3](layer3.md) realiza embeddings, recuperación híbrida y candidatos
+SOURCE+INDICATOR. [Capa 4A](layer4.md) consume esos candidatos y reconstruye los
+PROJECT por campos; Capa 4B recorre todos los PROJECT publicados, sin depender
+de GraphRAG. Capa 4A dispone de un preliminar técnico, con evaluación final
+pendiente; Capa 4B tiene revalidación territorial real.
 Aquí no hay modelos, inferencias, indicadores asignados, scores ni resultados finales.
 
 ```mermaid
@@ -62,7 +66,10 @@ flowchart TD
   E --> Q
   Q --> M[Manifest y candidato completo]
   M --> K[data/knowledge]
-  K --> F[Capa 3 futura]
+  K --> F[Capa 3: candidatos SOURCE + INDICATOR]
+  F --> A[Capa 4A: assessment de indicadores]
+  K --> A
+  K --> B[Capa 4B: todos los PROJECT por campos]
 ```
 
 ## Entradas y módulos
@@ -98,6 +105,11 @@ en indicator_name. reference_attributes permite revisar mappings explícitos, si
 inventar descripciones ausentes. Área/subárea/objetivo socioeconómico son metadata
 estructurada; document_type/journal son metadata bibliográfica. Cambiar esa decisión
 exige revisar significado contractual. Ninguna columna se adivina por semejanza.
+
+La referencia INDICATOR_REFERENCE de este snapshot conserva el catálogo histórico
+utilizado por Capa 3. Los perfiles enriquecidos v2 de assessment y la dimensión
+DANE son referencias independientes de Capa 1/4: no se incorporan retroactivamente
+a `data/knowledge` ni exigen reconstruir esta publicación.
 
 ## Reproducción y futuras publicaciones
 
@@ -204,8 +216,8 @@ Un intento fallido de publicación deja failure.json y manifest FAILED, nunca SU
 
 ## Tests y dependencias
 
-No se modifican requirements.txt, pytest.ini ni archivos de Capa 1. La aceptación
-incluye su suite completa y las pruebas técnicas y reales de Capa 2.
+La aceptación del 5 de octubre no modificó requirements.txt, pytest.ini ni archivos
+de Capa 1 e incluyó su suite completa y las pruebas técnicas y reales de Capa 2.
 Dependencias directas en requirements.txt; dependencias de tests en requirements-dev.txt.
 
 ```powershell

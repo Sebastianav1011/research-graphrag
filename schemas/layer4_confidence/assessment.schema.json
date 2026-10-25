@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "title": "Provider-independent PROJECT + INDICATOR assessment (pre-confidence)",
+  "required": [
+    "decision",
+    "support_strength",
+    "supported_key_elements",
+    "evidence",
+    "explanation"
+  ],
+  "properties": {
+    "decision": {
+      "enum": [
+        "SUPPORTED",
+        "INSUFFICIENT_EVIDENCE",
+        "NOT_SUPPORTED"
+      ]
+    },
+    "support_strength": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4
+    },
+    "supported_key_elements": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "field",
+          "text"
+        ],
+        "properties": {
+          "field": {
+            "enum": [
+              "title",
+              "keywords",
+              "summary",
+              "methodology",
+              "objectives",
+              "expected_results"
+            ]
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "explanation": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "additionalProperties": true,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "decision": {
+            "const": "SUPPORTED"
+          }
+        },
+        "required": [
+          "decision"
+        ]
+      },
+      "then": {
+        "properties": {
+          "support_strength": {
+            "enum": [
+              3,
+              4
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "decision": {
+            "const": "INSUFFICIENT_EVIDENCE"
+          }
+        },
+        "required": [
+          "decision"
+        ]
+      },
+      "then": {
+        "properties": {
+          "support_strength": {
+            "enum": [
+              1,
+              2
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "decision": {
+            "const": "NOT_SUPPORTED"
+          }
+        },
+        "required": [
+          "decision"
+        ]
+      },
+      "then": {
+        "properties": {
+          "support_strength": {
+            "enum": [
+              0
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

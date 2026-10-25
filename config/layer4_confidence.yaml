@@ -1,0 +1,24 @@
+version: RAW_CONFIDENCE_V1
+weights:
+  key_element_coverage: 0.35
+  field_relevance: 0.30
+  corroboration: 0.20
+  support_strength: 0.15
+field_relevance:
+  preferred: 1.00
+  substantive_non_preferred: 0.75
+  substantive_without_preferences: 1.00
+  orientation: 0.25
+corroboration:
+  zero_substantive_fields: 0.00
+  one_substantive_field: 0.70
+  two_or_more_substantive_fields: 1.00
+allowed_fields:
+  orientation:
+    - title
+    - keywords
+  substantive:
+    - summary
+    - methodology
+    - objectives
+    - expected_results

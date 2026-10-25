@@ -1,0 +1,404 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PRELIMINARY_PROJECT_INDICATOR_V1 including invalid assessment diagnostics",
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "indicator_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "indicator_name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "indicator_category": {
+      "type": "string",
+      "minLength": 1
+    },
+    "evidence_explanation": {
+      "type": "string",
+      "minLength": 1
+    },
+    "assessment_engine": {
+      "type": "string",
+      "minLength": 1
+    },
+    "assessment_engine_status": {
+      "type": "string",
+      "minLength": 1
+    },
+    "indicator_dimension": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "decision": {
+      "enum": [
+        "SUPPORTED",
+        "INSUFFICIENT_EVIDENCE",
+        "NOT_SUPPORTED"
+      ]
+    },
+    "support_strength": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4
+    },
+    "supported_key_elements": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "evidence_source_fields": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "title",
+          "keywords",
+          "summary",
+          "methodology",
+          "objectives",
+          "expected_results"
+        ]
+      }
+    },
+    "evidence_texts": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "confidence_version": {
+      "const": "RAW_CONFIDENCE_V1"
+    },
+    "confidence_status": {
+      "enum": [
+        "COMPUTED",
+        "NOT_APPLICABLE",
+        "NOT_COMPUTABLE",
+        "INVALID_ASSESSMENT"
+      ]
+    },
+    "key_element_coverage": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 1
+    },
+    "field_relevance_score": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 1
+    },
+    "corroboration_score": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 1
+    },
+    "support_strength_score": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 1
+    },
+    "confidence_raw_score": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Decimal quantized to 0.01 using ROUND_HALF_UP; serialize as a JSON number at the transport boundary."
+    },
+    "confidence_probability": {
+      "type": "null"
+    },
+    "confidence_level": {
+      "type": "null"
+    },
+    "assessment_validation_status": {
+      "enum": [
+        "VALID",
+        "INVALID_ASSESSMENT"
+      ]
+    },
+    "validation_errors": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "project_id",
+    "indicator_id",
+    "indicator_name",
+    "indicator_category",
+    "evidence_explanation",
+    "assessment_engine",
+    "assessment_engine_status",
+    "indicator_dimension",
+    "decision",
+    "support_strength",
+    "supported_key_elements",
+    "evidence_source_fields",
+    "evidence_texts",
+    "confidence_version",
+    "confidence_status",
+    "key_element_coverage",
+    "field_relevance_score",
+    "corroboration_score",
+    "support_strength_score",
+    "confidence_raw_score",
+    "confidence_probability",
+    "confidence_level",
+    "assessment_validation_status",
+    "validation_errors"
+  ],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "assessment_validation_status": {
+            "const": "INVALID_ASSESSMENT"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "confidence_status": {
+            "const": "INVALID_ASSESSMENT"
+          },
+          "confidence_raw_score": {
+            "type": "null"
+          },
+          "validation_errors": {
+            "minItems": 1
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "validation_errors": {
+            "maxItems": 0
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "decision": {
+                  "const": "SUPPORTED"
+                }
+              },
+              "required": [
+                "decision"
+              ]
+            },
+            "then": {
+              "properties": {
+                "support_strength": {
+                  "enum": [
+                    3,
+                    4
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "decision": {
+                  "const": "INSUFFICIENT_EVIDENCE"
+                }
+              },
+              "required": [
+                "decision"
+              ]
+            },
+            "then": {
+              "properties": {
+                "support_strength": {
+                  "enum": [
+                    1,
+                    2
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "decision": {
+                  "const": "NOT_SUPPORTED"
+                }
+              },
+              "required": [
+                "decision"
+              ]
+            },
+            "then": {
+              "properties": {
+                "support_strength": {
+                  "enum": [
+                    0
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "confidence_status": {
+                  "const": "COMPUTED"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "key_element_coverage": {
+                  "type": "number"
+                },
+                "field_relevance_score": {
+                  "type": "number"
+                },
+                "corroboration_score": {
+                  "type": "number"
+                },
+                "support_strength_score": {
+                  "type": "number"
+                },
+                "confidence_raw_score": {
+                  "type": "number"
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "key_element_coverage": {
+                  "type": "null"
+                },
+                "field_relevance_score": {
+                  "type": "null"
+                },
+                "corroboration_score": {
+                  "type": "null"
+                },
+                "support_strength_score": {
+                  "type": "null"
+                },
+                "confidence_raw_score": {
+                  "type": "null"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "confidence_status": {
+                  "const": "INVALID_ASSESSMENT"
+                }
+              }
+            },
+            "then": {
+              "properties": {}
+            },
+            "else": {
+              "properties": {}
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "decision": {
+                  "enum": [
+                    "NOT_SUPPORTED",
+                    "INSUFFICIENT_EVIDENCE"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "confidence_status": {
+                  "enum": [
+                    "NOT_APPLICABLE",
+                    "INVALID_ASSESSMENT"
+                  ]
+                },
+                "confidence_raw_score": {
+                  "type": "null"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "confidence_status": {
+                  "const": "COMPUTED"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "decision": {
+                  "const": "SUPPORTED"
+                },
+                "supported_key_elements": {
+                  "minItems": 1
+                },
+                "evidence_texts": {
+                  "minItems": 1
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "decision": {
+                  "const": "SUPPORTED"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "confidence_status": {
+                  "enum": [
+                    "COMPUTED",
+                    "NOT_COMPUTABLE",
+                    "INVALID_ASSESSMENT"
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,184 @@
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string",
+      "const": "CATALOG_RUBRIC_V3"
+    },
+    "assessments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "indicator_id": {
+            "type": "string",
+            "const": "CATALOG_RUBRIC_V3"
+          },
+          "rubrics": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "indicator_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "profile_sha256": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "indicator_evidence_type": {
+                  "type": "string",
+                  "enum": [
+                    "INCORPORATED_APPROACH",
+                    "MECHANISM_OR_COLLABORATION",
+                    "PRODUCT_OR_ACTIVITY",
+                    "RESULT_OR_IMPACT",
+                    "QUANTITATIVE"
+                  ]
+                },
+                "indicator_type_basis": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "profile_field": {
+                        "type": "string",
+                        "enum": [
+                          "indicator_name",
+                          "descripcion_ampliada",
+                          "key_elements",
+                          "favorable_evidence",
+                          "insufficient_evidence",
+                          "relational_context"
+                        ]
+                      },
+                      "text": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "profile_field",
+                      "text"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "minItems": 1
+                },
+                "indicator_type_rationale": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "criteria": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "criterion_id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "role": {
+                        "type": "string",
+                        "enum": [
+                          "REQUIRED",
+                          "ALTERNATIVE",
+                          "COMPLEMENTARY"
+                        ]
+                      },
+                      "alternative_group": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "temporal_requirement": {
+                        "type": "string",
+                        "enum": [
+                          "CONTEXT_ONLY",
+                          "DESIGN_OR_EXECUTION",
+                          "ESTABLISHED_OR_EXECUTED",
+                          "EXECUTED_ACTIVITY",
+                          "DEMONSTRATED_RESULT",
+                          "PROPOSAL_OR_HIGHER",
+                          "EXPECTED_OR_DEMONSTRATED"
+                        ]
+                      },
+                      "basis": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "profile_field": {
+                              "type": "string",
+                              "enum": [
+                                "indicator_name",
+                                "descripcion_ampliada",
+                                "key_elements",
+                                "favorable_evidence",
+                                "insufficient_evidence",
+                                "relational_context"
+                              ]
+                            },
+                            "text": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": [
+                            "profile_field",
+                            "text"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "minItems": 1
+                      },
+                      "rationale": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "criterion_id",
+                      "role",
+                      "alternative_group",
+                      "temporal_requirement",
+                      "basis",
+                      "rationale"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "minItems": 1
+                }
+              },
+              "required": [
+                "indicator_id",
+                "profile_sha256",
+                "indicator_evidence_type",
+                "indicator_type_basis",
+                "indicator_type_rationale",
+                "criteria"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 1,
+            "maxItems": 48
+          }
+        },
+        "required": [
+          "indicator_id",
+          "rubrics"
+        ],
+        "additionalProperties": false
+      },
+      "minItems": 1,
+      "maxItems": 1
+    }
+  },
+  "required": [
+    "project_id",
+    "assessments"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,11 @@
+version: LAYER4_CLOSURE_CONTROL_V1
+base_config: config/layer4_final.yaml
+pilot_directory: outputs/layer4/pruebas/piloto_v2/aceptado_5
+closure_directory: outputs/layer4/auditoria/historicos/cierre_v2_20
+fallback:
+  enabled: true
+  max_additional: 2
+  pool_limit: 5
+  trigger: NO_SUPPORTED
+  timeout_seconds: 600
+  model: null

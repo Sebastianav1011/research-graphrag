@@ -21,7 +21,7 @@ import tempfile
 import pyarrow.parquet as pq
 from openpyxl import load_workbook
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 RUN = 'layer3_2026-10-14T094639_959121+0000_eca9000e'
 V2 = 'data/reference/indicadores/catalogo_indicadores_v2.xlsx'
 V2_HASH = '1aeb1a376c24bca7bdd7acd228da527ef0043f0574541649589badb54e1cf88f'
@@ -408,12 +408,12 @@ def verify_saved(path, payload):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output', type=Path, default=ROOT / 'outputs/layer4/human_review/revision_proyectos_indicadores_source_level.xlsx')
+    parser.add_argument('--output', type=Path, default=ROOT / 'outputs/layer4/auditoria/revision_humana/revision_proyectos_indicadores_source_level.xlsx')
     parser.add_argument('--preview-dir', type=Path, default=Path(tempfile.gettempdir()) / 'graphrag_source_review_previews')
     parser.add_argument('--replace-unreviewed', action='store_true', help='Replace only an existing generated workbook with every human field still empty')
     args = parser.parse_args()
     output = args.output.resolve()
-    require(output.is_relative_to((ROOT / 'outputs/layer4/human_review').resolve()), 'Output must remain in private human_review directory')
+    require(output.is_relative_to((ROOT / 'outputs/layer4/auditoria/revision_humana').resolve()), 'Output must remain in private human_review directory')
     if output.exists():
         require(args.replace_unreviewed, 'Workbook already exists; preserve human labels and choose a new output filename')
         previous = load_workbook(output, read_only=True, data_only=False)
