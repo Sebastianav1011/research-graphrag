@@ -108,7 +108,7 @@ def resolve(value,population,catalog,additional=0):
     return result
 
 
-def menu(root,coordinator,config_path='config/pipeline_manual.json'):
+def menu(root,coordinator,config_path='config/pipeline_manual.json',*,defer_validation=False):
     while True:
         print('\nContratos de evaluacion\n1. Crear contrato\n2. Utilizar contrato existente\n0. Volver')
         answer=input('Opcion: ').strip()
@@ -119,6 +119,11 @@ def menu(root,coordinator,config_path='config/pipeline_manual.json'):
             seed=int(input('Semilla de seleccion (42): ').strip() or '42')
             choice=input('Exigir texto sustantivo autorizado [S/N] (S): ').strip().upper() or 'S'
             if choice not in ('S','N'):raise ValueError('Responder S o N')
+            if count<=0:raise ValueError('Cantidad positiva requerida')
+            if defer_validation:
+                return dict(limit=None,all_projects=False,seed=seed,project_count=count,
+                    contract_label=name+' (nuevo)',
+                    create_contract=dict(name=name,count=count,seed=seed,require_evaluable=choice=='S'))
             path=create(root,name,count,seed,inventory(root,coordinator,config_path),catalog_hash(root),require_evaluable=choice=='S')
             print('Contrato guardado: '+str(path)+'; no se iniciaron inferencias.')
         elif answer=='2':
@@ -133,6 +138,10 @@ def menu(root,coordinator,config_path='config/pipeline_manual.json'):
             if answer not in ('S','N'):raise ValueError('Responder S o N')
             additional=int(input('Limite explicito de proyectos adicionales: ')) if answer=='S' else 0
             if answer=='S' and additional<=0:raise ValueError('Limite positivo requerido')
+            if defer_validation:
+                return dict(limit=None,all_projects=False,seed=value['seed'],
+                    contract_path=paths[number-1].relative_to(root).as_posix(),additional_count=additional,
+                    project_count=value['selected_count']+additional,contract_label=paths[number-1].name)
             result=resolve(value,inventory(root,coordinator,config_path),catalog_hash(root),additional)
             print(f"Seleccion: {len(value['project_ids'])} obligatorios + {additional} adicionales. La ejecucion requiere su autorizacion posterior.")
             return dict(limit=None,all_projects=False,seed=value['seed'],project_ids=result['project_ids'],contract_metadata=result)

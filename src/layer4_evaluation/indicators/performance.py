@@ -321,23 +321,30 @@ def _resources_update(model,values):
 
 
 class RunMeasurement:
-    def __init__(self,run, included_in_parent=False):
+    def __init__(self,run, included_in_parent=False, deferred=False):
         self.run=Path(run);self.folder=self.run/'resultados/performance'
         self.id=uuid4().hex;self.mutex=threading.RLock();self.seen=set()
         self.data=dict(session=self.id, included_in_parent=included_in_parent, status='EN_CURSO', wall=0., cpu=0., model='', projects={},
             stages={}, ram=None,vram=None,device_vram=None,gpu_sum=0.,gpu_samples=0,model_usage=_model_usage())
         self.stage_active=Counter();self.stage_last=time.perf_counter()
         self.active_projects=Counter();self.last_flush=time.perf_counter()
+        self.deferred=deferred;self.sensor=None
 
     def __enter__(self):
         self.started=time.perf_counter();self.cpu=time.process_time()
+        if not self.deferred:self.activate()
+        return self
+
+    def activate(self):
+        if self.sensor is not None:return
+        self.started=self.stage_last=self.last_flush=time.perf_counter();self.cpu=time.process_time()
         self.sensor=Resources();self.stop=threading.Event();self.sample()
         def poll():
             while not self.stop.wait(1):self.sample()
         self.thread=threading.Thread(target=poll,daemon=True);self.thread.start()
-        return self
 
     def sample(self):
+        if self.sensor is None:return
         values=self.sensor.sample()
         with self.mutex:
             _resources_update(self.data['model_usage'],values)
@@ -353,6 +360,7 @@ class RunMeasurement:
                     _resources_update(row['model_usage'],values)
 
     def stage_change(self,stage=None,delta=0):
+        if self.sensor is None:return
         with self.mutex:
             now=time.perf_counter()
             if self.stage_active:
@@ -417,7 +425,7 @@ class RunMeasurement:
             finally:db.close()
 
     def flush(self):
-        if not self.run.exists():return
+        if self.sensor is None or not self.run.exists():return
         with self.mutex:
             self.data['wall']=time.perf_counter()-self.started
             self.data['cpu']=time.process_time()-self.cpu
@@ -440,6 +448,7 @@ class RunMeasurement:
             self.last_flush=time.perf_counter()
 
     def finish(self,status):
+        if self.sensor is None:return
         self.stop.set();self.thread.join(timeout=2);self.sample()
         self.data['status']=status
         try:_safe(lambda:self.sync(status));self.flush()
@@ -605,6 +614,11 @@ def observe_projects(ids,model=''):
             _active_run.data['model']=model or _active_run.data['model']
 
 
+def activate_run_measurement():
+    """Start resource supervision only after execution consent/registration."""
+    if _active_run:_safe(_active_run.activate)
+
+
 def project_states(verified):
     if _active_run:
         for row in verified.get('projects',[]):
@@ -612,12 +626,12 @@ def project_states(verified):
 
 
 @contextmanager
-def run_session(run, included_in_parent=False):
+def run_session(run, included_in_parent=False, deferred=False):
     global _active_run
     if _active_run is not None:
         yield _active_run
         return
-    measured=_safe(lambda:RunMeasurement(run,included_in_parent).__enter__())
+    measured=_safe(lambda:RunMeasurement(run,included_in_parent,deferred).__enter__())
     if measured is None:
         yield None
         return
@@ -635,13 +649,15 @@ def run_session(run, included_in_parent=False):
 def measured_pipeline(fn):
     @wraps(fn)
     def wrapped(root,**kwargs):
-        # The native ETL creates the run directory; monitoring must not pre-create it.
+        # Reject a duplicate before monitoring can write to the existing run.
         from scripts.pipeline_coordinator import configuration,find_run
         from datetime import datetime,timezone
         _,_,runs=configuration(Path(root).resolve(),kwargs.get('config_path','config/pipeline_manual.json'))
         name=kwargs.get('run_id') or 'run_'+datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S_%f')
         kwargs['run_id']=name;run=find_run(Path(root).resolve(),runs,name)
-        with run_session(run) as measurement:
+        if run.exists() and not kwargs.get('resume') and not kwargs.get('stage'):
+            raise ValueError('Run ID ya existe; usar resume --run-id ' + name + ' o elegir otro ID')
+        with run_session(run,deferred=kwargs.get('single_authorization',False)) as measurement:
             result=fn(root,**kwargs)
             if measurement:measurement.data['status']=result.get('status','COMPLETE')
         if (Path(run)/'resultados/indicadores.csv').exists():

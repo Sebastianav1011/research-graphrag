@@ -3,11 +3,22 @@ import argparse
 import json
 from pathlib import Path
 import sys
+from contextlib import contextmanager, ExitStack, redirect_stdout, redirect_stderr
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / 'src'))
 from run_paths import file_path as run_file
 STAGES = ('preprocessing', 'knowledge', 'graphrag', 'evaluation', 'export')
+
+
+@contextmanager
+def visible_work(message):
+    """Announce work synchronously; stage callbacks report actual progress.
+
+    A timer must never write over input(), including later provider approvals.
+    """
+    print(message, flush=True)
+    yield
 
 
 def coordinator():
@@ -22,15 +33,106 @@ def show(value):
 
 
 def report_progress(event):
-    print('[{status}] {stage} | {location}'.format(**event), flush=True)
-    if event['status']=='INPUT_SUMMARY':show(event['summary'])
-    elif event['status']=='ALL_PROJECTS_REVIEW':show(event['summary'])
-    elif event['status']=='SCOPE_RESOLVED':show(dict(project_count=event['project_count']))
-    if event['status'] in ('FAILED_OR_BLOCKED','INTERRUPTED','REVIEW_REQUIRED','BUILD_APPROVAL_REQUIRED'):
-        print('Continuar: '+event['resume_command'])
+    status=event['status']
+    if status=='INPUT_SUMMARY' and event.get('summary',{}).get('blocked_projects'):
+        summary=event['summary']
+        print('Proyectos bloqueados: '+str(len(summary['blocked_projects']))+'. Detalle: '+summary.get('report','estado del run'),flush=True)
+    elif status=='REGISTERED':print('Run registrado: '+event['run_id'],flush=True)
+    elif status=='RUNNING':print('Etapa: '+event['stage'],flush=True)
+    elif status=='STAGE_REUSED':print('Checkpoint conservado: '+event['stage'],flush=True)
+    elif status=='EVALUATION_PROGRESS':
+        print(f"Proyectos: {event['projects_evaluated']}/{event['total_projects']} | "
+              f"Indicadores evaluados: {event.get('indicators_completed',0)}",flush=True)
+    elif status in ('FAILED_OR_BLOCKED','INTERRUPTED','REVIEW_REQUIRED','BUILD_APPROVAL_REQUIRED','BLOCKED_INPUT'):
+        print(status+': '+event.get('error',event.get('message','Revisar los registros del run.')),flush=True)
+        if event.get('resume_command'):print('Continuar: '+event['resume_command'],flush=True)
+
+
+def render_result(result):
+    status=result.get('status','UNKNOWN')
+    if status=='CANCELLED':
+        print('Ejecucion cancelada. No se inicio el procesamiento.',flush=True)
+        return
+    print('Estado: '+status,flush=True)
+    if result.get('run_id'):print('Run ID: '+result['run_id'],flush=True)
+    if result.get('error'):print('Error: '+result['error'],flush=True)
+    if result.get('message'):print(result['message'],flush=True)
+    if result.get('blocked_projects'):print('Proyectos bloqueados: '+str(len(result['blocked_projects'])),flush=True)
+    excel=result.get('excel') or result.get('result',{}).get('excel')
+    if excel:print('Resultados: '+str(Path(excel).parent),flush=True)
+    elif result.get('results'):print('Resultados: '+str(result['results']),flush=True)
+    if status not in ('COMPLETE','CANCELLED') and result.get('location'):
+        print('Registros: '+result['location'],flush=True)
+
+
+def render_error(exc):
+    message=str(exc) or ('Entrada cerrada (EOF).' if isinstance(exc,EOFError) else type(exc).__name__)
+    print('Error: '+message,flush=True)
+    if getattr(exc,'resume_command',None):print('Continuar: '+exc.resume_command,flush=True)
+
+
+def execute_with_console(engine, **kwargs):
+    """Keep backend diagnostics in the registered run; UI stays on this thread."""
+    import logging
+    import traceback
+    terminal_out,terminal_err=sys.stdout,sys.stderr
+    latest={}
+    log=None
+    def handlers():
+        loggers=[logging.getLogger()]+[value for value in logging.Logger.manager.loggerDict.values()
+            if isinstance(value,logging.Logger)]
+        return {handler for logger in loggers for handler in logger.handlers
+            if isinstance(handler,logging.StreamHandler) and not isinstance(handler,logging.FileHandler)}
+    with ExitStack() as stack:
+        streams={}
+        def restore_handlers():
+            for handler in handlers():
+                if handler.stream is log:
+                    handler.setStream(streams.get(handler,terminal_err))
+        def notify(event):
+            nonlocal log
+            latest.update(event)
+            with redirect_stdout(terminal_out),redirect_stderr(terminal_err):report_progress(event)
+            run=Path(event['location'])
+            if (log is None and event['status'] in ('REGISTERED','RUNNING','STAGE_REUSED')
+                    and run.is_dir() and run_file(run,'execution.json').is_file()):
+                (run/'logs').mkdir(exist_ok=True)
+                log=stack.enter_context((run/'logs/terminal.log').open('a',encoding='utf-8',buffering=1))
+                stack.enter_context(redirect_stdout(log))
+                stack.enter_context(redirect_stderr(log))
+                for handler in handlers():
+                    streams[handler]=handler.stream
+                    handler.setStream(log)
+                stack.callback(restore_handlers)
+        def confirm(kind,summary):
+            with redirect_stdout(terminal_out),redirect_stderr(terminal_err):return confirm_action(kind,summary)
+        interactive=kwargs.pop('interactive',True)
+        try:
+            return engine.execute_pipeline(ROOT,notify=notify,confirm=confirm if interactive else None,**kwargs)
+        except BaseException as exc:
+            if log is not None:traceback.print_exc(file=log)
+            if not getattr(exc,'resume_command',None):exc.resume_command=latest.get('resume_command')
+            raise
 
 
 def confirm_action(kind, summary):
+    if kind=='run':
+        print('\nRun ID: '+summary['run_id'],flush=True)
+        print('Modelo: '+summary['provider']+' | '+summary['model'],flush=True)
+        print('Proyectos: '+str(summary['project_count']),flush=True)
+        print('Fuentes: '+('base' if all('/base/' in name or '/reference/' in name for name in summary['sources'])
+            else ', '.join(summary['sources']))+f" ({len(summary['sources'])} archivos)",flush=True)
+        contract=summary.get('contract')
+        print('Contrato: '+(f"{contract['contract_id']}.v{contract['version']}" if contract else 'sin contrato'),flush=True)
+        print('Procesamiento autonomo: '+' -> '.join(summary['stages']),flush=True)
+        print('Destino: '+str(summary.get('destination')),flush=True)
+        if summary['provider']=='openai':
+            print('Envio externo a OpenAI. Presupuesto maximo: USD '+str(summary['budget_usd']),flush=True)
+        else:print('Procesamiento local de los textos seleccionados.',flush=True)
+        if not sys.stdin.isatty():
+            print('Sin terminal interactiva: no se autoriza automaticamente.')
+            return False
+        return confirm_start()
     print('\n' + ('Revision de textos para el proveedor seleccionado' if kind == 'llm' else
         'Confirmar procesamiento de toda la base: tiempo y posible costo' if kind=='all' else 'Construccion local de GraphRAG'))
     show(summary)
@@ -79,6 +181,13 @@ def dispatch(args):
             save_preferences(ROOT,args.provider)
         else:change_model(ROOT)
         return dict(status='COMPLETE',inference_calls=0)
+    if args.command=='run' and not args.dry_run and args.through in (None,'evaluation','export'):
+        from model_access import preferences,api_key
+        provider=args.provider or preferences(ROOT)['provider']
+        if provider=='openai' and not api_key(ROOT):
+            if args.non_interactive:
+                raise ValueError('API_KEY_MISSING: configurar con uv run python run.py model --provider openai')
+            configure_key(ROOT)
     engine=coordinator()
     if args.reuse_run and args.provider:
         _,_,runs=engine.configuration(ROOT,args.config)
@@ -158,23 +267,24 @@ def dispatch_pipeline(args):
         from autonomous_execution.cli import dispatch as autonomous_dispatch
         return autonomous_dispatch(ROOT,args,engine)
     if sampling or args.dry_run:
-        if args.command != 'run' or args.autonomous:
+        if args.command != 'run':
             raise ValueError('--limit/--all/--dry-run/--selection-manifest se usan con run (o sin comando)')
-        return engine.execute_pipeline(ROOT, config_path=args.config, source=args.source, run_id=args.run_id,
+        return execute_with_console(engine, config_path=args.config, source=args.source, run_id=args.run_id,
             through=args.through, project_ids=selected_projects(args), input_file=args.input_file, delivery=args.delivery,
             limit=args.limit, all_projects=args.all_projects, seed=args.seed, dry_run=args.dry_run,
             selection_manifest=args.selection_manifest, approve_build=args.approve_build, authorize=args.authorize_llm,
             confirm_all=args.confirm_all,
-            confirm=confirm_action if not args.non_interactive else None, notify=report_progress)
+            single_authorization=True,
+            interactive=not args.non_interactive)
     if args.command == 'run' and not any((args.projects, args.project_id, args.input_file, args.delivery)):
         raise ValueError('Indicar --limit N, --all o IDs explicitos; nunca se ejecuta toda la base por defecto')
     active_autonomous = False
     if args.run_id:
         _,_,runs=engine.configuration(ROOT,args.config)
         active_autonomous=(engine.find_run(ROOT,runs,args.run_id)/'autonomous/main/manifest.json').exists()
-    if active_autonomous and args.command in ('run','stage') and not args.autonomous:
+    if active_autonomous and args.command in ('run','stage'):
         raise ValueError('El run tiene un manifiesto autonomo; usar start/resume --autonomous')
-    if args.command in ('prepare','authorize','start','export','retry-pending') or args.autonomous or active_autonomous and args.command in ('resume','status'):
+    if args.command in ('prepare','authorize','start','export','retry-pending') or active_autonomous and args.command in ('resume','status','verify'):
         from autonomous_execution.cli import dispatch as autonomous_dispatch
         return autonomous_dispatch(ROOT,args,engine)
     if args.background or args.partial or args.acknowledge_uncertain or args.manifest_sha256:
@@ -185,20 +295,13 @@ def dispatch_pipeline(args):
         return engine.execution_status(ROOT, args.config, args.run_id)
     if args.command in ('resume', 'stage') and not args.run_id:
         raise ValueError('--run-id es obligatorio para resume y stage')
-    latest = {}
-    def report(event):
-        latest.update(event)
-        report_progress(event)
-    try:
-        return engine.execute_pipeline(ROOT, config_path=args.config, source=args.source,
+    return execute_with_console(engine, config_path=args.config, source=args.source,
             run_id=args.run_id, stage=args.stage if args.command == 'stage' else None,
             through=args.through, resume=args.command == 'resume', approve_build=args.approve_build,
             authorize=args.authorize_llm, project_ids=selected_projects(args),
             input_file=args.input_file, delivery=args.delivery,
-            confirm=confirm_action if not args.non_interactive else None, notify=report)
-    except Exception as exc:
-        exc.resume_command = latest.get('resume_command')
-        raise
+            single_authorization=True,
+            interactive=not args.non_interactive)
 
 
 def exit_code(result):
@@ -240,7 +343,7 @@ def parser():
     result.add_argument('--non-interactive', action='store_true', help='No solicitar permisos por consola; detenerse en revisiones o permisos pendientes')
     result.add_argument('--approve-build', action='store_true', help='Autoriza embeddings locales; no permite descargar modelos')
     result.add_argument('--authorize-llm', action='store_true', help='Autoriza texto previamente revisado para el proveedor congelado del run')
-    result.add_argument('--autonomous', action='store_true', help='Usa el manifiesto y la cola persistente del modo autonomo')
+    result.add_argument('--autonomous', action='store_true', help='run/resume ya son autonomos por defecto; prepare/start conservan el flujo avanzado de manifiestos y cola')
     result.add_argument('--json', action='store_true', help='Salida JSON completa para status')
     result.add_argument('--batch-size', type=int, choices=(1,2,3), help='prepare autonomo: maximo de indicadores por llamada (1 por defecto); 2/3 habilitan lotes experimentales')
     result.add_argument('--policy', default='config/autonomous.json', help='Politica para prepare; despues queda congelada')
@@ -253,58 +356,81 @@ def parser():
     return result
 
 
-def menu(base):
+def menu_selection(root, seed):
+    """Collect options only; sampling and contract validation stay in dispatch."""
     while True:
-        from model_access import label,change_model
-        print('\nGraphRag\nMODELO ACTUAL: '+label(ROOT,base.provider))
-        print('1. Ejecutar pipeline completo\n2. Ejecutar una etapa especifica\n'
-              '3. Reanudar una ejecucion\n4. Verificar fuentes y configuracion\n'
-              '5. Cambiar modelo\n0. Salir')
+        print('\n1. Seleccionar cantidad de proyectos.\n2. Procesar todos los proyectos.\n'
+              '3. Utilizar contrato existente.\n0. Volver.')
+        choice=input('Opcion: ').strip()
+        if choice=='0':return None
+        if choice=='2':return dict(all_projects=True)
+        if choice=='1':
+            while True:
+                value=input('Cantidad de proyectos (0: volver): ').strip()
+                if value=='0':break
+                if value.isascii() and value.isdigit() and int(value)>0:return dict(limit=int(value),seed=seed)
+                print('Ingrese una cantidad entera positiva.')
+        elif choice=='3':
+            paths=sorted((root/'data/contratos').glob('*.json'))
+            if not paths:
+                print('No hay contratos disponibles.')
+                continue
+            for number,path in enumerate(paths,1):print(f'{number}. {path.name}')
+            while True:
+                value=input('Contrato (0: volver): ').strip()
+                if value=='0':break
+                if value.isascii() and value.isdigit() and 1<=int(value)<=len(paths):
+                    return dict(contract=paths[int(value)-1].relative_to(root).as_posix())
+                print('Contrato invalido.')
+        else:print('Opcion invalida.')
+
+
+def menu(base):
+    from model_access import label,change_model,preferences
+    while True:
+        print('\nGraphRAG\nModelo actual: '+label(ROOT,base.provider))
+        print('\n1. Ejecutar sistema\n2. Cambiar modelo\n0. Salir')
         try:
-            choice = input('Opcion: ').strip()
-            if choice == '0':
-                return 0
-            if choice=='5':
+            choice=input('Opcion: ').strip()
+            if choice=='0':return 0
+            if choice=='2':
                 change_model(ROOT)
                 base.provider=None
                 continue
-            commands = {'1': 'run', '2': 'stage', '3': 'resume', '4': 'verify'}
-            if choice not in commands:
+            if choice!='1':
                 print('Opcion invalida.')
                 continue
-            args = argparse.Namespace(**vars(base))
-            args.command = commands[choice]
-            if args.command in ('run', 'verify'):
-                if args.input_file is None and args.delivery is None:
-                    args.source = input('Fuentes [all/base/incoming/incoming/<entrega>] (base): ').strip() or 'base'
-            if args.command in ('run', 'stage', 'resume', 'status'):
-                args.run_id = input('Run ID (vacio: nuevo en run; listar en status): ').strip() or None
-            if args.command == 'stage':
-                print('Etapas: ' + ', '.join(STAGES))
-                args.stage = input('Etapa: ').strip()
-                if args.stage not in STAGES:
-                    raise ValueError('Etapa invalida')
-            if args.command == 'run':
-                from project_menu import select_projects, SelectionCancelled
-                try:
-                    selection = select_projects(args.seed,root=ROOT,coordinator=coordinator(),config_path=args.config,
-                        allow_contracts=args.source in ('base',None))
-                except SelectionCancelled:
-                    continue
-                args.limit, args.all_projects, args.seed = selection['limit'], selection['all_projects'], selection['seed']
-                if selection.get('contract_metadata'):
-                    args.project_id=selection['project_ids'];args.contract_metadata=selection['contract_metadata'];args.source='base'
-                args.through = input('Detenerse en (export): ').strip() or 'export'
-                if args.through not in STAGES:
-                    raise ValueError('Etapa invalida')
-            try:
-                show(dispatch(args))
-            except Exception as exc:
-                show(dict(status='FAILED_OR_BLOCKED', error_type=type(exc).__name__, error=str(exc)))
+            selection=menu_selection(ROOT,base.seed)
+            if selection is None:continue
+            # A clean CLI request prevents advanced flags leaking into the menu.
+            args=parser().parse_args(['run','--source','base','--through','export'])
+            args.config=base.config
+            args.provider=base.provider or preferences(ROOT)['provider']
+            args.budget_usd=base.budget_usd
+            args.autonomous=True
+            for key,value in selection.items():setattr(args,key,value)
+            if args.provider=='openai' and args.budget_usd is None:
+                import math
+                while True:
+                    try:
+                        args.budget_usd=float(input('Presupuesto operativo maximo USD (15): ').strip() or '15')
+                        if math.isfinite(args.budget_usd) and args.budget_usd>0:break
+                    except ValueError:pass
+                    print('Presupuesto positivo requerido.')
+            render_result(dispatch(args))
         except EOFError:
-            return 0
-        except ValueError as exc:
-            print(str(exc))
+            print('Entrada cerrada (EOF). No se inicio otra ejecucion.',flush=True)
+            return 2
+        except Exception as exc:
+            render_error(exc)
+
+
+def confirm_start():
+    while True:
+        answer=input('¿Iniciar ejecución? (S/N): ').strip().casefold()
+        if answer in ('s','si','sí'):return True
+        if answer in ('n','no',''):return False
+        print('Respuesta invalida. Escribir S o N.')
 
 
 def main(argv=None):
@@ -316,11 +442,9 @@ def main(argv=None):
         cli.error('stage requiere una etapa: ' + ', '.join(STAGES))
     if args.stage and args.command != 'stage':
         cli.error('La etapa posicional solo corresponde al comando stage; usar --through para run/resume')
+    if args.command=='run':args.autonomous=True
     try:
         if not args.command:
-            from run_storage import automatic_cleanup
-            result=automatic_cleanup(ROOT)
-            if result:show(dict(cleanup=result['status'],deleted=result['deleted'],recovered_bytes=result['recovered_bytes']))
             return menu(args)
         result = dispatch(args)
         if args.command=='status' and 'progress_scope' in result:
@@ -329,15 +453,15 @@ def main(argv=None):
                 from autonomous_execution.monitor import render
                 print(render(result))
             return 0
-        show(result)
+        if args.command in ('run','resume','stage') and not args.json:render_result(result)
+        else:show(result)
         return exit_code(result)
     except KeyboardInterrupt:
         print('\nInterrumpido. Consultar status y reanudar el mismo --run-id; no borrar checkpoints.')
         return 130
     except Exception as exc:
-        show(dict(status='FAILED_OR_BLOCKED', error_type=type(exc).__name__, error=str(exc),
-                  resume_command=getattr(exc, 'resume_command', None),
-                  next_step='Revisar configuracion/dependencias y checkpoints. Ejecutar uv sync si falta un modulo.'))
+        if args.json:show(dict(status='FAILED_OR_BLOCKED',error_type=type(exc).__name__,error=str(exc)))
+        else:render_error(exc)
         return 2
 
 

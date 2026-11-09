@@ -11,6 +11,25 @@ from scripts import pipeline_coordinator as runner
 from layer2_processing.preprocessing.adapters import discover_sources, read, write, sha, verify_raw
 
 
+def project_file(system, relative, ids):
+    """Use the current public intake template for incoming project fixtures."""
+    from layer2_processing.preprocessing.adapters import PROJECT_HEADERS
+    path=system.intake/relative
+    path.parent.mkdir(parents=True,exist_ok=True)
+    book=openpyxl.Workbook()
+    book.active.title='Proyectos'
+    book.active.append(list(PROJECT_HEADERS))
+    for pid in ids:
+        values=dict(id_actividad=pid,titulo_proyecto='Synthetic project',resumen='Synthetic authorized narrative')
+        book.active.append([values.get(name) for name in PROJECT_HEADERS])
+    book.save(path)
+    book.close()
+    config=read(system.root/'config/pipeline_manual.json')
+    config['files'][relative]={'domain':'proyectos'}
+    write(system.root/'config/pipeline_manual.json',config)
+    return path
+
+
 @pytest.fixture
 def system(tmp_path, monkeypatch):
     root = tmp_path/'repo'
@@ -29,7 +48,7 @@ def system(tmp_path, monkeypatch):
     def table(path):
         return SimpleNamespace(to_pylist=lambda:projects if Path(path).name == 'proyectos.parquet' else [])
     monkeypatch.setattr(runner.pq, 'read_table', table)
-    monkeypatch.setattr(runner, 'check', lambda root,run:read(run/'run.json'))
+    monkeypatch.setattr(runner, 'check', lambda root,run:read(runner.run_file(run,'run.json')))
     monkeypatch.setattr(runner, 'projects_without_evidence', lambda run, selected: [])
     def preview(root,path,source=None,input_file=None,delivery=None):
         settings,raw,_=runner.selected_configuration(root,path,source,input_file,delivery)
@@ -40,12 +59,12 @@ def system(tmp_path, monkeypatch):
     def prepare(root,run,raw,dataset,settings,through):
         current_run['path']=run
         calls.append('preprocessing')
-        if not (run/'run.json').exists():
-            write(run/'run.json',dict(status='PREPROCESSED',dataset=dataset,configuration=settings,
+        if not runner.run_file(run,'run.json').exists() or read(runner.run_file(run,'run.json'))['status']=='REGISTERED':
+            write(runner.run_file(run,'run.json'),dict(status='PREPROCESSED',dataset=dataset,configuration=settings,
                                      raw_path=raw.relative_to(root).as_posix()))
     def knowledge(root,run):
         calls.append('knowledge')
-        write(run/'run.json',read(run/'run.json')|dict(status='PREPARED'))
+        write(runner.run_file(run,'run.json'),read(runner.run_file(run,'run.json'))|dict(status='PREPARED'))
     def graph(root,run,build=False):
         calls.append('graphrag')
         write(run/'workspace/outputs/layer3/publication/_manifest.json',{'mock':'validated separately'})
@@ -108,37 +127,36 @@ def test_one_command_three_projects_exports_only_requested(system):
     assert saved['csv']['indicator_rows']==3 and saved['csv']['territory_rows']==0
     assert set(saved['csv']['paths'])=={'indicadores.csv','indicadores_territorios.csv'}
     assert saved['preprocessed_projects']==10 and saved['scoped_projects']==3 and saved['pending_projects']==[]
-    assert system.events[0]['summary']['input_rows']==10
-    assert system.events[0]['summary']['stages']==list(runner.STAGES)
+    summary=next(e['summary'] for e in system.events if e['status']=='INPUT_SUMMARY')
+    assert summary['input_rows']==10
+    assert summary['stages']==list(runner.STAGES)
 
 
 def test_file_discovers_ids_and_ignores_other_deliveries(system):
-    primary=system.intake/'incoming/selected/projects.json'
-    write(primary,[dict(id='002',title='Selected'),dict(id='003',title='Selected')])
+    primary=project_file(system,'incoming/selected/projects.xlsx',['002','003'])
     write(system.intake/'incoming/unrelated/bad.json',{'unconfigured':'do not process'})
     for row in system.projects[1:3]:
         row['provenance_json']=json.dumps([dict(record_source=str(primary))])
-    result=runner.execute_pipeline(system.root,input_file='incoming/selected/projects.json',through='export',
+    result=runner.execute_pipeline(system.root,input_file='incoming/selected/projects.xlsx',through='export',
         confirm=system.confirm,notify=system.events.append)
     assert result['status']=='COMPLETE'
     assert [c for c in system.calls if isinstance(c,tuple)]==[('ollama',['002','003'])]
-    summary=system.events[0]['summary']
-    assert summary['selected_files']==['incoming/selected/projects.json'] and summary['input_rows']==2
+    summary=next(e['summary'] for e in system.events if e['status']=='INPUT_SUMMARY')
+    assert summary['selected_files']==['incoming/selected/projects.xlsx'] and summary['input_rows']==2
     assert summary['supporting_files']==[]  # Independent inputs never add base evidence.
     state=read(system.run()/'run.json')
-    assert state['configuration']['source_paths']==['incoming/selected/projects.json']
+    assert state['configuration']['source_paths']==['incoming/selected/projects.xlsx']
 
 
 def test_delivery_contains_multiple_files_and_has_no_total_project_cap(system):
     for part,ids in [('a',range(1,5)),('b',range(5,8))]:
-        path=system.intake/f'incoming/delivery/{part}.json'
-        write(path,[dict(id=f'{i:03d}',title='Selected') for i in ids])
+        path=project_file(system,f'incoming/delivery/{part}.xlsx',[f'{i:03d}' for i in ids])
         for i in ids:system.projects[i-1]['provenance_json']=json.dumps([dict(record_source=str(path))])
     result=runner.execute_pipeline(system.root,delivery='delivery',through='export',confirm=system.confirm,notify=system.events.append)
     assert result['status']=='COMPLETE'
     evaluated=[identity for call in system.calls if isinstance(call,tuple) for identity in call[1]]
     assert evaluated==[f'{i:03d}' for i in range(1,8)]
-    assert len(system.events[0]['summary']['selected_files'])==2
+    assert len(next(e['summary'] for e in system.events if e['status']=='INPUT_SUMMARY')['selected_files'])==2
 
 
 def test_denied_review_can_resume_without_repeating_valid_calls(system):
@@ -162,10 +180,9 @@ def test_scope_rejects_unknown_project_before_graph(system):
 
 
 def test_selected_file_must_have_explicit_project_provenance(system):
-    selected=system.intake/'incoming/other.json'
-    write(selected,[dict(id='777',title='Unassociated')])
+    selected=project_file(system,'incoming/other.xlsx',['777'])
     with pytest.raises(ValueError,match='Seleccion sin PROJECT'):
-        runner.execute_pipeline(system.root,input_file='incoming/other.json',through='evaluation',confirm=system.confirm)
+        runner.execute_pipeline(system.root,input_file='incoming/other.xlsx',through='evaluation',confirm=system.confirm)
     assert not any(isinstance(call,tuple) for call in system.calls)
 
 
@@ -241,18 +258,9 @@ def test_cli_combines_file_and_projects(monkeypatch):
 
 
 def synthetic_excel(system, count=10):
-    path=system.intake/'incoming/synthetic/projects.xlsx'
-    path.parent.mkdir(parents=True,exist_ok=True)
-    book=openpyxl.Workbook()
-    book.active.append(['id_actividad','title','summary'])
+    path=project_file(system,'incoming/synthetic/projects.xlsx',[f'{i:03d}' for i in range(1,count+1)])
     for i in range(1,count+1):
-        book.active.append([f'{i:03d}','Synthetic project','Fictitious document for isolated testing'])
         system.projects[i-1]['provenance_json']=json.dumps([dict(record_source=str(path))])
-    book.save(path)
-    book.close()
-    config=read(system.root/'config/pipeline_manual.json')
-    config['files']['incoming/synthetic/projects.xlsx']={'domain':'proyectos'}
-    write(system.root/'config/pipeline_manual.json',config)
     return path
 
 
@@ -266,7 +274,7 @@ def test_file_with_ten_projects_scopes_three_and_resumes_without_repeating(syste
     result=runner.execute_pipeline(system.root,input_file=str(primary),project_ids=['002','005','009'],
         through='export',confirm=system.confirm,notify=system.events.append)
     assert result['status']=='COMPLETE'
-    assert system.events[0]['summary']['input_rows']==10
+    assert next(e['summary'] for e in system.events if e['status']=='INPUT_SUMMARY')['input_rows']==10
     calls=[c for c in system.calls if isinstance(c,tuple)]
     assert calls==[('ollama',['002','005']),('ollama',['009'])]
     result=runner.execute_pipeline(system.root,run_id=result['run_id'],resume=True,confirm=system.confirm)

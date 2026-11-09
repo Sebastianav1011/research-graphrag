@@ -5,7 +5,8 @@ class SelectionCancelled(Exception):
     pass
 
 
-def select_projects(seed=42, *, root=None, coordinator=None, config_path='config/pipeline_manual.json',allow_contracts=True):
+def select_projects(seed=42, *, root=None, coordinator=None, config_path='config/pipeline_manual.json',allow_contracts=True,
+                    defer_validation=False):
     while True:
         print('\nProyectos a procesar\n1. Seleccionar cantidad de proyectos.\n2. Procesar todos los proyectos.')
         if allow_contracts:print('3. Contratos de evaluación')
@@ -19,9 +20,10 @@ def select_projects(seed=42, *, root=None, coordinator=None, config_path='config
             if option == '3' and allow_contracts:
                 from pathlib import Path
                 from evaluation_contracts import menu
-                if coordinator is None:
+                if coordinator is None and not defer_validation:
                     from scripts import pipeline_coordinator as coordinator
-                selection=menu(root or Path(__file__).resolve().parents[1],coordinator,config_path)
+                selection=menu(root or Path(__file__).resolve().parents[1],coordinator,config_path,
+                    defer_validation=defer_validation)
                 if selection:return selection
                 continue
             if option != '1':
@@ -34,4 +36,4 @@ def select_projects(seed=42, *, root=None, coordinator=None, config_path='config
                     return dict(limit=int(amount), all_projects=False, seed=seed)
                 print('Ingrese una cantidad entera positiva (0 para cancelar).')
         except EOFError:
-            raise SelectionCancelled() from None
+            raise SelectionCancelled('Entrada cerrada durante la seleccion; no se inicio ninguna ejecucion.') from None

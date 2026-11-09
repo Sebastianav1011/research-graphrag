@@ -64,11 +64,12 @@ def test_insufficient_evaluable_projects_does_not_create_contract(tmp_path):
     assert not (tmp_path/'data').exists()
 
 
-def test_contract_run_uses_native_selection_validation(sandbox):
+def test_contract_run_uses_native_selection_validation(sandbox,monkeypatch):
     from scripts import pipeline_coordinator as runner
     from tests.test_scoped_identity import setup_sources,paper
     from experiment_runtime import options
     from evaluation_contracts import inventory
+    monkeypatch.setattr('evaluation_contracts.catalog_hash',lambda root:'catalog')
     from autonomous_execution import store
     root,_,config=sandbox
     setup_sources(root,[paper()])

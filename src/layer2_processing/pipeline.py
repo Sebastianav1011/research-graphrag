@@ -125,16 +125,21 @@ def layer_config(root, number):
 
 
 def prepare(root, run, raw, dataset, config, through='knowledge'):
-    if (run_file(run, 'run.json')).exists():
+    registered = (run_file(run, 'run.json')).exists() and read(run_file(run, 'run.json')).get('status') == 'REGISTERED'
+    if (run_file(run, 'run.json')).exists() and not registered:
         state = check(root, run)
         if state['dataset'] != dataset or not same_configuration(root, state['configuration'], config):
             raise ValueError('La ejecucion pertenece a otro conjunto/configuracion')
         if state['status'] == 'PREPROCESSED' and through == 'knowledge':
             return knowledge(root, run)
         return dict(status='ALREADY_PREPARED', run=str(run))
-    if run.exists():
+    if registered:
+        initial = read(run_file(run, 'run.json'))
+        if initial['dataset'] != dataset or initial['raw_path'] != raw.relative_to(root).as_posix():
+            raise ValueError('Registro inicial incompatible con la preparacion')
+    elif run.exists():
         raise ValueError('Directorio existente/incompleto: utilizar otro --run-id')
-    run.mkdir(parents=True)
+    run.mkdir(parents=True, exist_ok=registered)
     state = dict(run_id=run.name, dataset=dataset, raw_path=raw.relative_to(root).as_posix(),
         status='PREPARING', started_at=datetime.now(timezone.utc).isoformat(), configuration=config, code_hashes=code_hashes(root))
     write(run_file(run, 'run.json'), state)

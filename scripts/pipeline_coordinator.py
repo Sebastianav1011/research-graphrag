@@ -403,6 +403,7 @@ def export(root, run):
         sheet.auto_filter.ref = sheet.dimensions
     output = run_file(run, 'resultado_indicadores.xlsx')
     candidate = run_file(run, 'resultado_indicadores.pending.xlsx')
+    candidate.parent.mkdir(parents=True,exist_ok=True)
     book.save(candidate)
     book.close()
     checkbook = openpyxl.load_workbook(candidate, read_only=True)
@@ -535,6 +536,13 @@ def execution_status(root, config_path='config/pipeline_manual.json', run_id=Non
                     location=str(location), progress=read(run_file(location,'progress.json')) if run_file(location,'progress.json').exists() else None)
         return dict(status='INVENTORY', runs=list(entries.values()), note='Listado; usar status --run-id para verificar integridad')
     run = find_run(root, runs, run_id)
+    initial = read(run_file(run, 'run.json')) if run_file(run, 'run.json').exists() else {}
+    if initial.get('status') in ('REGISTERED','PREPARING','FAILED'):
+        progress = read(run_file(run, 'progress.json'))
+        return dict(status=progress['status'], run_id=run.name, location=str(run),
+            checkpoint=initial['status'], checkpoint_available=False, progress=progress,
+            execution=read(run_file(run, 'execution.json')),
+            failure=read(run_file(run, 'failure.json')) if run_file(run, 'failure.json').exists() else None)
     state = check(root, run)
     stages = dict(preprocessing='VERIFIED', knowledge='VERIFIED' if state['status'] == 'PREPARED' else 'PENDING',
                   graphrag='PENDING', evaluation='PENDING', export='PENDING')
@@ -594,11 +602,54 @@ def review_summary(module, directory):
                 note='Revisar review.txt y autorizar solo estos textos. No se muestran textos institucionales en consola.')
 
 
+def execution_approval(root, run, config, metadata, model_binding, target, confirm):
+    """One exact approval for new execution and identical resumptions, before work."""
+    import getpass
+    from layer2_processing.pipeline import code_hashes
+    from layer2_processing.preprocessing.project_selection import digest
+    scope = dict(version='RUN_APPROVAL_V1',run_id=run.name,project_ids=metadata['project_ids'],
+        sources=metadata['sources'],llm=model_binding['llm'],contract=model_binding.get('contract'),
+        configuration={k:v for k,v in config.items() if k not in ('processing_scope','project_selection')},
+        code_and_configuration=code_hashes(root),through=target)
+    path=run/'estado/run.authorization.json'
+    fingerprint=digest(scope)
+    if path.exists():
+        saved=read(path)
+        if saved.get('authorized') is True and saved.get('scope_sha256')==fingerprint and digest(saved['scope'])==fingerprint:
+            verify_execution_approval(root,saved)
+            return saved
+    llm=scope['llm'];external=llm['provider']=='openai'
+    summary=dict(run_id=run.name,provider=llm['provider'],model=llm['model'],project_count=len(scope['project_ids']),
+        sources=list(scope['sources']),contract=scope['contract'],stages=list(STAGES[:STAGES.index(target)+1]),
+        destination='OpenAI API: '+llm.get('api',{}).get('base_url','https://api.openai.com/v1') if external else llm.get('endpoint'),
+        budget_usd=llm.get('api',{}).get('budget_usd') if external else None,
+        privacy='Autoriza transmitir los textos seleccionados a OpenAI y su presupuesto.' if external else
+            'Autoriza ETL, embeddings locales y evaluacion completa de los textos seleccionados mediante Ollama.',
+        indicators_per_project=48,through=target,scope_sha256=fingerprint,
+        note='Una autorizacion para todo el alcance. Se conservan revisiones, registros por lote y checkpoints.')
+    if confirm is None or confirm('run',summary) is not True:return None
+    result=dict(authorized=True,scope=scope,scope_sha256=fingerprint,
+        authorized_at=datetime.now(timezone.utc).isoformat(),authorized_by=getpass.getuser())
+    verify_execution_approval(root,result)
+    return result
+
+
+def verify_execution_approval(root, approval):
+    from layer2_processing.preprocessing.project_selection import digest
+    scope=approval['scope']
+    if approval.get('authorized') is not True or digest(scope)!=approval['scope_sha256']:
+        raise ValueError('Autorizacion de ejecucion corrupta; se requiere nueva revision')
+    for name,expected in (scope['sources'] | scope['code_and_configuration']).items():
+        if sha(root/name)!=expected:
+            raise ValueError('Alcance autorizado modificado: '+name+'; detener y revisar antes de autorizar otra ejecucion')
+
+
 @measured_pipeline
 def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=None, run_id=None,
                      stage=None, through=None, resume=False, approve_build=False, authorize=False,
                      project_ids=None, notify=None, dataset=None, input_file=None, delivery=None, confirm=None,
-                     limit=None, all_projects=False, seed=42, dry_run=False, selection_manifest=None,confirm_all=False):
+                     limit=None, all_projects=False, seed=42, dry_run=False, selection_manifest=None,confirm_all=False,
+                     single_authorization=False):
     """Central reusable orchestration API. Layer checkpoints remain authoritative."""
     root = Path(root).resolve()
     sampling = limit is not None or all_projects or selection_manifest is not None
@@ -626,7 +677,7 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
                 warning='Toda la base puede tardar horas o dias. OpenAI puede generar costos; se conserva su proteccion presupuestaria. No se evaluan proyectos sin texto autorizado.')
             metadata['eligibility_summary']=summary
             if notify:notify(dict(status='ALL_PROJECTS_REVIEW',stage='selection',location=str(chosen_raw),summary=summary))
-            if not confirm_all and (confirm is None or confirm('all',summary) is not True):
+            if not single_authorization and not confirm_all and (confirm is None or confirm('all',summary) is not True):
                 return dict(status='REVIEW_REQUIRED',summary=summary,inference_calls=0,
                     next_step='Confirmar expresamente toda la base; CLI no interactiva requiere --confirm-all. No se inicio procesamiento.')
         if dry_run:
@@ -649,6 +700,7 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
     model_binding = binding(root, run, active_config.get('llm'))
     active_config = dict(active_config, llm=model_binding['llm'])
     current = None
+    approval = None
     target = stage or through or 'export'
     def quoted(value):
         return "'" + str(value).replace("'", "''") + "'"
@@ -673,7 +725,7 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
                 pass
         value = dict(status=status, run_id=name, location=str(run), stage=current,
                      updated_at=datetime.now(timezone.utc).isoformat(),
-                     resume_command=('python run.py resume --run-id ' + name + config_argument if checkpoint else restart) + ' --through ' + target,
+                     resume_command=('python run.py resume --run-id ' + name + config_argument if run.is_dir() else restart) + ' --through ' + target,
                      checkpoint_available=checkpoint, **detail)
         if run.is_dir():
             write(run_file(run, 'progress.json'), value)
@@ -682,12 +734,18 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
         return value
 
     with lock(runs):
+        if run.exists() and not resume and not stage:
+            raise ValueError('Run ID ya existe; usar resume --run-id ' + name + ' o elegir otro ID')
+        if resume and not run.exists():
+            raise ValueError('Run no encontrado: ' + name)
         try:
             from run_storage import reopen
             reopen(run)
             if resume:(run_file(run, 'stop.request.json')).unlink(missing_ok=True)
             previous_request = read(run_file(run, 'execution.json')) if (run_file(run, 'execution.json')).exists() else {}
-            if resume or (run_file(run, 'run.json')).exists():
+            initial = read(run_file(run, 'run.json')) if run_file(run, 'run.json').exists() else {}
+            registered = initial.get('status') == 'REGISTERED'
+            if (resume or initial) and not registered:
                 state = check(root, run)
                 if dataset is not None and dataset != state['dataset']:
                     raise ValueError('Conjunto de pruebas distinto del checkpoint')
@@ -708,16 +766,53 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
             else:
                 if stage and stage != 'preprocessing':
                     raise ValueError('La etapa requiere un checkpoint previo y --run-id')
-                if dataset is not None:
-                    from layer2_processing.preprocessing.adapters import discover_sources
+                if registered:
+                    if project_ids is not None and project_ids != previous_request['project_ids']:
+                        raise ValueError('Seleccion de proyectos distinta; reanudar los IDs registrados')
+                    project_ids = previous_request['project_ids']
+                    if not any(value is not None for value in (source,input_file,delivery)):
+                        source = previous_request.get('source')
+                        input_file = previous_request.get('input_file')
+                        delivery = previous_request.get('delivery')
+                    dataset = initial['dataset']
+                # Registration precedes source discovery and selection validation.
+                # REGISTERED is not an ETL checkpoint and is safe to retry on resume.
+                if dataset is None and project_ids is not None and source is None and input_file is None and delivery is None:
+                    source = 'base'
+                if dataset is not None and dataset != 'raw':
                     config, _, runs = configuration(root, config_path)
                     raw = root / 'tests/fixtures' / dataset
+                else:
+                    config, raw, runs = selected_configuration(root, config_path, source, input_file, delivery)
+                if registered and (initial['raw_path'] != raw.relative_to(root).as_posix() or
+                        not same_configuration(root,initial['configuration'],dict(config,llm=model_binding['llm']))):
+                    raise ValueError('Fuentes/configuracion distintas del registro inicial')
+                if not registered:
+                    if single_authorization and not dry_run:
+                        from layer2_processing.preprocessing.project_selection import select
+                        approval_metadata = metadata if sampling else select(root,raw,config,seed=seed,
+                            project_ids=project_ids,all_projects=project_ids is None)
+                        approval=execution_approval(root,run,dict(config,llm=model_binding['llm']),
+                            approval_metadata,model_binding,target,confirm)
+                        if approval is None:return dict(status='CANCELLED',inference_calls=0,run_id=name)
+                    run.mkdir(parents=True, exist_ok=False)
+                    write(run_file(run,'model.binding.json'), model_binding)
+                    write(run_file(run,'execution.json'), dict(through=target, project_ids=project_ids,
+                        llm=model_binding['llm'], evaluation_contract=model_binding.get('contract'),
+                        source=source,input_file=input_file,delivery=delivery))
+                    write(run_file(run,'run.json'), dict(status='REGISTERED',run_id=name,dataset=dataset or 'raw',
+                        raw_path=raw.relative_to(root).as_posix(),configuration=dict(config,llm=model_binding['llm']),
+                        started_at=datetime.now(timezone.utc).isoformat()))
+                    if approval:write(run/'estado/run.authorization.json',approval)
+                current = 'preparation'
+                progress('REGISTERED', message='Run registrado; validando fuentes y dependencias antes del ETL')
+                from layer4_evaluation.indicators.performance import activate_run_measurement
+                activate_run_measurement()
+                if dataset is not None and dataset != 'raw':
+                    from layer2_processing.preprocessing.adapters import discover_sources
                     preview = discover_sources(root, config, raw)
                     preview['discovery_status'] = preview['status']
                 else:
-                    if project_ids is not None and source is None and input_file is None and delivery is None:
-                        source = 'base'
-                    config, raw, runs = selected_configuration(root, config_path, source, input_file, delivery)
                     preview = verify_sources(root, config_path, source, input_file, delivery)
                 dataset = dataset or 'raw'
             target = stage or through or previous_request.get('through', 'export')
@@ -736,21 +831,45 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
                 if selection['mode'] not in ('file', 'delivery'):
                     raise ValueError('Modalidad distinta de la ejecucion original')
             request = dict(through=target, project_ids=project_ids, selection=selection,
-                llm=model_binding['llm'], evaluation_contract=model_binding.get('contract'))
+                llm=model_binding['llm'], evaluation_contract=model_binding.get('contract'),
+                source=source,input_file=input_file,delivery=delivery)
             config['llm'] = model_binding['llm']
+            if single_authorization and not dry_run and approval is None:
+                from layer2_processing.preprocessing.project_selection import select
+                approval_metadata=config.get('project_selection') or select(root,raw,config,seed=seed,
+                    project_ids=project_ids,all_projects=project_ids is None)
+                approval=execution_approval(root,run,config,approval_metadata,model_binding,target,confirm)
+                if approval is None:return progress('REVIEW_REQUIRED',message='Autorizar el alcance completo antes de continuar')
+                write(run/'estado/run.authorization.json',approval)
+                from layer4_evaluation.indicators.performance import activate_run_measurement
+                activate_run_measurement()
             if model_binding['llm']['provider']=='openai' and target in ('evaluation','export'):
                 from model_access import api_key
                 if not api_key(root):raise ValueError('API_KEY_MISSING: configurar clave antes de ejecutar API')
-            if not (run_file(run, 'run.json')).exists() and (project_ids is not None or selection['mode'] in ('file','delivery')):
+            prepared = read(run_file(run,'run.json')).get('status') != 'REGISTERED'
+            if not prepared and (project_ids is not None or selection['mode'] in ('file','delivery')):
                 config['processing_scope']=dict(mode=selection['mode'],project_ids=project_ids,
                     primary_files=config.get('selected_input_paths',[]))
                 if model_binding.get('contract') and not (sampling or dry_run):
                     from layer2_processing.preprocessing.project_selection import select
                     metadata=select(root,raw,config,project_ids=project_ids,seed=model_binding['contract'].get('seed',42))
+                    # Revalidate after the menu's confirmation, against fresh source
+                    # fingerprints, without changing the frozen IDs or resampling.
+                    from evaluation_contracts import load, catalog_hash
+                    from autonomous_execution.lifecycle import safe_id
+                    contract = model_binding['contract']
+                    safe_id(contract['contract_id'])
+                    value = load(root/'data/contratos'/f"{contract['contract_id']}.v{int(contract['version'])}.json")
+                    if (value['sha256'] != contract['sha256'] or
+                            value['project_ids'] != contract['mandatory_project_ids'] or
+                            contract['mandatory_project_ids'] + contract['additional_project_ids'] != project_ids or
+                            contract['sources'] != metadata['sources'] or
+                            contract['catalog_sha256'] != catalog_hash(root)):
+                        raise ValueError('Contrato, fuentes o catalogo cambiaron tras la seleccion; no se inicia el procesamiento')
                 if sampling or dry_run or model_binding.get('contract'):
                     config['project_selection'] = metadata
             sequence = [stage] if stage else list(STAGES[:STAGES.index(target) + 1])
-            if not (run_file(run, 'run.json')).exists():
+            if not prepared:
                 files = preview.get('files', [])
                 primary = set(config.get('selected_input_paths', [item['file'] for item in files]))
                 summary = dict(
@@ -777,6 +896,17 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
                 request['input_summary'] = summary
                 progress('INPUT_SUMMARY', summary=summary)
             for current in sequence:
+                if approval:verify_execution_approval(root,approval)
+                if run_file(run,'stop.request.json').exists():
+                    return progress('INTERRUPTED',message='Detencion solicitada; checkpoints conservados')
+                if resume and not registered and ((current=='preprocessing' and state['status'] in ('PREPROCESSED','PREPARED')) or
+                        (current=='knowledge' and state['status']=='PREPARED')):
+                    progress('STAGE_REUSED')
+                    continue
+                if resume and current=='graphrag' and (run/'workspace/outputs/layer3/publication/_manifest.json').exists():
+                    validated_graph(root,run)
+                    progress('STAGE_REUSED')
+                    continue
                 # Persist the requested target before a resumable stage can fail.
                 if run.is_dir():
                     if not (run_file(run, 'model.binding.json')).exists():write(run_file(run, 'model.binding.json'), model_binding)
@@ -803,7 +933,7 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
                     if check(root, run)['status'] != 'PREPARED':
                         raise ValueError('Conocimiento no preparado')
                 elif current == 'graphrag':
-                    if not (run / 'workspace/outputs/layer3/publication/_manifest.json').exists() and not approve_build:
+                    if not (run / 'workspace/outputs/layer3/publication/_manifest.json').exists() and not approve_build and not approval:
                         write(run_file(run, 'execution.json'), request)
                         approved = confirm is not None and confirm('build', dict(review=str(run / 'preprocess/review.json'),
                             note='Construir embeddings locales BGE-M3 e indices con las fuentes de apoyo; no se descargan modelos')) is True
@@ -842,6 +972,7 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
                         module = engine(root, run)
                         batches = [eligible[i:i+2] for i in range(0, len(eligible), 2)]
                         reviews, pending, authorized_batches = [], [], set()
+                        completed_projects=completed_indicators=0
                         for batch in batches:
                             directory = module.BASE / batch_name(batch)
                             review_path = directory / 'review.txt'
@@ -851,8 +982,13 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
                             project_states(verified)
                             if verified['errors']:
                                 raise ValueError('Evaluacion bloqueada: ' + '; '.join(verified['errors']))
+                            if verified['status']=='COMPLETE':
+                                completed_projects+=len(verified['projects'])
+                                completed_indicators+=sum(len(p.get('rows',[])) for p in verified['projects'])
                             if verified['status'] != 'COMPLETE':
-                                if reviewed != sha(review_path) or not authorize and not (directory / 'authorization.json').exists():
+                                if approval:
+                                    authorized_batches.add(batch_name(batch))
+                                elif reviewed != sha(review_path) or not authorize and not (directory / 'authorization.json').exists():
                                     review_hash = sha(review_path)
                                     approved = confirm is not None and confirm('llm', review_summary(module, directory)) is True
                                     if sha(review_path) != review_hash:
@@ -866,12 +1002,25 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
                             return progress('REVIEW_REQUIRED', reviews=reviews,
                                 message='Leer los reviews; reanudar con --authorize-llm para autorizar el proveedor registrado en el run')
                         for batch in pending:
+                            if approval:verify_execution_approval(root,approval)
                             if (run_file(run, 'stop.request.json')).exists():
                                 partial=export(root,run)
                                 return progress('INTERRUPTED',result=partial)
+                            if approval:
+                                directory=module.BASE/batch_name(batch)
+                                write(directory/'run_authorization.reference.json',dict(
+                                    scope_sha256=approval['scope_sha256'],authorization=str(run/'estado/run.authorization.json'),
+                                    authorization_sha256=sha(run/'estado/run.authorization.json'),
+                                    plan_sha256=sha(directory/'plan.json'),review_sha256=sha(directory/'review.txt')))
                             evaluate(root, run, batch, authorize=authorize or batch_name(batch) in authorized_batches, execute=True)
                             verified = module.verify_run(module.BASE / batch_name(batch))
                             project_states(verified)
+                            completed_projects+=sum(p.get('complete',False) for p in verified['projects'])
+                            completed_indicators+=sum(len(p.get('rows',[])) for p in verified['projects'])
+                            if notify:
+                                progress('EVALUATION_PROGRESS',projects_in_batch=len(batch),
+                                    projects_evaluated=completed_projects,total_projects=len(eligible),
+                                    indicators_completed=completed_indicators)
                             if verified['errors'] or verified['status'] != 'COMPLETE':
                                 if (run_file(run, 'stop.request.json')).exists():
                                     return progress('INTERRUPTED',result=export(root,run))
@@ -910,6 +1059,8 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
             progress('INTERRUPTED', message='Reanudar el mismo run; conservar checkpoints y claims del proveedor')
             raise
         except Exception as exc:
+            if run.is_dir():
+                write(run_file(run,'failure.json'), dict(stage=current,error=str(exc),error_type=type(exc).__name__))
             if model_binding['llm']['provider']=='openai' and any((run/'workspace/outputs/layer4').glob('batch_*')):
                 try:
                     partial_result=export(root,run)

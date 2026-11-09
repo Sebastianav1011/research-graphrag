@@ -145,7 +145,8 @@ def export_files(run):
     if not any(name in result for name in ('indicadores.csv','indicadores_territorios.csv')) and not any(p.suffix=='.xlsx' for p in result.values()) and not any(name.startswith('performance/') for name in result):
         return {}
     for name in ('execution.json','run.json','raw_manifest.json','prepared_hashes.json','model.binding.json',
-            'runtime.manifest.json','project_states.json','export.json','evidence_lineage.json','discovery.json'):
+            'runtime.manifest.json','project_states.json','export.json','evidence_lineage.json','discovery.json',
+            'estado/run.authorization.json'):
         path=file_path(run,name)
         if path.is_file():result['trazabilidad/'+name]=path
     for name in ('autonomous/main/manifest.json','autonomous/main/authorization.json','manifest.json','authorization.json','corrected/manifest.json'):
