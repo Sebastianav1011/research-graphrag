@@ -51,6 +51,15 @@ def emit(value): print(json.dumps(value,ensure_ascii=True,indent=2),flush=True)
 
 def now(): return datetime.now(timezone.utc).isoformat()
 
+
+def aggregate_metrics(calls):
+    observations = [usage_metrics(call) for call in calls]
+    tokens = {key: (sum(values) if values and all(v is not None for v in values) else None)
+        for key in ('input_tokens', 'output_tokens', 'total_tokens')
+        for values in [[m.get(key, {}).get('value') for m in observations]]}
+    walls = [c.get('performance', {}).get('wall_seconds', {}).get('value') for c in calls]
+    return tokens, sum(walls) if walls and all(v is not None for v in walls) else None
+
 def run_dir(name):
     require(re.fullmatch(r'[A-Za-z0-9_-]{1,80}',name),'--run solo admite letras, numeros, guion y guion bajo')
     return BASE/name
@@ -95,11 +104,12 @@ def check(directory):
 
 def verify_run(directory):
     plan=check(directory);cache=read(directory/'cache.json');states=[];errors=[];usage=list(plan.get('recovery', {}).get('previous_usage', []))
+    isolated_errors=[]
     local = plan.get('runtime', {}).get('provider') in ('ollama','openai')
     for p in plan['projects']:
         bounded = plan.get('request_protocol') == CONTEXT_VERSION
         pid=p['project_id'];state=dict(project_id=pid,siap_id=p['siap_id'],discovery_complete=bounded,
-            selected=sorted(plan['profiles']) if bounded else [],rows=[],complete=False,reused=False)
+            selected=sorted(plan['profiles']) if bounded else [],rows=[],complete=False,reused=False,blocked_indicators={})
         if bounded:
             state['context_limits'] = {iid:r['context_selection']['status'] for iid,r in plan['context_requests'][pid].items()
                 if r['context_selection']['status'] != 'READY'}
@@ -135,12 +145,33 @@ def verify_run(directory):
                 record=read(record_path);verify_hashes(out,record['artifact_hashes'])
                 require(record['request_sha256']==cp['request_sha256'],'Registro/request difieren')
                 if local and not record['calls'] and record['status'] == 'ERROR':
-                    errors.append(pid+': BLOCKED_ERROR; no llamada completada; conservar claim y revisar '+str(out))
+                    message=pid+': BLOCKED_ERROR; no llamada completada; conservar claim y revisar '+str(out)
+                    errors.append(message)
+                    if bounded and plan.get('isolate_indicator_errors'):
+                        isolated_errors.append(message)
+                        state['blocked_indicators'].update({iid:'BLOCKED_ERROR' for iid in cp['indicator_ids']})
                     continue
-                require(len(record['calls'])==1,'Cada fase requiere exactamente una llamada')
-                native=record['calls'][0]
-                attempt=out/cp['phase']/('ollama_runs' if local else 'codex_runs')/pid/'attempt_1'
-                require(read(attempt/'call.json')==native,'Metadatos nativos diferentes')
+                retries=plan.get('token_limit_retries',0) if bounded else 0
+                require(1 <= len(record['calls']) <= retries+1,'Numero de llamadas fuera del limite')
+                for index, call in enumerate(record['calls']):
+                    attempt=out/cp['phase']/('ollama_runs' if local else 'codex_runs')/pid/('attempt_'+str(index+1))
+                    require(read(attempt/'call.json')==call and call['retry']==index,'Metadatos nativos/reintento diferentes')
+                    require(index==len(record['calls'])-1 or call['exit_status']=='TOKEN_LIMIT','Solo se reintenta el limite de salida')
+                    require(call['prompt_sha256']==__import__('hashlib').sha256(request['prompt'].encode()).hexdigest() and
+                        (attempt/'prompt.txt').read_text(encoding='utf-8')==request['prompt'] and
+                        call['schema_sha256']==sha256(out/'schema.json') and
+                        call['events_sha256']==sha256(attempt/'events.jsonl') and
+                        call['stderr_sha256']==sha256(attempt/'stderr.txt'),'Artefactos de intento diferentes')
+                    if local:
+                        require(call['runtime']==read(directory/'provider.json'),'Runtime de reintento diferente')
+                        sent=read(attempt/'request.json')
+                        require(sent['messages']==[dict(role='user',content=request['prompt'])] and
+                            sent['format']==expected_schema,'Solicitud de reintento diferente')
+                        options=sent['options'];configured=plan['runtime']['configuration']
+                        require(options['num_ctx']==configured['num_ctx'] and
+                            configured['num_predict']<=options['num_predict']<=max(configured['num_predict'],configured.get('max_predict',configured['num_predict'])),
+                            'Presupuesto de reintento fuera del plan')
+                native=record['calls'][-1]
                 if local:
                     binding = read(directory/'provider.json')
                     require(native.get('provider') == plan['runtime']['provider'] and native['runtime'] == binding and
@@ -155,13 +186,17 @@ def verify_run(directory):
                 require(auth['plan_sha256']==sha256(out/'plan.json') and auth['request_sha256']==cp['request_sha256'] and auth['authorized'] is True,'Autorizacion de llamada no coincide')
                 require(read(out/'dispatch.claim.json')['authorization_sha256']==sha256(out/'authorization.used.json'),'Claim/autorizacion difieren')
                 if verification['status']!='PASS' or record['status']!='VALID':
-                    errors.append(pid+': '+verification['status']+'; '+str(record.get('error'))+'; ver '+str(out));continue
+                    message=pid+': '+verification['status']+'; '+str(record.get('error'))+'; ver '+str(out)
+                    errors.append(message)
+                    if bounded and plan.get('isolate_indicator_errors'):
+                        isolated_errors.append(message)
+                        state['blocked_indicators'].update({iid:verification['status'] for iid in cp['indicator_ids']})
+                    continue
                 require(native['successful_transport'] and native['response_sha256']==sha256(attempt/'response.json') and
                     read(attempt/'response.json')==record['wrapper'],'Respuesta nativa diferente/no valida')
-                native_usage=usage_metrics(native)
-                require(all(verification['tokens'][k]==native_usage[k]['value'] for k in ('input_tokens','output_tokens','total_tokens')) and
+                native_tokens,_=aggregate_metrics(record['calls'])
+                require(all(verification['tokens'][k]==native_tokens[k] for k in ('input_tokens','output_tokens','total_tokens')) and
                     verification['tokens']['total_tokens']<=plan['budgets'][cp['phase']+'_postcall_review_threshold'],'Metricas ausentes o requieren revision')
-                require(len(record['calls'])==1 and record['calls'][0]['retry']==0,'Numero de llamadas/reintentos invalido')
                 if cp['phase']=='discovery':
                     selection=gd.validate_selection(record['wrapper'],p,plan['profiles'])
                     state.update(discovery_complete=True,selected=selection['prioritized_ids'])
@@ -181,7 +216,8 @@ def verify_run(directory):
             state['complete']=state['discovery_complete'] and set(ids)==set(state['selected']) and not any(e.startswith(pid+':') for e in errors)
         state['pending']=[i for i in state['selected'] if i not in {r['indicator_id'] for r in state['rows']}]
         states.append(state)
-    return dict(status='BLOCKED' if errors else ('COMPLETE' if all(s['complete'] for s in states) else 'PARTIAL'),projects=states,errors=errors,usage=usage,
+    return dict(status='BLOCKED' if errors else ('COMPLETE' if all(s['complete'] for s in states) else 'PARTIAL'),projects=states,errors=errors,
+        blocking_errors=[e for e in errors if e not in isolated_errors],usage=usage,
         new_calls=sum(v['calls'] for v in usage),total_tokens=sum(v['tokens']['total_tokens'] for v in usage if v['tokens']['total_tokens'] is not None),
         missing_token_metrics=sum(v['tokens']['total_tokens'] is None for v in usage))
 
@@ -227,7 +263,7 @@ def execute(args):
     directory=run_dir(args.run)
     with execution_lock():
         plan=check(directory);state=verify_run(directory)
-        require(not state['errors'],'Ejecucion detenida: '+'; '.join(state['errors']))
+        require(not state['blocking_errors'],'Ejecucion detenida: '+'; '.join(state['blocking_errors']))
         if state['status']=='COMPLETE': return summary(state)
         auth_path=directory/'authorization.json'
         if not auth_path.exists():
@@ -236,15 +272,15 @@ def execute(args):
                 authorization_reference='Explicit execute --authorize after review of extracted project text',
                 run_plan_sha256=sha256(directory/'plan.json'),review_sha256=sha256(directory/'review.json'),
                 project_ids=[p['project_id'] for p in plan['projects']],maximum_new_calls=plan['maximum_calls'],
-                token_reservation_cap=plan['total_token_reservation_cap'],max_retries=0))
+                token_reservation_cap=plan['total_token_reservation_cap'],max_retries=plan.get('token_limit_retries',0)))
         auth=read(auth_path)
         require(auth['authorized'] is True and auth['run_plan_sha256']==sha256(directory/'plan.json') and
-            auth['review_sha256']==sha256(directory/'review.json') and auth['max_retries']==0,'Autorizacion no coincide con texto revisado')
+            auth['review_sha256']==sha256(directory/'review.json') and auth['max_retries']==plan.get('token_limit_retries',0),'Autorizacion no coincide con texto revisado')
         require(plan.get('runtime', {}).get('provider') in ('ollama','openai'),
                 'Plan historico Codex: solo verificable/exportable; crear una nueva ejecucion Ollama, sin reutilizar sus respuestas')
         settings = llm_configuration(plan['runtime']['configuration'])
         if plan.get('request_protocol') == CONTEXT_VERSION and not any(
-                iid not in p['context_limits'] for p in state['projects'] for iid in p['pending']):
+                iid not in p['context_limits'] and iid not in p['blocked_indicators'] for p in state['projects'] for iid in p['pending']):
             write(directory/'status.json', summary(state))
             return summary(state)
         client = OllamaClient(settings) if settings['provider']=='ollama' else create_client(settings)
@@ -259,10 +295,10 @@ def execute(args):
             if run_root and (run_file(run_root, 'stop.request.json')).exists():
                 write(directory/'status.json',dict(summary(state),status='INTERRUPTED'))
                 return dict(summary(state),status='INTERRUPTED')
-            require(not state['errors'],'Ejecucion bloqueada; no se reintenta: '+'; '.join(state['errors']))
+            require(not state['blocking_errors'],'Ejecucion bloqueada; no se reintenta: '+'; '.join(state['blocking_errors']))
             bounded = plan.get('request_protocol') == CONTEXT_VERSION
             runnable = [s for s in state['projects'] if not s['complete'] and
-                (not bounded or any(i not in s['context_limits'] for i in s['pending']))]
+                (not bounded or any(i not in s['context_limits'] and i not in s['blocked_indicators'] for i in s['pending']))]
             if not runnable:
                 write(directory/'status.json', summary(state))
                 return summary(state)  # Explicit partial coverage, never invented decisions.
@@ -270,8 +306,9 @@ def execute(args):
             require(any((p['fields'].get(f) or '').strip() for f in substantive_fields(p['fields'])),'No hay campos sustantivos; corregir la extraccion y preparar otra ejecucion antes de inferir')
             phase='assessment' if st['discovery_complete'] else 'discovery';ids=st['pending'][:3] if phase=='assessment' else []
             if bounded:
-                ids=[i for i in st['pending'] if i not in st['context_limits']][:1]
+                ids=[i for i in st['pending'] if i not in st['context_limits'] and i not in st['blocked_indicators']][:1]
             request=request_for(plan,p,phase,ids);reservation=plan['budgets'][phase+'_reservation']
+            retries=plan.get('token_limit_retries',0) if bounded else 0
             schema = gd.selection_schema(p['fields']) if phase=='discovery' else v3.schemas(p['fields'])['assessment_batch']
             estimate=(context_guard(request['prompt'],schema,settings,runtime,request['context_budget']) if bounded else
                 math.ceil(len(request['prompt'])*plan['observed_character_ratio']*1.25)+12000)
@@ -279,16 +316,16 @@ def execute(args):
             require(state['new_calls']<plan['maximum_calls'] and state['total_tokens']+reservation<=plan['total_token_reservation_cap'],'Presupuesto de ejecucion agotado')
             context_guard(request['prompt'], schema, settings, runtime, request.get('context_budget'))
             require(client.inspect() == runtime, 'RUNTIME_DRIFT: cambio de modelo o servidor antes de la llamada')
-            number=len(st['rows'])+1 if bounded else len(st['rows'])//3+1
+            number=len(list((directory/'calls'/p['project_id']).glob('assessment_*')))+1 if bounded else len(st['rows'])//3+1
             out=directory/'calls'/p['project_id']/('discovery' if phase=='discovery' else 'assessment_'+str(number))
             out.mkdir(parents=True,exist_ok=True)
             require(not (out/'dispatch.claim.json').exists(),'UNCERTAIN_OUTCOME: claim existente; no repetir')
             cp=dict(project_id=p['project_id'],phase=phase,indicator_ids=ids,run_plan_sha256=sha256(directory/'plan.json'),
                 request_sha256=canonical_hash(request),runtime=runtime,provider_binding_sha256=sha256(binding_path),requested_model=plan['requested_model'],
-                execution_id=plan['execution_id'],maximum_new_calls=1,max_retries=0,timeout_seconds=plan['timeout_seconds'],reservation=reservation,estimated_tokens=estimate)
+                execution_id=plan['execution_id'],maximum_new_calls=1+retries,max_retries=retries,timeout_seconds=plan['timeout_seconds'],reservation=reservation,estimated_tokens=estimate)
             write(out/'plan.json',cp);write(out/'schema.json',schema)
             call_auth=dict(authorized=True,project_ids=[p['project_id']],phase=phase,indicator_ids=ids,plan_sha256=sha256(out/'plan.json'),
-                request_sha256=cp['request_sha256'],token_budget=reservation,maximum_new_calls=1,max_retries=0,
+                request_sha256=cp['request_sha256'],token_budget=reservation,maximum_new_calls=1+retries,max_retries=retries,
                 authorized_by=auth['authorized_by'],authorization_reference='Reviewed live-run authorization sha256='+sha256(auth_path),authorized_at=now())
             write(out/'authorization.used.json',call_auth)
             with (out/'dispatch.claim.json').open('x',encoding='utf-8') as stream: json.dump(dict(authorization_sha256=sha256(out/'authorization.used.json')),stream)
@@ -308,7 +345,7 @@ def execute(args):
             emit(dict(status='CALL_STARTED',project_id=p['project_id'],phase=phase,indicator_ids=ids,token_reservation=reservation))
             provider = OllamaAssessmentProvider(out/phase/'ollama_runs', out/'schema.json', lambda p,i:request,
                 settings=settings, client=client, runtime=runtime, wrapper_validator=gate,
-                execution_id=plan['execution_id'], max_retries=0, max_indicators=3)
+                execution_id=plan['execution_id'], max_retries=0, max_indicators=3, token_limit_retries=retries)
             error = None
             try:
                 provider.evaluate(dict(project_id=p['project_id'], fields=p['fields']),
@@ -321,11 +358,9 @@ def execute(args):
                 calls=provider.calls, status='ERROR' if error else 'VALID', error=error,
                 request_sha256=canonical_hash(request), artifact_hashes=artifacts)
             write(record_path,record)
-            metrics=usage_metrics(record['calls'][0]) if len(record['calls'])==1 else {}
-            tokens={k:metrics.get(k,{}).get('value') for k in ('input_tokens','output_tokens','total_tokens')}
-            wall=record['calls'][0].get('performance',{}).get('wall_seconds',{}).get('value') if record['calls'] else None
+            tokens,wall=aggregate_metrics(record['calls'])
             status='PASS'
-            if record['status']!='VALID' or len(record['calls'])!=1: status='BLOCKED_ERROR'
+            if record['status']!='VALID' or not 1<=len(record['calls'])<=retries+1: status='BLOCKED_ERROR'
             elif wall is None or any(v is None for v in tokens.values()): status='BLOCKED_MISSING_METRICS'
             elif tokens['total_tokens']>reservation: status='BLOCKED_TOKEN_BUDGET'
             elif tokens['total_tokens']>plan['budgets'][phase+'_postcall_review_threshold']: status='PAUSED_TOKEN_REVIEW'
@@ -334,13 +369,13 @@ def execute(args):
                 write(out/'assessment.rows.json',dict(record_sha256=sha256(record_path),rows=rows))
             verify_hashes(out,record['artifact_hashes']);check(directory)
             recovered = plan.get('recovery', {})
-            retry = int(recovered.get('project_id') == p['project_id'] and recovered.get('indicator_ids') == ids)
+            retry = max(0,len(record['calls'])-1)+int(recovered.get('project_id') == p['project_id'] and recovered.get('indicator_ids') == ids)
             result=dict(status=status,project_id=p['project_id'],phase=phase,indicator_ids=ids,calls=len(record['calls']),retries=retry,tokens=tokens,wall_seconds=wall,error=record['error'])
             if status!='PASS':
                 result['provider'] = settings['provider']
             write(out/'verification.json',result);emit(result)
             state=verify_run(directory);write(directory/'status.json',summary(state))
-            if status!='PASS':
+            if status!='PASS' and not (bounded and plan.get('isolate_indicator_errors')):
                 raise ValueError(status+': '+str(record['error'])+'. Sin reintento automatico. Revisar los artefactos privados de '+str(out)+'; se conservan las publicaciones anteriores.')
         return summary(state)
 

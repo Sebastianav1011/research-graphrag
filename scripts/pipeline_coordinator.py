@@ -299,11 +299,15 @@ def prepare_evaluation(root, run, selected):
         if path.exists():source_hashes[path.relative_to(root).as_posix()]=sha(path)
     plan.update(version='MANUAL_RAW_V3_3_OLLAMA_V1', execution_id=uuid.uuid4().hex, projects=inputs,
         request_protocol=context_version, context_requests=requests,
+        isolate_indicator_errors=True,
+        token_limit_retries=provider_config['token_limit_retries'] if provider_config['provider']=='ollama' else 0,
         runtime=dict(provider=provider_config['provider'], configuration=provider_config), requested_model=provider_config['model'],
         maximum_calls=len(settings['profiles']) * len(inputs), total_token_reservation_cap=170000 * len(inputs), timeout_seconds=provider_config['timeout_seconds'],
         source_hashes=source_hashes, territories=[], run_id=run.name)
-    plan['budgets'] = dict(plan['budgets'], assessment_reservation=provider_config['num_ctx'],
-        assessment_postcall_review_threshold=provider_config['num_ctx'])
+    plan['maximum_calls'] *= 1 + plan['token_limit_retries']
+    reservation=provider_config['num_ctx'] * (1 + plan['token_limit_retries'])
+    plan['budgets'] = dict(plan['budgets'], assessment_reservation=reservation,
+        assessment_postcall_review_threshold=reservation)
     plan['total_token_reservation_cap'] = plan['maximum_calls'] * provider_config['num_ctx']
     write(directory / 'plan.json', plan)
     write(directory / 'manifest.json', dict(plan_sha256=sha(directory / 'plan.json'), files={n: sha(directory / n) for n in ('review.json', 'review.txt', 'cache.json', 'context_selection.json')}))
@@ -980,7 +984,7 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
                             result = evaluate(root, run, batch)
                             verified = module.verify_run(directory)
                             project_states(verified)
-                            if verified['errors']:
+                            if verified.get('blocking_errors',verified['errors']):
                                 raise ValueError('Evaluacion bloqueada: ' + '; '.join(verified['errors']))
                             if verified['status']=='COMPLETE':
                                 completed_projects+=len(verified['projects'])
@@ -1021,7 +1025,7 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
                                 progress('EVALUATION_PROGRESS',projects_in_batch=len(batch),
                                     projects_evaluated=completed_projects,total_projects=len(eligible),
                                     indicators_completed=completed_indicators)
-                            if verified['errors'] or verified['status'] != 'COMPLETE':
+                            if verified.get('blocking_errors',verified['errors']):
                                 if (run_file(run, 'stop.request.json')).exists():
                                     return progress('INTERRUPTED',result=export(root,run))
                                 raise ValueError('Lote incompleto/bloqueado; consultar status antes de reanudar')
@@ -1033,7 +1037,8 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
                         for directory in directories:
                             verified = module.verify_run(directory)
                             if verified['errors'] or verified['status'] != 'COMPLETE':
-                                raise ValueError('No se sobrescribe Excel: existen evaluaciones incompletas/bloqueadas')
+                                return progress('PARTIAL',evaluations=[module.summary(module.verify_run(d)) for d in directories],
+                                    message='Evaluacion finalizada con indicadores bloqueados. Checkpoints conservados; no se publica un Excel completo.')
                         result = export(root, run)
                         if result['status'] != 'COMPLETE':
                             return progress(result['status'], result=result)

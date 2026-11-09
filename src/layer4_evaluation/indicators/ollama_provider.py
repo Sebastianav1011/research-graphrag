@@ -23,8 +23,9 @@ from .validation_diagnostics import AssessmentValidationError
 
 
 DEFAULTS = dict(provider='ollama', model='qwen3.5:4b-q4_K_M',
-                endpoint='http://127.0.0.1:11434', temperature=0, num_ctx=4096,
-                num_predict=1024, timeout_seconds=600, keep_alive='5m', seed=0,
+                endpoint='http://127.0.0.1:11434', temperature=0, num_ctx=8192,
+                num_predict=4096, token_limit_retries=2, max_predict=6144,
+                timeout_seconds=600, keep_alive='5m', seed=0,
                 context_margin_tokens=512, expected_quantization='Q4_K_M')
 
 
@@ -72,6 +73,10 @@ def configuration(value=None):
             raise ValueError('llm.' + key + ' debe ser un entero positivo')
     if result['num_predict'] + result['context_margin_tokens'] >= result['num_ctx']:
         raise ValueError('Contexto insuficiente para generacion y margen de plantilla')
+    if type(result['token_limit_retries']) is not int or not 0 <= result['token_limit_retries'] <= 2:
+        raise ValueError('Se permiten como maximo dos reintentos por limite de tokens')
+    if type(result['max_predict']) is not int or result['max_predict'] <= 0:
+        raise ValueError('max_predict debe ser un entero positivo')
     if type(result['seed']) is not int:
         raise ValueError('llm.seed debe ser entero')
     temp = result['temperature']
@@ -215,13 +220,17 @@ class OllamaAssessmentProvider:
     """Drop-in evaluate(project, indicators), calls/raw_outputs/last_output contract."""
     def __init__(self, run_directory, schema_path, input_factory, *, settings=None, client=None,
                  runtime=None, timeout=None, model=None, max_retries=0, max_indicators=3,
-                 wrapper_validator=None, execution_id=None, stop_on_uncertain=True, output_adapter=None):
+                 wrapper_validator=None, execution_id=None, stop_on_uncertain=True, output_adapter=None,
+                 token_limit_retries=0):
         options = dict(settings or {})
         if timeout is not None:
             options['timeout_seconds'] = timeout
         if model is not None:
             options['model'] = model
         self.settings = configuration(options)
+        if type(token_limit_retries) is not int or not 0 <= token_limit_retries <= self.settings['token_limit_retries']:
+            raise ValueError('Reintentos de salida fuera de la configuracion')
+        self.token_limit_retries = token_limit_retries
         if max_retries != 0 or max_indicators not in (1, 2, 3, 5) or not stop_on_uncertain:
             raise ValueError('Ollama requiere ejecucion secuencial sin reintentos automaticos')
         self.directory, self.schema = Path(run_directory), Path(schema_path)
@@ -234,6 +243,28 @@ class OllamaAssessmentProvider:
 
     @measured_project
     def evaluate(self, project, indicators):
+        # Retries are explicitly enabled by the live run plan. Other callers keep
+        # their existing outer retry policy and do not multiply inference calls.
+        retries = self.token_limit_retries
+        output = self.settings['num_predict']
+        for attempt in range(retries + 1):
+            try:
+                return self._evaluate_once(project, indicators, attempt=attempt, output=output)
+            except OllamaError as exc:
+                if exc.code != 'TOKEN_LIMIT' or attempt == retries:
+                    raise
+                budget = self.calls[-1].get('context_budget')
+                input_tokens = (budget['estimated_input_tokens'] if budget else
+                    len(self.input_factory(project, indicators)['prompt'].encode('utf-8')))
+                observed = self.calls[-1]['usage_observations'][0].get('input_tokens')
+                if type(observed) is int:
+                    input_tokens = max(input_tokens, observed)
+                available = self.settings['num_ctx'] - self.settings['context_margin_tokens'] - input_tokens
+                ceiling = min(max(output, self.settings['max_predict']), available)
+                if ceiling > output:
+                    output = min(output * 2, ceiling)
+
+    def _evaluate_once(self, project, indicators, *, attempt=0, output=None):
         self.last_output = None
         if not 1 <= len(indicators) <= self.max_indicators or not re.fullmatch(r'[A-Za-z0-9_-]+', project['project_id']):
             raise ValueError('Identificador de proyecto o lote invalido')
@@ -247,13 +278,18 @@ class OllamaAssessmentProvider:
         runtime = self.runtime or self.client.inspect()
         if runtime['configuration'] != self.settings:
             raise OllamaError('RUNTIME_DRIFT', 'Modelo, digest, servidor o configuracion distintos del checkpoint; no se reutiliza otra version')
-        context_guard(prompt, schema, self.settings, runtime, request.get('context_budget'))
+        generation = self.settings | dict(num_predict=output or self.settings['num_predict'])
+        budget = request.get('context_budget')
+        if budget and generation != self.settings:
+            from .context_budget import estimate
+            budget = estimate(prompt, schema, generation, tokenizer=budget.get('tokenizer'))
+        context_guard(prompt, schema, generation, runtime, budget)
         payload = dict(model=self.settings['model'], messages=[dict(role='user', content=prompt)], format=schema,
                        stream=False, truncate=False, shift=False, keep_alive=self.settings['keep_alive'],
-                       options={key: self.settings[key] for key in ('temperature', 'num_ctx', 'num_predict', 'seed')})
+                       options={key: generation[key] for key in ('temperature', 'num_ctx', 'num_predict', 'seed')})
         if runtime['think'] is not None:
             payload['think'] = runtime['think']
-        cwd = self.directory / project['project_id'] / 'attempt_1'
+        cwd = self.directory / project['project_id'] / ('attempt_' + str(attempt + 1))
         cwd.mkdir(parents=True, exist_ok=False)
         if hasattr(self.client, 'attach'):self.client.attempt = cwd
         (cwd / 'prompt.txt').write_text(prompt, encoding='utf-8')
@@ -269,6 +305,8 @@ class OllamaAssessmentProvider:
             save('native_response.json', native)
             raw = native.get('message', {}).get('content', '')
             (cwd / 'response.raw.txt').write_text(raw if isinstance(raw, str) else '', encoding='utf-8')
+            if native.get('done_reason') == 'length' or (type(native.get('eval_count')) is int and native['eval_count'] >= generation['num_predict']):
+                raise OllamaError('TOKEN_LIMIT', 'Limite de salida alcanzado; respuesta incompleta no aceptada')
             if native.get('done') is not True or native.get('done_reason') != 'stop':
                 raise OllamaError('INCOMPLETE_RESPONSE', 'Generacion incompleta o limite de tokens alcanzado; no es NOT_SUPPORTED')
             if native.get('model') != self.settings['model'] or native.get('message', {}).get('tool_calls'):
@@ -278,7 +316,7 @@ class OllamaAssessmentProvider:
                     raise OllamaError('MISSING_METRICS', 'Faltan conteos reales de tokens de Ollama')
             if native['prompt_eval_count'] + native['eval_count'] >= self.settings['num_ctx']:
                 raise OllamaError('CONTEXT_EXHAUSTED', 'Se alcanzo la ventana de contexto; no se acepta una posible entrada truncada')
-            if request.get('context_budget') and native['prompt_eval_count'] > request['context_budget']['input_budget']:
+            if budget and native['prompt_eval_count'] > budget['input_budget']:
                 raise OllamaError('CONTEXT_EXHAUSTED', 'El conteo real de entrada supera el presupuesto estimado revisado; respuesta no aceptada. Requiere revisar contexto/configuracion, nunca asignar NOT_SUPPORTED')
             if self.client.inspect() != runtime:
                 raise OllamaError('RUNTIME_DRIFT', 'El modelo o servidor cambio durante la llamada')
@@ -320,7 +358,8 @@ class OllamaAssessmentProvider:
             (cwd / 'events.jsonl').write_text(json.dumps(dict(provider=self.settings['provider'], done=native.get('done'), error=error.code if error else None, validation_issues=issues)) + '\n', encoding='utf-8')
             (cwd / 'stderr.txt').write_text(str(error) if error else '', encoding='utf-8')
             digest = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
-            call = dict(project_id=project['project_id'], call_number=len(self.calls)+1, retry=0,
+            call = dict(project_id=project['project_id'], call_number=len(self.calls)+1, retry=attempt,
+                generation_options=payload['options'],
                 execution_id=self.execution_id, provider=self.settings['provider'], runtime=runtime,
                 requested_model=self.settings['model'], timestamp=started, finished_at=datetime.now(timezone.utc).isoformat(),
                 successful_transport=error is None, technical_error=str(error) if error else None,
@@ -340,8 +379,8 @@ class OllamaAssessmentProvider:
                     api_returned_model=native.get('api_returned_model'),rate_limit_retries=native.get('rate_limit_retries'),
                     estimated_cost_usd=native.get('estimated_cost_usd'),remote_response_seconds=native.get('remote_response_seconds'),
                     remote_hardware='NOT_AVAILABLE',local_hardware_scope='LOCAL_PIPELINE_ONLY')
-            if request.get('context_budget'):
-                call['context_budget'] = request['context_budget']
+            if budget:
+                call['context_budget'] = budget
             call['validation_issues'] = issues
             save('call.json', call)
             record_call(call, cwd/'call.json')
