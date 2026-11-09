@@ -1,2 +1,21 @@
 # Preserve the authorized shared contract byte-for-byte across computers.
 data/contratos/tesis_comparacion_30.v1.json -text whitespace=cr-at-eol
+
+# These exact source bytes and historical snapshots are pinned by SHA-256.
+# Preserve them when staging and checking out, independently of core.autocrlf.
+run.py -text whitespace=cr-at-eol
+scripts/pipeline_coordinator.py -text whitespace=cr-at-eol
+scripts/export_layer4_pilot.py -text whitespace=cr-at-eol
+scripts/auxiliary/verify_layer4_preparation.py -text whitespace=cr-at-eol
+src/autonomous_execution/lifecycle.py -text whitespace=cr-at-eol
+src/autonomous_execution/prepare_menu.py -text whitespace=cr-at-eol
+src/layer2_processing/pipeline.py -text whitespace=cr-at-eol
+src/layer2_processing/checkpoints.py -text whitespace=cr-at-eol
+src/layer4_evaluation/live_execution.py -text whitespace=cr-at-eol
+src/layer4_evaluation/indicators/context_budget.py -text whitespace=cr-at-eol
+src/layer4_evaluation/indicators/ollama_provider.py -text whitespace=cr-at-eol
+src/layer4_evaluation/indicators/openai_provider.py -text whitespace=cr-at-eol
+docs/architecture/resume_compatibility/*.py.snapshot -text whitespace=cr-at-eol
+docs/architecture/uv_command_compatibility/*.py.snapshot -text whitespace=cr-at-eol
+config/sources.institutional.example.yaml -text whitespace=cr-at-eol
+config/layer4_pilot.example.yaml -text whitespace=cr-at-eol

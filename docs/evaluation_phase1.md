@@ -85,21 +85,21 @@ d079bfcb65336741cf777866df8501178508fb2ac56600abdfbb0b74d86ef87e
 Para preparar otra copia nueva, sin sobrescribir la anterior:
 
 ```powershell
-python scripts/compare_evaluation.py prepare --name phase1_20_v2
+uv run python scripts/compare_evaluation.py prepare --name phase1_20_v2
 ```
 
 Para autorizar el panel entregado, tras revisarlo:
 
 ```powershell
-python scripts/compare_evaluation.py authorize --name phase1_20_v1 --manifest-sha256 d079bfcb65336741cf777866df8501178508fb2ac56600abdfbb0b74d86ef87e
+uv run python scripts/compare_evaluation.py authorize --name phase1_20_v1 --manifest-sha256 d079bfcb65336741cf777866df8501178508fb2ac56600abdfbb0b74d86ef87e
 ```
 
 Los comandos siguientes **sí ejecutarán Qwen**. No se han ejecutado en esta entrega. Cada brazo evalúa veinte casos; completar ambos implica hasta cuarenta evaluaciones, más los reintentos acotados que correspondan:
 
 ```powershell
-python scripts/compare_evaluation.py run --name phase1_20_v1 --arm baseline
-python scripts/compare_evaluation.py run --name phase1_20_v1 --arm corrected
-python scripts/compare_evaluation.py metrics --name phase1_20_v1
+uv run python scripts/compare_evaluation.py run --name phase1_20_v1 --arm baseline
+uv run python scripts/compare_evaluation.py run --name phase1_20_v1 --arm corrected
+uv run python scripts/compare_evaluation.py metrics --name phase1_20_v1
 ```
 
 El mismo comando `run --arm ...` reanuda ese brazo: revalida los PASS y no repite sus inferencias. Un transporte completado se recupera mediante sus recibos; una llamada despachada sin resultado comprobable queda incierta y no se repite ciegamente. Los bloqueos semánticos no se reintentan indefinidamente. Ante falta de recursos o drift de runtime, el experimento detiene ese brazo y conserva los resultados. Este runner de comparación no sustituye al scheduler de espera automática del modo autónomo normal; revisar un bloqueo y preparar un experimento nuevo si hace falta cambiar política o alcance.
@@ -107,12 +107,12 @@ El mismo comando `run --arm ...` reanuda ese brazo: revalida los PASS y no repit
 Para adjudicar referencias, copiar `references.pending.csv` a `references.reviewed.csv`. Un revisor humano completa `decision`, `reviewer` y `reviewed_at`, y cambia únicamente los casos revisados a `APPROVED_HUMAN_REVIEW`. Conservar el resto pendiente. Las etiquetas están separadas del alcance autorizado de inferencia y su SHA se registra al calcular métricas:
 
 ```powershell
-python scripts/compare_evaluation.py metrics --name phase1_20_v1 --references outputs/experiments/evaluation_phase1/phase1_20_v1/references.reviewed.csv
+uv run python scripts/compare_evaluation.py metrics --name phase1_20_v1 --references outputs/experiments/evaluation_phase1/phase1_20_v1/references.reviewed.csv
 ```
 
 No se autoriza ni se inicia nada por el hecho de calcular métricas. No se acepta `--yes`. Si cambia código, fuente o política, la comprobación falla antes de otra inferencia: preparar un nuevo nombre y autorizar su hash.
 
-Para ejecuciones institucionales nuevas sigue disponible `python run.py prepare --autonomous`, con el menú existente y las cuatro modalidades de selección. Se prepara y autoriza un manifiesto nuevo con V2. **No usar esta entrega para reautorizar o migrar el run histórico**: sus fingerprints corresponden a otra versión y se rechaza su ejecución con código cambiado. Conservarlo para comparación y conservar la versión de código anterior si se necesita reproducirlo literalmente.
+Para ejecuciones institucionales nuevas sigue disponible `uv run python run.py prepare --autonomous`, con el menú existente y las cuatro modalidades de selección. Se prepara y autoriza un manifiesto nuevo con V2. **No usar esta entrega para reautorizar o migrar el run histórico**: sus fingerprints corresponden a otra versión y se rechaza su ejecución con código cambiado. Conservarlo para comparación y conservar la versión de código anterior si se necesita reproducirlo literalmente.
 
 ## Métricas y criterios de comparación
 
@@ -149,7 +149,7 @@ Validación: **233 pruebas satisfactorias** en la suite seleccionada, más **una
 Comando principal ejecutado, con directorio de temporales nuevo:
 
 ```powershell
-.\.venv\Scripts\python.exe -B -m pytest -q tests/test_phase1_evaluation.py tests/test_autonomous_execution.py tests/test_assessment_recovery.py tests/test_context_budget.py tests/test_ollama_provider.py tests/test_resource_wait.py tests/test_autonomous_prepare_menu.py tests/test_preparation_integrity.py tests/layer5_experiment/test_assessment_v3.py --basetemp=outputs/test-phase1-final-01 --disable-warnings --maxfail=2
+uv run python -B -m pytest -q tests/test_phase1_evaluation.py tests/test_autonomous_execution.py tests/test_assessment_recovery.py tests/test_context_budget.py tests/test_ollama_provider.py tests/test_resource_wait.py tests/test_autonomous_prepare_menu.py tests/test_preparation_integrity.py tests/layer5_experiment/test_assessment_v3.py --basetemp=outputs/test-phase1-final-01 --disable-warnings --maxfail=2
 ```
 
 La prueba adicional fue `test_irreducible_synthesis_budget_fails_closed_with_receipt`, con temporales propios. Para repetir las pruebas, utilizar otro directorio temporal nuevo: pytest limpia el `basetemp` que se le proporciona.

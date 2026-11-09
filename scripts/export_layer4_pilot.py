@@ -215,7 +215,7 @@ La confianza es un puntaje de evidencia, no una probabilidad ni exactitud. Se ca
 
 La procedencia territorial está aceptada; las decisiones LLM del piloto son preliminares y requieren revisión humana independiente. Ni el piloto ni esta exportación conceden aceptación final de 4A. Los manifests, prompts, respuestas y auditorías completas permanecen en el directorio técnico privado. La entrega no incluye tablas personales, credenciales ni esos textos completos.
 
-Para reproducir desde el repositorio, verificar primero las publicaciones y disponer de la autorización institucional aplicable. Ejecutar únicamente el piloto preparado con `python scripts/run_layer4_experiment.py --config {config_path} execute-batch --stage pilot --authorization <constancia.json>`. Las respuestas compatibles guardadas se reutilizan. Regenerar estos tres archivos, sin nueva inferencia, con `python scripts/export_layer4_pilot.py --config {config_path}`. No volver a ejecutar 4B. Las otras 69 evaluaciones exigen revisión y aprobación separada del piloto.
+Para reproducir desde el repositorio, verificar primero las publicaciones y disponer de la autorización institucional aplicable. Ejecutar únicamente el piloto preparado con `uv run python scripts/run_layer4_experiment.py --config {config_path} execute-batch --stage pilot --authorization <constancia.json>`. Las respuestas compatibles guardadas se reutilizan. Regenerar estos tres archivos, sin nueva inferencia, con `uv run python scripts/export_layer4_pilot.py --config {config_path}`. No volver a ejecutar 4B. Las otras 69 evaluaciones exigen revisión y aprobación separada del piloto.
 '''
 
 

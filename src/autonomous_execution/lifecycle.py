@@ -321,7 +321,7 @@ def prepare(root, run, policy, *, runtime=None, evaluator=None, indicator_ids=No
         tokenizer_config=root/'config/qwen_tokenizer.json'
         if tokenizer_config.exists():
             descriptor=s.read(tokenizer_config);tokenizer_path=root/descriptor['path']
-            if not tokenizer_path.is_file():raise ValueError('Preparar tokenizer local: python scripts/prepare_qwen_tokenizer.py')
+            if not tokenizer_path.is_file():raise ValueError('Preparar tokenizer local: uv run python scripts/prepare_qwen_tokenizer.py')
             if s.sha(tokenizer_path)!=descriptor['sha256']:raise ValueError('Tokenizer local distinto del fijado')
             if descriptor['model_digest']!=runtime['digest'] or descriptor['model_metadata_sha256']!=runtime['model_metadata_sha256']:
                 raise ValueError('Tokenizer/plantilla requieren calibracion para este modelo; no adivinar conteos')

@@ -59,13 +59,13 @@ Sobre el entorno existente, desde la raíz:
 
 ```powershell
 Set-Location -LiteralPath 'C:\Users\sebas\Workspace\Docs Tesis\GraphRag'
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+uv sync --locked
 # Solo para PDF con texto extraíble:
-.\.venv\Scripts\python.exe -m pip install -r requirements/manual-input.txt
-.\.venv\Scripts\python.exe scripts/run_pipeline_manual.py --help
+uv sync --locked --group pdf
+uv run python scripts/run_pipeline_manual.py --help
 ```
 
-Para una instalación nueva, crear antes el entorno con `python -m venv .venv`.
+Para una instalación nueva, ejecutar `uv sync --locked`; uv administra el entorno sin activarlo manualmente.
 GraphRAG requiere además las dependencias ya documentadas en
 `requirements/layer3.txt` y el lock Windows/CUDA
 `requirements/layer3-windows-cuda.lock.txt`, hardware compatible y los pesos BGE-M3
@@ -145,10 +145,10 @@ Copiar los documentos **antes** de preparar. Por ejemplo, para uno o varios form
 Set-Location -LiteralPath 'C:\Users\sebas\Workspace\Docs Tesis\GraphRag'
 Copy-Item -LiteralPath 'C:\Documentos\proyecto_recibido.pdf' -Destination '.\capa_1_raw\prueba_en_vivo\'
 $ejecucion = 'vivo_' + (Get-Date -Format 'yyyyMMdd_HHmmss_fff')
-.\.venv\Scripts\python.exe -B scripts/run_pipeline_manual.py prepare --dataset prueba_en_vivo --run-id $ejecucion
+uv run python -B scripts/run_pipeline_manual.py prepare --dataset prueba_en_vivo --run-id $ejecucion
 Get-Content -Raw -LiteralPath ".\outputs\pipeline_manual\$ejecucion\preprocess\review.json"
 Get-Content -Raw -LiteralPath ".\outputs\pipeline_manual\$ejecucion\preprocess\diagnostics.json"
-.\.venv\Scripts\python.exe -B scripts/run_pipeline_manual.py validate --dataset prueba_en_vivo --run-id $ejecucion
+uv run python -B scripts/run_pipeline_manual.py validate --dataset prueba_en_vivo --run-id $ejecucion
 ```
 
 La misma copia admite `.docx`, `.xlsx`, `.csv` o `.json`; no requiere cambiar código.
@@ -159,8 +159,8 @@ comprueba contratos y grafo factual sin cargar el modelo.
 Después de revisar, construir GraphRAG local y preparar la revisión de Capa 4:
 
 ```powershell
-.\.venv\Scripts\python.exe -B scripts/run_pipeline_manual.py graph --dataset prueba_en_vivo --run-id $ejecucion --approve-build
-.\.venv\Scripts\python.exe -B scripts/run_pipeline_manual.py review --dataset prueba_en_vivo --run-id $ejecucion
+uv run python -B scripts/run_pipeline_manual.py graph --dataset prueba_en_vivo --run-id $ejecucion --approve-build
+uv run python -B scripts/run_pipeline_manual.py review --dataset prueba_en_vivo --run-id $ejecucion
 Get-ChildItem -LiteralPath ".\outputs\pipeline_manual\$ejecucion\layer5_results" -Filter 'review.txt' -Recurse | ForEach-Object { Get-Content -Raw -LiteralPath $_.FullName }
 ```
 
@@ -173,9 +173,9 @@ proyectos no necesita esas opciones.
 Tras leer la revisión, autorizar el envío y exportar:
 
 ```powershell
-.\.venv\Scripts\python.exe -B scripts/run_pipeline_manual.py evaluate --dataset prueba_en_vivo --run-id $ejecucion --authorize
-.\.venv\Scripts\python.exe -B scripts/run_pipeline_manual.py export --dataset prueba_en_vivo --run-id $ejecucion
-.\.venv\Scripts\python.exe -B scripts/run_pipeline_manual.py verify --dataset prueba_en_vivo --run-id $ejecucion
+uv run python -B scripts/run_pipeline_manual.py evaluate --dataset prueba_en_vivo --run-id $ejecucion --authorize
+uv run python -B scripts/run_pipeline_manual.py export --dataset prueba_en_vivo --run-id $ejecucion
+uv run python -B scripts/run_pipeline_manual.py verify --dataset prueba_en_vivo --run-id $ejecucion
 ```
 
 `--authorize` autoriza expresamente el texto y el plan preparados. El ejecutor conserva

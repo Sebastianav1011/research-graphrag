@@ -32,7 +32,7 @@ sirven en PowerShell, Linux y macOS:
 ```powershell
 git clone https://github.com/Sebastianav1011/research-graphrag.git
 cd research-graphrag
-uv sync
+uv sync --locked
 uv run python run.py
 ```
 

@@ -39,7 +39,7 @@ En esa aceptación no se realizó commit/push ni se implementó Capa 3.
 
 Evidencia: outputs/layer2/reports/acceptance.json y tests.xml; perfiles y calibración
 en text_field_profile.csv, input_profile.json, chunking_candidates.json y chunking_analysis.md.
-Repetir aceptación: `python scripts/verify_layer2.py` después de dos ejecuciones aprobadas.
+Repetir aceptación: `uv run python scripts/verify_layer2.py` después de dos ejecuciones aprobadas.
 
 ## Fronteras
 
@@ -120,15 +120,15 @@ a `data/knowledge` ni exigen reconstruir esta publicación.
    y estados. Registrar publication_kind: real y approved_layer1_manifest_sha256
    con la huella exacta del manifest revisado. Si Capa 1 no declara real/synthetic,
    esto es una atestación humana explícita; no se abre su configuración de fuentes.
-4. Ejecutar `python scripts/run_layer2.py --mode profile`: solo perfil real en
+4. Ejecutar `uv run python scripts/run_layer2.py --mode profile`: solo perfil real en
    outputs/layer2/reports/input_profile.json, sin publicar conocimiento.
 5. Seleccionar parámetros con percentiles y revisión de textos largos/overlap/NULL.
    Aprobar mappings_verified y chunking_calibrated después de la revisión.
-6. Ejecutar `python scripts/run_layer2.py --mode validate`: paquete en memoria y
+6. Ejecutar `uv run python scripts/run_layer2.py --mode validate`: paquete en memoria y
    calidad, sin escribir una publicación.
 7. Ejecutar integration tests reales. Resolver incompatibilidades de Capa 2 y
    reportar defectos upstream sin editar canonical.
-8. Ejecutar `python scripts/run_layer2.py` dos veces, verificar payloads, manifest,
+8. Ejecutar `uv run python scripts/run_layer2.py` dos veces, verificar payloads, manifest,
    hashes y prueba final de publicación. Recién entonces evaluar aceptación completa.
 
 La configuración distribuida bloquea ejecución no aprobada. Manifest ausente/escritor
@@ -221,14 +221,14 @@ de Capa 1 e incluyó su suite completa y las pruebas técnicas y reales de Capa 
 Dependencias directas en requirements.txt; dependencias de tests en requirements-dev.txt.
 
 ```powershell
-python scripts/build_layer2_contracts.py --check
-python -m pytest tests/layer2 -q --basetemp=outputs/layer2/unit-temp
+uv run python scripts/build_layer2_contracts.py --check
+uv run python -m pytest tests/layer2 -q --basetemp=outputs/layer2/unit-temp
 # Después de revisar canonical real:
 $env:LAYER2_REAL_INTEGRATION = '1'
-python -m pytest tests/layer2/test_integration_real.py -q
+uv run python -m pytest tests/layer2/test_integration_real.py -q
 # Después de dos publicaciones aprobadas:
 $env:LAYER2_VERIFY_PUBLICATION = '1'
-python -m pytest tests/layer2/test_integration_real.py -q
+uv run python -m pytest tests/layer2/test_integration_real.py -q
 ```
 
 LAYER2_CONFIG admite un config revisado alternativo sujeto a límites de rutas.

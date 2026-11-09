@@ -2,7 +2,7 @@
 
 Contrato integrado con el canonical real oficial. Autoridad ejecutable: contracts.py en
 src/layer2_knowledge. Nueve JSON Schemas derivados en schemas/layer2, generados con
-`python scripts/build_layer2_contracts.py`; `--check` detecta drift sin reescribirlos.
+`uv run python scripts/build_layer2_contracts.py`; `--check` detecta drift sin reescribirlos.
 Los ocho Parquet están publicados en data/knowledge/. Sus conteos y huellas se
 registran en _manifest.json y outputs/layer2/reports/acceptance.json al cierre.
 

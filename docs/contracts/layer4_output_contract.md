@@ -33,7 +33,7 @@ numerada, cita literal, section_id y coordenadas verificadas.
 una auditoría separada sin escribir Excel. El verificador de un bundle completo es:
 
 ```powershell
-.\.venv\Scripts\python.exe -B scripts/prepare_layer4_consumer_v3_3.py --bundle RUTA_BUNDLE.json --check-only
+uv run python -B scripts/prepare_layer4_consumer_v3_3.py --bundle RUTA_BUNDLE.json --check-only
 ```
 
 El bundle explícito contiene `consumer_contract`, `projects` (los veinte), `rows`,

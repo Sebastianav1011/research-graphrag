@@ -2,7 +2,7 @@
 
 Rutas y publicación actualizadas: [almacenamiento](ALMACENAMIENTO.md). El contrato de tesis está expresamente autorizado para Git; los demás contratos y todos los outputs siguen privados. Los informes anteriores describen su fecha.
 
-El flujo oficial es **uv sync → uv run python run.py**, sin activar un entorno.
+El flujo oficial es **uv sync --locked → uv run python run.py**, sin activar un entorno.
 uv administra `.venv`, instala Python 3.14.0 si hace falta y usa `uv.lock`.
 Se preservan las versiones existentes del runtime. Sincronizar paquetes no
 ejecuta proyectos ni descarga pesos de los modelos.
@@ -34,7 +34,7 @@ Reabrir la terminal si es necesario. Los pasos siguientes son comunes:
 uv --version
 git clone https://github.com/Sebastianav1011/research-graphrag.git
 cd research-graphrag
-uv sync
+uv sync --locked
 uv run python run.py
 ```
 
@@ -67,16 +67,16 @@ No eliminar `.venv`. Para la adopción conservadora:
 uv sync --locked --inexact
 ```
 
-`--inexact` conserva paquetes adicionales ajenos al proyecto. `uv sync` normal
+`--inexact` conserva paquetes adicionales ajenos al proyecto. `uv sync --locked` normal
 sincroniza exactamente las dependencias seleccionadas y puede retirar paquetes
 no declarados; no borra el entorno ni los datos del proyecto. `uv run` selecciona
 el entorno automáticamente y permite ejecutar todos los entrypoints existentes.
 
 ```powershell
-uv sync --no-dev
-uv sync --group pdf
-uv sync --group performance
-uv sync --all-groups
+uv sync --locked --no-dev
+uv sync --locked --group pdf
+uv sync --locked --group performance
+uv sync --locked --all-groups
 ```
 
 El grupo dev (pytest) se incluye por defecto. pdf (pypdf) y performance

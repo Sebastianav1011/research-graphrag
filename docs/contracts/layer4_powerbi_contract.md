@@ -134,7 +134,7 @@ tabla de consumo. Los diagnósticos permanecen en el QA y en el manifest separad
 
 El entrypoint histórico `scripts/export_layer4_powerbi.py` está ligado al
 preliminar de 20 proyectos y no se usa como exportador genérico. La ruta vigente
-es `python -B scripts/run_layer4_experiment.py export` (parcial) o `finalize`
+es `uv run python -B scripts/run_layer4_experiment.py export` (parcial) o `finalize`
 (exige todos los assessments válidos). Produce exactamente RESULTADO_INDICADORES
 y TERRITORIOS, y CSV UTF-8 con BOM. TERRITORIOS proyecta únicamente la bridge
 publicada RESOLVED de 4B para la muestra; no ejecuta detección. Los códigos son

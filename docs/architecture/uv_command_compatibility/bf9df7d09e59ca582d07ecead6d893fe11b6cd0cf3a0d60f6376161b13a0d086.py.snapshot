@@ -1,0 +1,1175 @@
+"""CLI orchestration; existing layer implementations operate inside a private root."""
+from run_paths import file_path as run_file
+import argparse
+from contextlib import contextmanager
+from datetime import datetime, timezone
+import importlib.util
+import json
+import math
+import os
+from pathlib import Path
+import re
+import sys
+from types import SimpleNamespace
+import uuid
+
+import openpyxl
+import pyarrow.parquet as pq
+import yaml
+from layer4_evaluation.indicators.performance import measured_pipeline, timed, project_states, observe_projects
+
+
+from layer2_processing.preprocessing.adapters import PROJECT_FIELDS, read, sha, write
+from layer4_evaluation.indicators.selection import substantive_fields
+from layer2_processing import pipeline as processing
+from layer2_processing.pipeline import check, same_configuration, layer_config, seal
+
+ROOT = Path(__file__).resolve().parents[1]
+COLUMNS = ['siap_id', 'indicador_id', 'parrafo_evidencia', 'fuente_evidencia', 'ubicacion_evidencia', 'confianza']
+TERRITORY_COLUMNS = ['siap_id', 'territory_type', 'territory_code', 'code_system']
+
+
+def within(root, relative):
+    path = (root / relative).resolve()
+    if Path(relative).is_absolute() or not path.is_relative_to(root.resolve()):
+        raise ValueError('Ruta fuera de la raiz permitida: ' + str(relative))
+    return path
+
+
+def configuration(root, path):
+    config = read(within(root, path))
+    raw = within(root, config['raw_base'])
+    runs = within(root, config['runs_base'])
+    if raw == runs or raw.is_relative_to(runs) or runs.is_relative_to(raw):
+        raise ValueError('RAW y ejecuciones deben estar separados')
+    # Never permit an alternate config to publish over the historical stores/code.
+    allowed_raw = {(root / 'data/layer1_sources').resolve()}
+    if not any(runs.is_relative_to(root / p) for p in ('outputs/runs', 'outputs/pipeline_manual')) or not any(raw.is_relative_to(p) for p in allowed_raw):
+        raise ValueError('Fuentes en data/layer1_sources y ejecuciones nuevas en outputs/runs')
+    reference = within(root, config['reference_catalog'])
+    if not reference.is_relative_to(root / 'data/layer1_sources/reference/indicadores'):
+        raise ValueError('Catalogo VRI debe permanecer en data/layer1_sources/reference/indicadores, separado de RAW')
+    return config, raw, runs
+
+
+@contextmanager
+def lock(folder):
+    from run_paths import BUCKETS
+    folder=Path(folder)
+    if folder.name in BUCKETS and folder.parent.name=='runs':folder=folder.parent
+    folder.mkdir(parents=True, exist_ok=True)
+    run_file(folder,'.execution.lock').parent.mkdir(parents=True,exist_ok=True)
+    with (run_file(folder, '.execution.lock')).open('a+b') as stream:
+        stream.seek(0, 2)
+        if stream.tell() == 0:
+            stream.write(b'0')
+            stream.flush()
+        stream.seek(0)
+        if os.name == 'nt':
+            import msvcrt
+            msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+            try:
+                yield
+            finally:
+                stream.seek(0)
+                msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            try:
+                yield
+            finally:
+                fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+
+
+def graph_configuration(root, run):
+    """Bind GraphRAG to a prepared knowledge checkpoint without building embeddings."""
+    workspace = run / 'workspace'
+    if not (workspace / 'config/layer3.yaml').exists():
+        layer3 = yaml.safe_load(layer_config(root, 4).read_text(encoding='utf-8'))
+        layer3['readiness']['approved_layer2_manifest_sha256'] = sha(workspace / 'outputs/layer2/knowledge/_manifest.json')
+        layer3['execution']['allow_real_build'] = False
+        (workspace / 'config/layer3.yaml').write_text(yaml.safe_dump(layer3), encoding='utf-8')
+        seal(run)
+
+
+@timed('preparacion')
+def prepare(root, run, raw, dataset, config, through='knowledge'):
+    result = processing.prepare(root, run, raw, dataset, config, through=through)
+    if through == 'knowledge':
+        graph_configuration(root, run)
+    return result
+
+
+@timed('preparacion')
+def knowledge(root, run):
+    result = processing.knowledge(root, run)
+    graph_configuration(root, run)
+    return result
+
+
+def graph(root, run, build=False):
+    if check(root, run)['status'] != 'PREPARED':
+        raise ValueError('Ejecutar knowledge antes de GraphRAG')
+    from layer3_graphrag.pipeline import run as graphrag
+    workspace = run / 'workspace'
+    graph_configuration(root, run)
+    config_path = workspace / 'config/layer3.yaml'
+    config = yaml.safe_load(config_path.read_text(encoding='utf-8'))
+    if build:
+        from layer3_graphrag.manifest import validate_publication
+        published = workspace / 'outputs/layer3/publication'
+        if (published / '_manifest.json').exists():
+            return validated_graph(root, run)
+        config['execution']['allow_real_build'] = True
+        config_path = workspace / 'config/layer3.build.yaml'
+        config_path.write_text(yaml.safe_dump(config), encoding='utf-8')
+    # The existing provider deliberately locates pinned weights at the code root.
+    # Everything it writes (cache, graph, indexes, reports) uses this private workspace.
+    result = graphrag(workspace, config_path=str(config_path.relative_to(workspace)), mode='build' if build else 'validate')
+    write(run_file(run, 'graph_result.json' if build else 'graph_validation.json'), result)
+    return result
+
+
+def validated_graph(root, run):
+    """Reject another run's graph, corrupt vectors, or a test/changed embedding provider."""
+    from layer3_graphrag.configuration import load_config
+    from layer3_graphrag.embeddings import create_provider
+    from layer3_graphrag.pipeline import load_artifacts
+    from layer3_graphrag.validate_inputs import validate_inputs
+    workspace = run / 'workspace'
+    config, _ = load_config(workspace)
+    snapshot = validate_inputs(workspace, config)
+    manifest, _, _ = load_artifacts(workspace, snapshot, config, create_provider(config['embeddings']))
+    return manifest
+
+
+def engine(root, run):
+    import importlib
+    from layer4_evaluation import live_execution
+    module = importlib.reload(live_execution)
+    module.BASE = run / 'layer5_results' if (run / 'layer5_results').exists() else run / 'workspace/outputs/layer4'
+    return module
+
+
+def projects_without_evidence(run, selected):
+    """Isolate missing input before batching; never classify title-only projects."""
+    base = run / 'workspace/outputs/layer2'
+    projects = pq.read_table(base / 'canonical/proyectos.parquet').to_pylist()
+    sections = pq.read_table(base / 'knowledge/source_sections.parquet').to_pylist()
+    fields = {}
+    for section in sections:
+        fields.setdefault(section['source_id'], {})[section['field_name']] = section['text_original'] or ''
+    unavailable = []
+    for project in projects:
+        if project['source_project_id'] not in selected:
+            continue
+        values = fields.get(project['project_id'], {})
+        if not any((values.get(f) or '').strip() for f in substantive_fields(values)):
+            unavailable.append(project['source_project_id'])
+    return unavailable
+
+
+def evaluation_settings(root, module):
+    """Read sealed semantics for a NEW run, not a historical closure execution.
+
+    Historical publication verification still uses the frozen closure checker.
+    New calls bind current executable bytes separately from the immutable rubric.
+    """
+    from layer4_evaluation.indicators.experiment_inputs import verify_hashes
+    settings = read(module.FROZEN)
+    manifest = read(module.FROZEN.with_name('closure.manifest.json'))
+    if sha(module.FROZEN) != manifest['plan_sha256']:
+        raise ValueError('Closure plan changed')
+    if (settings['discovery_version'] != module.gd.VERSION or settings['assessment_version'] != module.v3.VERSION
+            or len(settings['profiles']) != 48 or settings['compact_active'] or settings['proposal_v3_4_active']):
+        raise ValueError('Frozen configuration differs')
+    resources = {name: digest for name, digest in settings['source_hashes'].items() if not name.endswith('.py')}
+    verify_hashes(root, resources)
+    for iid, profile in settings['profiles'].items():
+        module.v3.check_rubric(profile, settings['rubrics'][iid])
+    return settings, resources
+
+
+def prepare_evaluation(root, run, selected):
+    from layer4_evaluation.indicators.context_budget import VERSION as context_version, prepare_contexts
+    state = check(root, run)
+    from layer4_evaluation.indicators.ollama_provider import configuration as llm_configuration
+    request_path = run_file(run, 'execution.json')
+    requested = read(request_path) if request_path.is_file() else {}
+    provider_config = llm_configuration(requested.get('llm', state['configuration'].get('llm')))
+    workspace = run / 'workspace'
+    projects = pq.read_table(workspace / 'outputs/layer2/canonical/proyectos.parquet').to_pylist()
+    if not selected:
+        if len(projects) > 2:
+            raise ValueError('Seleccionar uno o dos --project-id; IDs en preprocess/review.json o canonical')
+        selected = [p['source_project_id'] for p in projects]
+    if not 1 <= len(selected) <= 2 or len(set(selected)) != len(selected):
+        raise ValueError('Seleccionar uno o dos identificadores unicos')
+    chosen = [p for pid in selected for p in projects if p['source_project_id'] == pid]
+    if len(chosen) != len(selected):
+        raise ValueError('Identificador no presente en esta ejecucion')
+    quarantine=state.get('scope_quarantine',{})
+    blocked=[p for p in selected if p in quarantine.get('affected_projects',{}) or quarantine.get('primary_article_conflicts')]
+    if blocked:
+        write(run_file(run, 'evaluation_readiness.json'),dict(status='BLOCKED_ARTICLE_QUARANTINE',projects=blocked,
+            report=str(run/'preprocess/scope_validation.json'),note='Sin inferencias ni clasificacion; cuarentena conservada'))
+        raise ValueError('Cuarentena relevante para proyectos seleccionados: '+', '.join(blocked)+'; consultar preprocess/scope_validation.json')
+    sections = pq.read_table(workspace / 'outputs/layer2/knowledge/source_sections.parquet').to_pylist()
+    unavailable = []
+    for project in chosen:
+        fields = {s['field_name']: s['text_original'] or '' for s in sections if s['source_id'] == project['project_id']}
+        if not any(value.strip() for field, value in fields.items() if field in substantive_fields(fields)):
+            unavailable.append(dict(project_id=project['project_id'], source_project_id=project['source_project_id'],
+                status='NO_AUTHORIZED_SUBSTANTIVE_TEXT', record_source=project['record_source'], source_row=project['source_row']))
+    if unavailable:
+        write(run_file(run, 'evaluation_readiness.json'), dict(status='BLOCKED_NO_EVIDENCE', projects=unavailable,
+            note='Sin clasificacion de indicadores ni inferencias; conservar metadatos y aportar evidencia autorizada'))
+        raise ValueError('Proyectos seleccionados sin evidencia textual sustantiva autorizada: ' +
+            ', '.join(p['source_project_id'] for p in unavailable) + '; consultar evaluation_readiness.json. No se asigna un estado de cumplimiento')
+    validated_graph(root, run)
+    module = engine(root, run)
+    batch = batch_name(selected)
+    directory = module.BASE / batch
+    if directory.exists():
+        previous = module.check(directory)
+        if previous.get('runtime', {}).get('provider') != provider_config['provider']:
+            raise ValueError('Lote historico o proveedor/configuracion distinta: no reutilizar respuestas Codex como Qwen; crear otra ejecucion')
+        if (previous['runtime']['configuration'] == provider_config and previous.get('request_protocol') == context_version and
+                previous.get('source_hashes',{}).get('src/layer4_evaluation/indicators/context_budget.py') ==
+                sha(root/'src/layer4_evaluation/indicators/context_budget.py')):
+            return batch
+        changed = {key for key in provider_config if provider_config[key] != previous['runtime']['configuration'].get(key)}
+        if changed - {'num_ctx', 'num_predict', 'timeout_seconds', 'context_margin_tokens'}:
+            raise ValueError('Cambiar proveedor/modelo requiere otra ejecucion; no reutilizar respuestas de otra configuracion')
+        for other in module.BASE.glob('batch_*'):
+            if any((other / 'calls').rglob('*')) or read(other / 'cache.json'):
+                raise ValueError('Configuracion LLM distinta con llamadas/cache previos: conservar el run y crear otra ejecucion')
+        # Only a review with no inference may be replaced. Keep its exact bytes,
+        # authorization and metadata outside the active batch glob.
+        base = module.BASE.resolve()
+        archive = (base / 'review_versions' / batch / sha(directory / 'plan.json')).resolve()
+        if directory.is_symlink() or not directory.resolve().is_relative_to(base) or not archive.is_relative_to(base):
+            raise ValueError('Ruta de revision fuera de la ejecucion')
+        archive.parent.mkdir(parents=True, exist_ok=True)
+        directory.rename(archive)
+    for existing in module.BASE.glob('batch_*'):
+        if {p['siap_id'] for p in module.check(existing)['projects']} & set(selected):
+            raise ValueError('Proyecto ya preparado en otro lote; reanudar la seleccion original para no repetir inferencias')
+    settings, semantic_resources = evaluation_settings(root, module)
+    catalog_ids = {r['indicator_id'] for r in pq.read_table(workspace / 'outputs/layer2/canonical/indicadores.parquet').to_pylist()}
+    if catalog_ids != set(settings['profiles']):
+        raise ValueError('Catalogo GraphRAG y los 48 perfiles V3.3 no tienen los mismos IDs')
+    directory.mkdir(parents=True)
+    inputs = []
+    for p in chosen:
+        matches = [s for s in sections if s['source_id'] == p['project_id']]
+        fields = {f: next((s['text_original'] or '' for s in matches if s['field_name'] == f), '') for f in PROJECT_FIELDS}
+        fields.update({s['field_name']: s['text_original'] or '' for s in matches if s['field_name'].startswith('text__')})
+        field_provenance = {s['field_name']: dict(section_id=s['section_id'], text_hash_original=s['text_hash_original'],
+            source_file=p['record_source'], source_row=p['source_row'],
+            raw_sources=json.loads(s['provenance_json'])['layer1']) for s in matches}
+        inputs.append(dict(project_id=p['project_id'], siap_id=p['source_project_id'], identity_type='SIAP_PROPORCIONADO',
+            fields=fields, field_provenance=field_provenance, input_path=p['record_source'],
+            input_row=p['source_row'], missing_fields=[f for f, v in fields.items() if not v]))
+    review = dict(projects=inputs, llm=provider_config,
+        warnings=['Una solicitud por indicador, con fragmentos originales recuperados por GraphRAG. Se revisan los 48 indicadores.',
+                  'Presupuesto aproximado de entrada incluye esquema; las omisiones y limitaciones constan en context_selection.json. No se truncan citas.'], inference_performed=False)
+    graph_folder = workspace / 'outputs/layer3/publication/retrieval'
+    requests, context_report = prepare_contexts(inputs, settings['profiles'], settings['rubrics'], provider_config,
+        pq.read_table(graph_folder / 'source_indicator_candidates.parquet').to_pylist(),
+        pq.read_table(workspace / 'outputs/layer2/knowledge/source_chunks.parquet').to_pylist(), sections)
+    write(directory / 'context_selection.json', context_report)
+    review['context_selection'] = context_report
+    review['requests'] = requests
+    if (run/'preprocess/scope.json').is_file():
+        scoped=read(run/'preprocess/scope.json')
+        review['scope_notice']=dict(selected_counts=scoped['selected_counts'],identity_links=scoped['identity_links'],
+            unverified_production_records=len(scoped['unverified_production']),report=str(run/'preprocess/scope.json'),
+            note='Las asociaciones no corroboradas no aportan evidencia. Esto no demuestra ausencia de produccion.')
+    write(directory / 'review.json', review)
+    (directory / 'review.txt').write_text(json.dumps(review, ensure_ascii=False, indent=2), encoding='utf-8')
+    write(directory / 'cache.json', {})
+    source_hashes = dict(semantic_resources)
+    source_hashes.update(state['code_hashes'])
+    for path in (module.FROZEN, root / 'src/layer4_evaluation/live_execution.py', root / 'src/layer4_evaluation/indicators/ollama_provider.py', root / 'src/layer4_evaluation/indicators/context_budget.py', run_file(run, 'prepared_hashes.json'), workspace / 'outputs/layer3/publication/_manifest.json'):
+        source_hashes[path.relative_to(root).as_posix()] = sha(path)
+    plan = {k: settings[k] for k in ('profiles', 'rubrics', 'rules', 'budgets', 'observed_character_ratio', 'discovery_version', 'assessment_version')}
+    for path in (root/'src/layer4_evaluation/indicators/openai_provider.py',run_file(run, 'model.binding.json')):
+        if path.exists():source_hashes[path.relative_to(root).as_posix()]=sha(path)
+    plan.update(version='MANUAL_RAW_V3_3_OLLAMA_V1', execution_id=uuid.uuid4().hex, projects=inputs,
+        request_protocol=context_version, context_requests=requests,
+        isolate_indicator_errors=True,
+        token_limit_retries=provider_config['token_limit_retries'] if provider_config['provider']=='ollama' else 0,
+        runtime=dict(provider=provider_config['provider'], configuration=provider_config), requested_model=provider_config['model'],
+        maximum_calls=len(settings['profiles']) * len(inputs), total_token_reservation_cap=170000 * len(inputs), timeout_seconds=provider_config['timeout_seconds'],
+        source_hashes=source_hashes, territories=[], run_id=run.name)
+    plan['maximum_calls'] *= 1 + plan['token_limit_retries']
+    reservation=provider_config['num_ctx'] * (1 + plan['token_limit_retries'])
+    plan['budgets'] = dict(plan['budgets'], assessment_reservation=reservation,
+        assessment_postcall_review_threshold=reservation)
+    plan['total_token_reservation_cap'] = plan['maximum_calls'] * provider_config['num_ctx']
+    write(directory / 'plan.json', plan)
+    write(directory / 'manifest.json', dict(plan_sha256=sha(directory / 'plan.json'), files={n: sha(directory / n) for n in ('review.json', 'review.txt', 'cache.json', 'context_selection.json')}))
+    return batch
+
+
+def evaluate(root, run, selected, authorize=False, execute=False):
+    batch = prepare_evaluation(root, run, selected)
+    module = engine(root, run)
+    if not execute:
+        return dict(status='REVIEW_REQUIRED', review=str(module.BASE / batch / 'review.txt'), batch=batch, inference_calls=0)
+    return module.execute(SimpleNamespace(run=batch, authorize=authorize))
+
+
+def batch_name(selected):
+    return 'batch_' + __import__('hashlib').sha256(json.dumps(sorted(selected)).encode()).hexdigest()[:16]
+
+
+def evidence_sources(project, location):
+    field = location['field']
+    refs = project['field_provenance'][field]['raw_sources']
+    valid = [r for r in refs if field in r['field_mapping']]
+    if not valid:
+        raise ValueError('Evidencia sin campo RAW de origen: ' + field)
+    return '\n'.join(f'{r["record_source"]}; hoja={r.get("source_sheet")}; registro={r["source_row"]}; campo_RAW={r["field_mapping"][field]}; campo_preprocesado={field}' for r in valid)
+
+
+def export(root, run):
+    from layer4_evaluation.indicator_csv import TerritoryCodes, write_results
+    resolve_codes = TerritoryCodes(root)
+    codes_by_pair, csv_records = {}, {}
+    check(root, run)
+    module = engine(root, run)
+    if any(module.BASE.glob('batch_*')):
+        validated_graph(root, run)
+    rows, lineage, processed, selected, errors = [], [], set(), set(), []
+    coverage, valid_results=[], []
+    evaluated_projects, blocked_results = set(), set()
+    all_projects = {p['source_project_id'] for p in pq.read_table(run / 'workspace/outputs/layer2/canonical/proyectos.parquet').to_pylist()}
+    request = read(run_file(run, 'execution.json')) if (run_file(run, 'execution.json')).exists() else {}
+    target_projects = set(request['project_ids']) if request.get('selection') and request.get('project_ids') is not None else all_projects
+    if not target_projects or not target_projects <= all_projects:
+        raise ValueError('Seleccion de exportacion vacia o ausente del canonical')
+    for directory in sorted(module.BASE.glob('batch_*')):
+        plan, state = module.check(directory), module.verify_run(directory)
+        errors.extend(state['errors'])
+        for s in state['projects']:
+            p = next(p for p in plan['projects'] if p['project_id'] == s['project_id'])
+            if p['siap_id'] not in target_projects:
+                raise ValueError('Evaluacion fuera de la seleccion: no se publica un Excel mezclado')
+            selected.add(p['siap_id'])
+            if s['rows']:evaluated_projects.add(p['siap_id'])
+            if any(error.startswith(s['project_id']+':') for error in state['errors']):blocked_results.add(p['siap_id'])
+            if s['complete']:
+                processed.add(p['siap_id'])
+            valid_ids={r['indicator_id'] for r in s['rows']}
+            for iid in s['selected']:
+                status=('VALID' if iid in valid_ids else s['blocked_indicators'].get(iid) or
+                    s.get('context_limits',{}).get(iid) or 'PENDING')
+                coverage.append(dict(siap_id=p['siap_id'],indicator_id=iid,status=status,project_complete=s['complete']))
+            for row in s['rows']:
+                iid = row['indicator_id']
+                assessment = module.assessment_from_row(row)
+                if module.v3.validate(p['fields'], plan['profiles'][iid], assessment, plan['rubrics'][iid]):
+                    raise ValueError('Assessment guardado invalido')
+                valid_results.append(dict(row,siap_id=p['siap_id']))
+                locations = module.evidence_locations(p, assessment)
+                relevant = any(c['support'] in ('CLEAR', 'PARTIAL') and any(assessment['evidence'][i]['field'] in substantive_fields(p['fields']) for i in c['evidence_indices']) for c in assessment['criterion_assessments'])
+                if not relevant or not locations or not all(e['match_valid'] and e['section_id'] for e in locations):
+                    continue
+                value = row['confidence_raw_score']
+                if type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 100:
+                    raise ValueError('Confianza guardada invalida')
+                record = [p['siap_id'], iid, '\n\n'.join(e['text'] for e in locations),
+                    '\n'.join(evidence_sources(p, e) for e in locations),
+                    '\n'.join(f'section_id={e["section_id"]}; [{e["start"]},{e["end"]}); {e["coordinate_system"]}' for e in locations), value]
+                pair = (record[0], record[1])
+                previous = next((r for r in rows if (r[0], r[1]) == pair), None)
+                if previous and (previous != record or csv_records[pair]['estado_cumplimiento'] != row['decision']):
+                    raise ValueError('Resultados contradictorios entre lotes')
+                if not previous:
+                    rows.append(record)
+                    csv_records[pair] = dict(zip(COLUMNS, record), estado_cumplimiento=row['decision'])
+                    codes_by_pair[pair] = resolve_codes(p, assessment)
+                    lineage.append(dict(siap_id=p['siap_id'], indicator_id=iid, batch=directory.name, evidence=locations,
+                        raw_fields={e['field']: p['field_provenance'][e['field']]['raw_sources'] for e in locations}))
+    rows.sort(key=lambda r: (r[0], r[1]))
+    if any(isinstance(c, str) and (len(c) > 32767 or re.search(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', c)) for r in rows for c in r):
+        raise ValueError('Texto no representable en Excel; no se trunca evidencia')
+    book = openpyxl.Workbook()
+    ws = book.active
+    ws.title = 'RESULTADO_INDICADORES'
+    ws.append(COLUMNS)
+    for row in rows:
+        ws.append(row)
+        for cell in ws[ws.max_row][:5]:
+            cell.data_type = 's'
+            cell.number_format = '@'
+    territory = book.create_sheet('TERRITORIOS')
+    territory.append(TERRITORY_COLUMNS)
+    # No cross-experiment territorial lookup. New runs have no newly verified 4B bridge.
+    for sheet in book:
+        sheet.freeze_panes = 'A2'
+        sheet.auto_filter.ref = sheet.dimensions
+    output = run_file(run, 'resultado_indicadores.xlsx')
+    candidate = run_file(run, 'resultado_indicadores.pending.xlsx')
+    candidate.parent.mkdir(parents=True,exist_ok=True)
+    book.save(candidate)
+    book.close()
+    checkbook = openpyxl.load_workbook(candidate, read_only=True)
+    try:
+        if checkbook.sheetnames != ['RESULTADO_INDICADORES', 'TERRITORIOS'] or list(next(checkbook.worksheets[0].values)) != COLUMNS or list(next(checkbook.worksheets[1].values)) != TERRITORY_COLUMNS:
+            raise ValueError('Contrato Excel invalido')
+        for cells in checkbook.worksheets[0].iter_rows(min_row=2):
+            if any(c.data_type != 's' for c in cells[:5]) or cells[5].data_type != 'n':
+                raise ValueError('Tipos Excel invalidos')
+    finally:
+        checkbook.close()
+    candidate.replace(output)
+    csv_result = write_results(run, COLUMNS+['estado_cumplimiento'],
+                               [csv_records[(r[0], r[1])] for r in rows], codes_by_pair)
+    coverage_path=run/'resultados/estado_indicadores.json'
+    write(coverage_path,dict(status='COMPLETE' if target_projects==processed else 'PARTIAL',
+        note='VALID identifica evaluaciones verificadas; los demas estados no son evaluaciones completas.',indicators=coverage))
+    valid_path=run/'resultados/evaluaciones_validas.json'
+    write(valid_path,dict(status='COMPLETE' if target_projects==processed else 'PARTIAL',assessments=valid_results))
+    result = dict(status='COMPLETE' if target_projects == processed and not errors else 'PARTIAL', excel=str(output),
+        preprocessed_projects=len(all_projects), scoped_projects=len(target_projects), pending_projects=sorted(target_projects - processed), errors=errors,
+        selected_projects=len(selected), processed_projects=len(processed), represented_projects=len({r[0] for r in rows}),
+        relationships=len(rows), territories=0, excel_sha256=sha(output), power_bi_desktop_tested=False)
+    result['csv'] = csv_result
+    result['indicator_statuses']=str(coverage_path)
+    result['valid_results']=str(valid_path)
+    result['valid_assessments']=sum(c['status']=='VALID' for c in coverage)
+    result['blocked_indicators']=[c for c in coverage if c['status']!='VALID']
+    result['note'] = ('Analisis terminado sin candidatos con evidencia pertinente' if not rows and result['status'] == 'COMPLETE'
+        else 'Resultados parciales; consultar proyectos pendientes' if result['status'] != 'COMPLETE'
+        else 'Analisis completo de los proyectos preparados')
+    write(run_file(run, 'export.json'), result)
+    write(run_file(run, 'evidence_lineage.json'), lineage)
+    complete=sorted(processed)
+    partial=sorted(evaluated_projects-processed)
+    blocked=sorted((set(request.get('blocked_projects',{}))|blocked_results)-processed-set(partial))
+    write(run_file(run, 'runtime.manifest.json'),dict(run_id=run.name,provider=request.get('llm',{}).get('provider','ollama'),
+        model=request.get('llm',{}).get('model'),evaluation_contract=request.get('evaluation_contract'),
+        project_states=dict(complete=complete,partial=partial,blocked=blocked,
+            pending=sorted(target_projects-set(complete)-set(partial)-set(blocked)))))
+    from run_storage import archive_export
+    return archive_export(root,run,result)
+
+
+STAGES = ('preprocessing', 'knowledge', 'graphrag', 'evaluation', 'export')
+
+
+def find_run(root, runs, name):
+    from run_paths import find_run as resolve_run
+    return resolve_run(root,runs,name)
+
+
+def selected_configuration(root, config_path, source=None, input_file=None, delivery=None):
+    config, raw, runs = configuration(root, config_path)
+    if sum(value is not None for value in (source, input_file, delivery)) > 1:
+        raise ValueError('Elegir --source, --file o --delivery; no combinarlos')
+    if input_file is not None or delivery is not None:
+        from layer2_processing.preprocessing.adapters import source_files
+        intake = (root / 'data/layer1_sources').resolve()
+        value = input_file if input_file is not None else delivery
+        if not str(value).strip():
+            raise ValueError('Archivo o entrega vacios')
+        candidate = Path(value)
+        if not candidate.is_absolute():
+            if candidate.parts[:2] == ('data', 'layer1_sources'):
+                candidate = root / candidate
+            elif delivery is not None and candidate.parts[0] != 'incoming':
+                candidate = intake / 'incoming' / candidate
+            else:
+                candidate = intake / candidate
+        target = candidate.resolve()
+        if candidate.is_symlink() or not any(target.is_relative_to(intake / base) for base in ('base', 'incoming')):
+            raise ValueError('Seleccionar originales dentro de base o incoming')
+        if delivery is not None and (not target.is_relative_to(intake / 'incoming') or target == intake / 'incoming' or not target.is_dir()):
+            raise ValueError('--delivery requiere una entrega existente dentro de incoming')
+        if input_file is not None and not target.is_file():
+            raise ValueError('--file requiere un archivo existente')
+        primary = [target] if input_file is not None else source_files(target)
+        if not primary:
+            raise ValueError('Entrega sin archivos para procesar')
+        config['selected_input_paths'] = sorted(p.relative_to(intake).as_posix() for p in primary)
+        config['source_paths'] = list(config['selected_input_paths'])
+        # Definitions of indicators are supplied separately by prepare_files.
+        # Independent inputs never gain documentary evidence from the base.
+        config['documentary_source_policy'] = 'SELECTED_ONLY_V1'
+        config['raw_base'] = intake.relative_to(root).as_posix()
+        config.pop('source_prefix', None)
+        raw = intake
+    if source is not None:
+        intake = root / 'data/layer1_sources'
+        if source == 'all':
+            raw = intake
+        else:
+            raw = within(intake, source)
+            if source not in ('base', 'incoming') and not raw.is_relative_to(intake / 'incoming'):
+                raise ValueError('Seleccionar all, base, incoming o incoming/<entrega>')
+        config['raw_base'] = raw.relative_to(root).as_posix()
+    if not raw.is_dir():
+        raise ValueError('Carpeta de fuentes inexistente: ' + str(raw))
+    prefix = raw.relative_to(root / 'data/layer1_sources').as_posix()
+    if prefix != '.':
+        config['source_prefix'] = prefix + '/'
+    return config, raw, runs
+
+
+@timed('preparacion')
+def verify_sources(root, config_path='config/pipeline_manual.json', source=None, input_file=None, delivery=None):
+    """Read-only intake/configuration inspection. No model or provider calls."""
+    from layer2_processing.preprocessing.adapters import discover_sources
+    config, raw, _ = selected_configuration(root, config_path, source, input_file, delivery)
+    from layer4_evaluation.indicators.ollama_provider import configuration as llm_configuration
+    llm = llm_configuration(config.get('llm'))
+    preview = discover_sources(root, config, raw)
+    missing = []
+    for path in (config['reference_catalog'], 'config/layer1.yaml', 'config/layer2.yaml', 'config/layer3.yaml'):
+        if not within(root, path).is_file():
+            missing.append(path)
+    for number in (2, 3, 4):
+        path = layer_config(root, number)
+        if path.is_file():
+            from layer2_processing.preprocessing.runtime import read_config
+            read_config(path)
+    return dict(status=preview['status'] if not missing else 'BLOCKED',
+                discovery_status=preview['status'], source=str(raw), missing=missing, llm=llm,
+                files=[{k: v for k, v in item.items() if k != 'records'} for item in preview['files']],
+                note='Verificacion estructural; identidad, modelos, proveedor y publicaciones se validan en sus etapas')
+
+
+def execution_status(root, config_path='config/pipeline_manual.json', run_id=None):
+    _, _, runs = configuration(root, config_path)
+    if not run_id:
+        entries = {}
+        from run_paths import list_runs
+        for location in list_runs(root,runs):
+            path=run_file(location,'run.json')
+            if path.exists():
+                state = read(path)
+                entries[str(location)] = dict(run_id=location.name, checkpoint=state.get('status','UNKNOWN'),
+                    location=str(location), progress=read(run_file(location,'progress.json')) if run_file(location,'progress.json').exists() else None)
+        return dict(status='INVENTORY', runs=list(entries.values()), note='Listado; usar status --run-id para verificar integridad')
+    run = find_run(root, runs, run_id)
+    initial = read(run_file(run, 'run.json')) if run_file(run, 'run.json').exists() else {}
+    if initial.get('status') in ('REGISTERED','PREPARING','FAILED'):
+        progress = read(run_file(run, 'progress.json'))
+        return dict(status=progress['status'], run_id=run.name, location=str(run),
+            checkpoint=initial['status'], checkpoint_available=False, progress=progress,
+            execution=read(run_file(run, 'execution.json')),
+            failure=read(run_file(run, 'failure.json')) if run_file(run, 'failure.json').exists() else None)
+    state = check(root, run)
+    stages = dict(preprocessing='VERIFIED', knowledge='VERIFIED' if state['status'] == 'PREPARED' else 'PENDING',
+                  graphrag='PENDING', evaluation='PENDING', export='PENDING')
+    batches = {}
+    publication = run / 'workspace/outputs/layer3/publication/_manifest.json'
+    if publication.exists():
+        validated_graph(root, run)
+        stages['graphrag'] = 'VERIFIED'
+        module = engine(root, run)
+        for directory in sorted(module.BASE.glob('batch_*')):
+            verified = module.verify_run(directory)
+            batches[directory.name] = module.summary(verified)
+        if batches:
+            stages['evaluation'] = 'VERIFIED_SELECTED_BATCHES' if all(b['status'] == 'COMPLETE' for b in batches.values()) else 'PARTIAL_OR_BLOCKED'
+    if (run_file(run, 'export.json')).exists():
+        saved = read(run_file(run, 'export.json'))
+        if sha(run_file(run, 'resultado_indicadores.xlsx')) != saved['excel_sha256']:
+            raise ValueError('Excel publicado modificado')
+        stages['export'] = saved['status'] + '_HASH_VERIFIED'
+    return dict(status='VERIFIED', run_id=run.name, location=str(run), stages=stages, evaluations=batches,
+                sources=state['raw_path'], progress=read(run_file(run, 'progress.json')) if (run_file(run, 'progress.json')).exists() else None,
+                limitations=['Evaluacion actual: PROJECT; ARTICLE pendiente', 'Exportador actual: sin puente territorial nuevo verificado'])
+
+
+def scope_projects(root, run, selection, requested=None):
+    """Scope results using canonical identities and explicit field provenance only."""
+    folder = run / 'workspace/outputs/layer2/canonical'
+    rows = pq.read_table(folder / 'proyectos.parquet').to_pylist()
+    selected = [row['source_project_id'] for row in rows]
+    if selection['mode'] in ('file', 'delivery'):
+        from layer2_processing.checkpoints import resolve
+        files = {resolve(root, 'data/layer1_sources/' + name).resolve() for name in selection['files']}
+        def originates(row):
+            refs = json.loads(row.get('provenance_json', '[]'))
+            return any(resolve(root, ref['record_source']).resolve() in files for ref in refs)
+        matched = {row['project_id'] for row in rows if originates(row)}
+        membership = folder / 'proyecto_investigador.parquet'
+        if membership.is_file():
+            matched.update(row['project_id'] for row in pq.read_table(membership).to_pylist() if originates(row))
+        selected = [row['source_project_id'] for row in rows if row['project_id'] in matched]
+    if requested is not None:
+        missing = set(requested) - set(selected)
+        if missing:
+            raise ValueError('Proyectos no presentes en las fuentes seleccionadas: ' + ', '.join(sorted(missing)))
+        return list(requested)
+    if not selected:
+        raise ValueError('Seleccion sin PROJECT o relaciones institucionales explicitas con proyectos. ARTICLE no tiene evaluacion implementada; no se inventan asociaciones')
+    return selected
+
+
+def review_summary(module, directory):
+    plan = module.check(directory)
+    return dict(review=str(directory / 'review.txt'),
+                projects=[p['siap_id'] for p in plan['projects']], indicators=len(plan['profiles']),
+                llm=plan.get('runtime', {}), maximum_calls=plan['maximum_calls'],
+                review_sha256=sha(directory / 'review.txt'),
+                note='Revisar review.txt y autorizar solo estos textos. No se muestran textos institucionales en consola.')
+
+
+def execution_approval(root, run, config, metadata, model_binding, target, confirm):
+    """One exact approval for new execution and identical resumptions, before work."""
+    import getpass
+    from layer2_processing.pipeline import code_hashes
+    from layer2_processing.preprocessing.project_selection import digest
+    scope = dict(version='RUN_APPROVAL_V1',run_id=run.name,project_ids=metadata['project_ids'],
+        sources=metadata['sources'],llm=model_binding['llm'],contract=model_binding.get('contract'),
+        configuration={k:v for k,v in config.items() if k not in ('processing_scope','project_selection')},
+        code_and_configuration=code_hashes(root),through=target)
+    path=run/'estado/run.authorization.json'
+    fingerprint=digest(scope)
+    if path.exists():
+        saved=read(path)
+        if saved.get('authorized') is True and saved.get('scope_sha256')==fingerprint and digest(saved['scope'])==fingerprint:
+            verify_execution_approval(root,saved)
+            return saved
+    llm=scope['llm'];external=llm['provider']=='openai'
+    summary=dict(run_id=run.name,provider=llm['provider'],model=llm['model'],project_count=len(scope['project_ids']),
+        sources=list(scope['sources']),contract=scope['contract'],stages=list(STAGES[:STAGES.index(target)+1]),
+        destination='OpenAI API: '+llm.get('api',{}).get('base_url','https://api.openai.com/v1') if external else llm.get('endpoint'),
+        budget_usd=llm.get('api',{}).get('budget_usd') if external else None,
+        privacy='Autoriza transmitir los textos seleccionados a OpenAI y su presupuesto.' if external else
+            'Autoriza ETL, embeddings locales y evaluacion completa de los textos seleccionados mediante Ollama.',
+        indicators_per_project=48,through=target,scope_sha256=fingerprint,
+        note='Una autorizacion para todo el alcance. Se conservan revisiones, registros por lote y checkpoints.')
+    if confirm is None or confirm('run',summary) is not True:return None
+    result=dict(authorized=True,scope=scope,scope_sha256=fingerprint,
+        authorized_at=datetime.now(timezone.utc).isoformat(),authorized_by=getpass.getuser())
+    verify_execution_approval(root,result)
+    return result
+
+
+def verify_execution_approval(root, approval):
+    from layer2_processing.preprocessing.project_selection import digest
+    scope=approval['scope']
+    if approval.get('authorized') is not True or digest(scope)!=approval['scope_sha256']:
+        raise ValueError('Autorizacion de ejecucion corrupta; se requiere nueva revision')
+    for name,expected in (scope['sources'] | scope['code_and_configuration']).items():
+        if sha(root/name)!=expected:
+            raise ValueError('Alcance autorizado modificado: '+name+'; detener y revisar antes de autorizar otra ejecucion')
+
+
+@measured_pipeline
+def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=None, run_id=None,
+                     stage=None, through=None, resume=False, approve_build=False, authorize=False,
+                     project_ids=None, notify=None, dataset=None, input_file=None, delivery=None, confirm=None,
+                     limit=None, all_projects=False, seed=42, dry_run=False, selection_manifest=None,confirm_all=False,
+                     single_authorization=False):
+    """Central reusable orchestration API. Layer checkpoints remain authoritative."""
+    root = Path(root).resolve()
+    sampling = limit is not None or all_projects or selection_manifest is not None
+    if sampling or dry_run:
+        if resume or stage or dataset or (sampling and project_ids is not None):
+            raise ValueError('Muestreo/dry-run requiere una ejecucion nueva por fuente, sin otros selectores; reanudar conserva los IDs')
+        from layer2_processing.preprocessing.project_selection import select
+        sampled_source = source or ('base' if input_file is None and delivery is None else None)
+        chosen_config, chosen_raw, _ = selected_configuration(root, config_path, sampled_source, input_file, delivery)
+        metadata = select(root, chosen_raw, chosen_config, limit=limit, all_projects=all_projects,
+                          seed=seed, project_ids=project_ids,
+                          replay=within(root, selection_manifest) if selection_manifest else None)
+        source = sampled_source
+        project_ids = metadata['project_ids']
+        if all_projects and not dry_run:
+            from evaluation_contracts import evaluable_features
+            from model_access import label
+            from experiment_runtime import options
+            eligible=evaluable_features(root,chosen_raw,chosen_config,metadata['project_features'])
+            excluded=[pid for pid in project_ids if pid not in eligible]
+            summary=dict(model=label(root,options.get().get('provider')),total_projects=len(project_ids),
+                evaluable_projects=len(eligible),blocked_projects=len(excluded),blocked_project_ids=excluded,
+                reason='NO_AUTHORIZED_SUBSTANTIVE_TEXT',results='outputs/runs/<proveedor>/<run_id>/resultados',
+                history='outputs/historico/<proveedor>/<run_id>',budget_usd=options.get().get('budget_usd'),
+                warning='Toda la base puede tardar horas o dias. OpenAI puede generar costos; se conserva su proteccion presupuestaria. No se evaluan proyectos sin texto autorizado.')
+            metadata['eligibility_summary']=summary
+            if notify:notify(dict(status='ALL_PROJECTS_REVIEW',stage='selection',location=str(chosen_raw),summary=summary))
+            if not single_authorization and not confirm_all and (confirm is None or confirm('all',summary) is not True):
+                return dict(status='REVIEW_REQUIRED',summary=summary,inference_calls=0,
+                    next_step='Confirmar expresamente toda la base; CLI no interactiva requiere --confirm-all. No se inicio procesamiento.')
+        if dry_run:
+            through = 'preprocessing'
+    if project_ids is not None and (not project_ids or any(not isinstance(p, str) or not p.strip() for p in project_ids) or len(project_ids) != len(set(project_ids))):
+        raise ValueError('Seleccionar identificadores institucionales unicos y no vacios')
+    if project_ids is not None and delivery is not None and not sampling:
+        raise ValueError('Elegir proyectos o entrega como modalidad de seleccion; --file admite --projects')
+    if dataset is not None and dataset not in ('prueba_controlada', 'prueba_en_vivo'):
+        raise ValueError('Conjunto de pruebas desconocido')
+    if stage is not None and stage not in STAGES or through is not None and through not in STAGES:
+        raise ValueError('Etapa desconocida')
+    active_config, _, runs = configuration(root, config_path)
+    observe_projects(project_ids,active_config.get('llm',{}).get('model',''))
+    if resume and not run_id:
+        raise ValueError('Reanudar requiere --run-id')
+    name = run_id or ('run_' + datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S_%f'))
+    run = find_run(root, runs, name)
+    from experiment_runtime import binding
+    model_binding = binding(root, run, active_config.get('llm'))
+    active_config = dict(active_config, llm=model_binding['llm'])
+    current = None
+    approval = None
+    target = stage or through or 'export'
+    def quoted(value):
+        return "'" + str(value).replace("'", "''") + "'"
+    config_argument = ' --config ' + quoted(config_path) if config_path != 'config/pipeline_manual.json' else ''
+    restart = 'python run.py run' + config_argument
+    if input_file is not None:
+        restart += ' --file ' + quoted(input_file)
+    elif delivery is not None:
+        restart += ' --delivery ' + quoted(delivery)
+    else:
+        if source is not None:
+            restart += ' --source ' + quoted(source)
+    if project_ids:
+        restart += ' --projects ' + quoted(','.join(project_ids))
+
+    def progress(status, **detail):
+        checkpoint = False
+        if (run_file(run, 'run.json')).exists():
+            try:
+                checkpoint = read(run_file(run, 'run.json'))['status'] in ('PREPROCESSED', 'PREPARED')
+            except (ValueError, KeyError):
+                pass
+        value = dict(status=status, run_id=name, location=str(run), stage=current,
+                     updated_at=datetime.now(timezone.utc).isoformat(),
+                     resume_command=('python run.py resume --run-id ' + name + config_argument if run.is_dir() else restart) + ' --through ' + target,
+                     checkpoint_available=checkpoint, **detail)
+        if run.is_dir():
+            write(run_file(run, 'progress.json'), value)
+        if notify:
+            notify(value)
+        return value
+
+    with lock(runs):
+        if run.exists() and not resume and not stage:
+            raise ValueError('Run ID ya existe; usar resume --run-id ' + name + ' o elegir otro ID')
+        if resume and not run.exists():
+            raise ValueError('Run no encontrado: ' + name)
+        try:
+            from run_storage import reopen
+            reopen(run)
+            if resume:(run_file(run, 'stop.request.json')).unlink(missing_ok=True)
+            previous_request = read(run_file(run, 'execution.json')) if (run_file(run, 'execution.json')).exists() else {}
+            initial = read(run_file(run, 'run.json')) if run_file(run, 'run.json').exists() else {}
+            registered = initial.get('status') == 'REGISTERED'
+            if (resume or initial) and not registered:
+                state = check(root, run)
+                if dataset is not None and dataset != state['dataset']:
+                    raise ValueError('Conjunto de pruebas distinto del checkpoint')
+                config = state['configuration']
+                from layer2_processing.checkpoints import resolve
+                raw = resolve(root, state['raw_path'])
+                if any(value is not None for value in (source, input_file, delivery)):
+                    selected, selected_raw, _ = selected_configuration(root, config_path, source, input_file, delivery)
+                    if 'processing_scope' in config:
+                        selected['processing_scope']=config['processing_scope']
+                    # Data settings stay frozen; LLM changes get their own review
+                    # and pre-dispatch compatibility checks in prepare_evaluation.
+                    selected_data = {k:v for k,v in selected.items() if k != 'llm'}
+                    stored_data = {k:v for k,v in config.items() if k != 'llm'}
+                    if selected_raw.resolve() != raw.resolve() or not same_configuration(root, selected_data, stored_data):
+                        raise ValueError('Fuentes/configuracion distintas; crear una ejecucion nueva')
+                dataset = state['dataset']
+            else:
+                if stage and stage != 'preprocessing':
+                    raise ValueError('La etapa requiere un checkpoint previo y --run-id')
+                if registered:
+                    if project_ids is not None and project_ids != previous_request['project_ids']:
+                        raise ValueError('Seleccion de proyectos distinta; reanudar los IDs registrados')
+                    project_ids = previous_request['project_ids']
+                    if not any(value is not None for value in (source,input_file,delivery)):
+                        source = previous_request.get('source')
+                        input_file = previous_request.get('input_file')
+                        delivery = previous_request.get('delivery')
+                    dataset = initial['dataset']
+                # Registration precedes source discovery and selection validation.
+                # REGISTERED is not an ETL checkpoint and is safe to retry on resume.
+                if dataset is None and project_ids is not None and source is None and input_file is None and delivery is None:
+                    source = 'base'
+                if dataset is not None and dataset != 'raw':
+                    config, _, runs = configuration(root, config_path)
+                    raw = root / 'tests/fixtures' / dataset
+                else:
+                    config, raw, runs = selected_configuration(root, config_path, source, input_file, delivery)
+                if registered and (initial['raw_path'] != raw.relative_to(root).as_posix() or
+                        not same_configuration(root,initial['configuration'],dict(config,llm=model_binding['llm']))):
+                    raise ValueError('Fuentes/configuracion distintas del registro inicial')
+                if not registered:
+                    if single_authorization and not dry_run:
+                        from layer2_processing.preprocessing.project_selection import select
+                        approval_metadata = metadata if sampling else select(root,raw,config,seed=seed,
+                            project_ids=project_ids,all_projects=project_ids is None)
+                        approval=execution_approval(root,run,dict(config,llm=model_binding['llm']),
+                            approval_metadata,model_binding,target,confirm)
+                        if approval is None:return dict(status='CANCELLED',inference_calls=0,run_id=name)
+                    run.mkdir(parents=True, exist_ok=False)
+                    write(run_file(run,'model.binding.json'), model_binding)
+                    write(run_file(run,'execution.json'), dict(through=target, project_ids=project_ids,
+                        llm=model_binding['llm'], evaluation_contract=model_binding.get('contract'),
+                        source=source,input_file=input_file,delivery=delivery))
+                    write(run_file(run,'run.json'), dict(status='REGISTERED',run_id=name,dataset=dataset or 'raw',
+                        raw_path=raw.relative_to(root).as_posix(),configuration=dict(config,llm=model_binding['llm']),
+                        started_at=datetime.now(timezone.utc).isoformat()))
+                    if approval:write(run/'estado/run.authorization.json',approval)
+                current = 'preparation'
+                progress('REGISTERED', message='Run registrado; validando fuentes y dependencias antes del ETL')
+                from layer4_evaluation.indicators.performance import activate_run_measurement
+                activate_run_measurement()
+                if dataset is not None and dataset != 'raw':
+                    from layer2_processing.preprocessing.adapters import discover_sources
+                    preview = discover_sources(root, config, raw)
+                    preview['discovery_status'] = preview['status']
+                else:
+                    preview = verify_sources(root, config_path, source, input_file, delivery)
+                dataset = dataset or 'raw'
+            target = stage or through or previous_request.get('through', 'export')
+            saved_ids = previous_request.get('project_ids')
+            if saved_ids is not None and project_ids is not None and project_ids != saved_ids:
+                raise ValueError('Seleccion de proyectos distinta; reanudar los lotes originales')
+            project_ids = saved_ids if project_ids is None else project_ids
+            selection = previous_request.get('selection') or dict(
+                mode='file' if input_file is not None else 'delivery' if delivery is not None else 'projects' if project_ids is not None else 'source',
+                files=config.get('selected_input_paths', []))
+            if selection['mode'] in ('file', 'delivery') and (
+                    not selection['files'] or set(config.get('source_paths', [])) != set(selection['files'])):
+                raise ValueError('Checkpoint con fuentes externas a la seleccion independiente; conservarlo y crear otra ejecucion con --file o --delivery')
+            if previous_request.get('selection') and project_ids is not None and (input_file is not None or delivery is not None):
+                # Saved project IDs are the canonical resolution of the same file/delivery.
+                if selection['mode'] not in ('file', 'delivery'):
+                    raise ValueError('Modalidad distinta de la ejecucion original')
+            request = dict(through=target, project_ids=project_ids, selection=selection,
+                llm=model_binding['llm'], evaluation_contract=model_binding.get('contract'),
+                source=source,input_file=input_file,delivery=delivery)
+            config['llm'] = model_binding['llm']
+            if single_authorization and not dry_run and approval is None:
+                from layer2_processing.preprocessing.project_selection import select
+                approval_metadata=config.get('project_selection') or select(root,raw,config,seed=seed,
+                    project_ids=project_ids,all_projects=project_ids is None)
+                approval=execution_approval(root,run,config,approval_metadata,model_binding,target,confirm)
+                if approval is None:return progress('REVIEW_REQUIRED',message='Autorizar el alcance completo antes de continuar')
+                write(run/'estado/run.authorization.json',approval)
+                from layer4_evaluation.indicators.performance import activate_run_measurement
+                activate_run_measurement()
+            if model_binding['llm']['provider']=='openai' and target in ('evaluation','export'):
+                from model_access import api_key
+                if not api_key(root):raise ValueError('API_KEY_MISSING: configurar clave antes de ejecutar API')
+            prepared = read(run_file(run,'run.json')).get('status') != 'REGISTERED'
+            if not prepared and (project_ids is not None or selection['mode'] in ('file','delivery')):
+                config['processing_scope']=dict(mode=selection['mode'],project_ids=project_ids,
+                    primary_files=config.get('selected_input_paths',[]))
+                if model_binding.get('contract') and not (sampling or dry_run):
+                    from layer2_processing.preprocessing.project_selection import select
+                    metadata=select(root,raw,config,project_ids=project_ids,seed=model_binding['contract'].get('seed',42))
+                    # Revalidate after the menu's confirmation, against fresh source
+                    # fingerprints, without changing the frozen IDs or resampling.
+                    from evaluation_contracts import load, catalog_hash
+                    from autonomous_execution.lifecycle import safe_id
+                    contract = model_binding['contract']
+                    safe_id(contract['contract_id'])
+                    value = load(root/'data/contratos'/f"{contract['contract_id']}.v{int(contract['version'])}.json")
+                    if (value['sha256'] != contract['sha256'] or
+                            value['project_ids'] != contract['mandatory_project_ids'] or
+                            contract['mandatory_project_ids'] + contract['additional_project_ids'] != project_ids or
+                            contract['sources'] != metadata['sources'] or
+                            contract['catalog_sha256'] != catalog_hash(root)):
+                        raise ValueError('Contrato, fuentes o catalogo cambiaron tras la seleccion; no se inicia el procesamiento')
+                if sampling or dry_run or model_binding.get('contract'):
+                    config['project_selection'] = metadata
+            sequence = [stage] if stage else list(STAGES[:STAGES.index(target) + 1])
+            if not prepared:
+                files = preview.get('files', [])
+                primary = set(config.get('selected_input_paths', [item['file'] for item in files]))
+                summary = dict(
+                    mode=selection['mode'], selected_files=[item['file'] for item in files if item['file'] in primary],
+                    supporting_files=[item['file'] for item in files if item['file'] not in primary],
+                    input_rows=sum(item.get('record_count', 0) for item in files if item['file'] in primary),
+                    records_by_domain={domain:sum(item.get('record_count', 0) for item in files if item['file'] in primary and item.get('domain') == domain)
+                        for domain in sorted({item.get('domain', 'pending') for item in files if item['file'] in primary})},
+                    requested_projects=project_ids, stages=sequence,
+                    note='Filas disponibles para lectura e indices. El ETL acota proyectos/produccion y conserva testigos de identidad: preprocess/scope.json. Evaluacion/Excel solo incluyen la seleccion. ARTICLE no evaluado; TERRITORIOS queda sin filas verificadas de este run.')
+                request['input_summary'] = summary
+                progress('INPUT_SUMMARY', summary=summary)
+                if preview['status'] != 'READY_FOR_VALIDATION' or preview['discovery_status'] != 'READY_FOR_VALIDATION':
+                    details = '; '.join(item['file']+': '+'; '.join(str(d) for d in item.get('diagnostics', []))
+                                        for item in preview.get('files', []) if item['status'] != 'READY_FOR_VALIDATION')
+                    raise ValueError('Fuentes pendientes/invalidas: '+details)
+            else:
+                summary = dict(previous_request.get('input_summary', {}), stages=sequence, resumed=True,
+                               project_count=len(project_ids) if project_ids is not None else None)
+                if not summary.get('selected_files'):
+                    summary.update(selected_files=config.get('selected_input_paths', config.get('source_paths', [])),
+                        canonical_counts=state.get('counts'),
+                        note='Checkpoint verificado; las fuentes/IDs originales se conservan. ARTICLE y territorios por ejecucion mantienen sus limitaciones.')
+                request['input_summary'] = summary
+                progress('INPUT_SUMMARY', summary=summary)
+            for current in sequence:
+                if approval:verify_execution_approval(root,approval)
+                if run_file(run,'stop.request.json').exists():
+                    return progress('INTERRUPTED',message='Detencion solicitada; checkpoints conservados')
+                if resume and not registered and ((current=='preprocessing' and state['status'] in ('PREPROCESSED','PREPARED')) or
+                        (current=='knowledge' and state['status']=='PREPARED')):
+                    progress('STAGE_REUSED')
+                    continue
+                if resume and current=='graphrag' and (run/'workspace/outputs/layer3/publication/_manifest.json').exists():
+                    validated_graph(root,run)
+                    progress('STAGE_REUSED')
+                    continue
+                # Persist the requested target before a resumable stage can fail.
+                if run.is_dir():
+                    if not (run_file(run, 'model.binding.json')).exists():write(run_file(run, 'model.binding.json'), model_binding)
+                    write(run_file(run, 'execution.json'), request)
+                progress('RUNNING')
+                if (current in ('knowledge', 'graphrag', 'evaluation') and (
+                        selection['mode'] == 'projects' or selection['mode'] == 'file' and project_ids is not None) or
+                        current == 'evaluation' and selection['mode'] in ('file', 'delivery')) and not request.get('scope_resolved'):
+                    project_ids = scope_projects(root, run, selection, project_ids)
+                    request.update(project_ids=project_ids, scope_resolved=True)
+                    write(run_file(run, 'execution.json'), request)
+                    progress('SCOPE_RESOLVED', project_count=len(project_ids), projects=project_ids)
+                if current == 'preprocessing':
+                    prepare(root, run, raw, dataset, config, through='preprocessing')
+                    if not (run_file(run, 'model.binding.json')).exists():write(run_file(run, 'model.binding.json'), model_binding)
+                    check(root, run)
+                    if (run/'preprocess/scope.json').is_file():
+                        planned=read(run/'preprocess/scope.json')
+                        progress('INPUT_SUMMARY',summary=dict({k:planned[k] for k in ('selected_counts','identity_context_records','projects')},
+                            identity_links=planned['identity_links'],unverified_production_records=len(planned['unverified_production']),
+                            report=str(run/'preprocess/scope.json')))
+                elif current == 'knowledge':
+                    knowledge(root, run)
+                    if check(root, run)['status'] != 'PREPARED':
+                        raise ValueError('Conocimiento no preparado')
+                elif current == 'graphrag':
+                    if not (run / 'workspace/outputs/layer3/publication/_manifest.json').exists() and not approve_build and not approval:
+                        write(run_file(run, 'execution.json'), request)
+                        approved = confirm is not None and confirm('build', dict(review=str(run / 'preprocess/review.json'),
+                            note='Construir embeddings locales BGE-M3 e indices con las fuentes de apoyo; no se descargan modelos')) is True
+                        if not approved:
+                            return progress('BUILD_APPROVAL_REQUIRED', message='Revisar preprocess/review.json y autorizar embeddings locales')
+                    graph(root, run, build=True)
+                    validated_graph(root, run)
+                else:
+                    check(root, run)
+                    validated_graph(root, run)
+                    if current == 'evaluation':
+                        from layer4_evaluation.indicators.ollama_provider import configuration as llm_configuration
+                        request['llm'] = llm_configuration(active_config.get('llm'))
+                        selected = scope_projects(root, run, selection, project_ids)
+                        if not selected or len(selected) != len(set(selected)):
+                            raise ValueError('Evaluacion actual requiere proyectos con IDs unicos; ARTICLE no esta implementado')
+                        request['project_ids'] = selected
+                        quarantine=check(root,run).get('scope_quarantine',{})
+                        blocked={p:quarantine.get('affected_projects',{}).get(p,quarantine.get('primary_article_conflicts',[]))
+                            for p in selected if p in quarantine.get('affected_projects',{}) or quarantine.get('primary_article_conflicts')}
+                        unavailable = projects_without_evidence(run, selected)
+                        for pid in unavailable:
+                            blocked.setdefault(pid, []).append('NO_AUTHORIZED_SUBSTANTIVE_TEXT')
+                        write(run_file(run, 'evaluation_readiness.json'), dict(
+                            status='PARTIAL' if blocked else 'READY', blocked_projects=blocked,
+                            projects_without_evidence=unavailable,
+                            note='No se infieren indicadores ni cumplimiento de proyectos sin texto sustantivo; no se sustituyen IDs'))
+                        request['blocked_projects']=blocked
+                        write(run_file(run, 'execution.json'), request)
+                        eligible=[p for p in selected if p not in blocked]
+                        if blocked:
+                            progress('INPUT_SUMMARY',summary=dict(blocked_projects=blocked,eligible_projects=eligible,
+                                report=str(run_file(run, 'evaluation_readiness.json')),note='No se evaluan proyectos bloqueados ni se asignan estados de cumplimiento; el resultado del conjunto permanecera parcial'))
+                        if not eligible:
+                            return progress('BLOCKED_INPUT',blocked_projects=blocked,report=str(run_file(run, 'evaluation_readiness.json')))
+                        module = engine(root, run)
+                        batches = [eligible[i:i+2] for i in range(0, len(eligible), 2)]
+                        reviews, pending, authorized_batches = [], [], set()
+                        completed_projects=completed_indicators=0
+                        for batch in batches:
+                            directory = module.BASE / batch_name(batch)
+                            review_path = directory / 'review.txt'
+                            reviewed = sha(review_path) if review_path.is_file() else None
+                            result = evaluate(root, run, batch)
+                            verified = module.verify_run(directory)
+                            project_states(verified)
+                            if verified.get('blocking_errors',verified['errors']):
+                                raise ValueError('Evaluacion bloqueada: ' + '; '.join(verified['errors']))
+                            if verified['status']=='COMPLETE':
+                                completed_projects+=len(verified['projects'])
+                                completed_indicators+=sum(len(p.get('rows',[])) for p in verified['projects'])
+                            if verified['status'] != 'COMPLETE':
+                                if approval:
+                                    authorized_batches.add(batch_name(batch))
+                                elif reviewed != sha(review_path) or not authorize and not (directory / 'authorization.json').exists():
+                                    review_hash = sha(review_path)
+                                    approved = confirm is not None and confirm('llm', review_summary(module, directory)) is True
+                                    if sha(review_path) != review_hash:
+                                        raise ValueError('La revision cambio durante la autorizacion; revisar nuevamente')
+                                    if approved:
+                                        authorized_batches.add(batch_name(batch))
+                                    else:
+                                        reviews.append(result['review'])
+                                pending.append(batch)
+                        if reviews:
+                            return progress('REVIEW_REQUIRED', reviews=reviews,
+                                message='Leer los reviews; reanudar con --authorize-llm para autorizar el proveedor registrado en el run')
+                        for batch in pending:
+                            if approval:verify_execution_approval(root,approval)
+                            if (run_file(run, 'stop.request.json')).exists():
+                                partial=export(root,run)
+                                return progress('INTERRUPTED',result=partial)
+                            if approval:
+                                directory=module.BASE/batch_name(batch)
+                                write(directory/'run_authorization.reference.json',dict(
+                                    scope_sha256=approval['scope_sha256'],authorization=str(run/'estado/run.authorization.json'),
+                                    authorization_sha256=sha(run/'estado/run.authorization.json'),
+                                    plan_sha256=sha(directory/'plan.json'),review_sha256=sha(directory/'review.txt')))
+                            evaluate(root, run, batch, authorize=authorize or batch_name(batch) in authorized_batches, execute=True)
+                            verified = module.verify_run(module.BASE / batch_name(batch))
+                            project_states(verified)
+                            completed_projects+=sum(p.get('complete',False) for p in verified['projects'])
+                            completed_indicators+=sum(len(p.get('rows',[])) for p in verified['projects'])
+                            if notify:
+                                progress('EVALUATION_PROGRESS',projects_in_batch=len(batch),
+                                    projects_evaluated=completed_projects,total_projects=len(eligible),
+                                    indicators_completed=completed_indicators)
+                            if verified.get('blocking_errors',verified['errors']):
+                                if (run_file(run, 'stop.request.json')).exists():
+                                    return progress('INTERRUPTED',result=export(root,run))
+                                raise ValueError('Lote incompleto/bloqueado; consultar status antes de reanudar')
+                    else:
+                        module = engine(root, run)
+                        directories = list(module.BASE.glob('batch_*'))
+                        if not directories:
+                            raise ValueError('Exportacion requiere evaluaciones verificadas')
+                        result = export(root, run)
+                        if result['status'] != 'COMPLETE':
+                            return progress(result['status'], result=result)
+                write(run_file(run, 'execution.json'), request)
+                progress('STAGE_COMPLETE')
+            if request.get('blocked_projects') and 'evaluation' in sequence:
+                return progress('PARTIAL',through=target,blocked_projects=request['blocked_projects'],report=str(run/'preprocess/scope_validation.json'))
+            if dry_run:
+                report = read(run / 'preprocess/selection_manifest.json')
+                return progress(report['status'], manifest=str(run / 'preprocess/selection_manifest.json'),
+                                selected_count=report['selected_count'], counts=report['counts'],
+                                shared_researchers=report['shared_researchers'],
+                                warnings=[dict(code=w['code'], count=w.get('count', len(w.get('projects', w.get('groups', [])))))
+                                          for w in report['warnings']],
+                                inference_calls=0, embeddings_created=0)
+            return progress('COMPLETE', through=target, results=str(run / 'workspace/outputs'),
+                            excel=str(run_file(run, 'resultado_indicadores.xlsx')) if target == 'export' else None,
+                            limitations=['Evaluacion PROJECT; ARTICLE pendiente. Exportacion sin puente territorial nuevo verificado.'])
+        except KeyboardInterrupt:
+            if any((run/'workspace/outputs/layer4').glob('batch_*')):
+                try:export(root,run)
+                except Exception:write(run/'partial_export.pending.json',dict(reason='Reintentar python run.py export --run-id '+name))
+            progress('INTERRUPTED', message='Reanudar el mismo run; conservar checkpoints y claims del proveedor')
+            raise
+        except Exception as exc:
+            if run.is_dir():
+                write(run_file(run,'failure.json'), dict(stage=current,error=str(exc),error_type=type(exc).__name__))
+            if model_binding['llm']['provider']=='openai' and any((run/'workspace/outputs/layer4').glob('batch_*')):
+                try:
+                    partial_result=export(root,run)
+                    if 'API_BUDGET' in str(exc):return progress('PARTIAL',result=partial_result,reason='API_BUDGET')
+                except Exception:write(run/'partial_export.pending.json',dict(reason='Reintentar export explicito; comprobar recibos'))
+            progress('FAILED_OR_BLOCKED', error=str(exc), error_type=type(exc).__name__)
+            raise
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description='RAW -> PREPROCESSING -> KNOWLEDGE -> GRAPHRAG -> RESULTS -> Power BI')
+    parser.add_argument('operation', choices=['raw', 'preprocess', 'knowledge', 'prepare', 'validate', 'graph', 'review', 'evaluate', 'export', 'verify', 'run'])
+    parser.add_argument('--dataset', choices=['prueba_controlada', 'prueba_en_vivo'], default=None)
+    parser.add_argument('--run-id', help='Nuevo en prepare; obligatorio para las demas operaciones')
+    parser.add_argument('--config', default='config/pipeline_manual.json')
+    parser.add_argument('--project-id', action='append', help='Identificador institucional; maximo dos por lote')
+    parser.add_argument('--approve-build', action='store_true', help='Autoriza embeddings locales, sin descargas')
+    parser.add_argument('--authorize', action='store_true', help='Consentimiento explicito para evaluar el texto revisado con Ollama local')
+    parser.add_argument('--through', choices=['preprocessing', 'knowledge', 'graphrag', 'results'], default='knowledge', help='Ultima capa para run; results conserva la revision/autorizacion explicita')
+    args = parser.parse_args(argv)
+    run = None
+    try:
+        if args.operation in ('run', 'prepare', 'preprocess'):
+            target = ('preprocessing' if args.operation == 'preprocess' else
+                      'knowledge' if args.operation == 'prepare' else
+                      'export' if args.through == 'results' else args.through)
+            result = execute_pipeline(ROOT, config_path=args.config, run_id=args.run_id,
+                through=target, approve_build=args.approve_build, authorize=args.authorize,
+                project_ids=args.project_id, dataset=args.dataset)
+            print(json.dumps(result, ensure_ascii=True, default=str))
+            return 0 if result['status'] == 'COMPLETE' else 3
+        config, rawbase, runs = configuration(ROOT, args.config)
+        selected_raw = ROOT / 'tests/fixtures' / args.dataset if args.dataset else rawbase
+        dataset = args.dataset or 'raw'
+        if args.operation == 'raw':
+            from layer2_processing.preprocessing.adapters import inventory, discover_sources
+            result = inventory(ROOT, args.dataset, config['raw_base'])
+            preview = discover_sources(ROOT, config, selected_raw)
+            result['discovery_status'] = preview['status']
+            result['discovery'] = [{k:v for k,v in item.items() if k != 'records'} for item in preview['files']]
+            print(json.dumps(result, ensure_ascii=True))
+            return 0
+        if not args.run_id and args.operation not in ('prepare', 'preprocess', 'run'):
+            raise ValueError('--run-id es obligatorio para reutilizar la ejecucion seleccionada')
+        name = args.run_id or ('run_' + datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S_%f'))
+        if not re.fullmatch(r'[A-Za-z0-9_-]{1,80}', name):
+            raise ValueError('--run-id invalido')
+        run = runs / name
+        previous = ROOT / 'outputs/pipeline_manual' / name
+        if not run.exists() and previous.exists():
+            run = previous
+        # A shared lock prevents concurrent manual analytical executions across runs.
+        with lock(runs):
+            state = check(ROOT, run)
+            if state['dataset'] != dataset or not same_configuration(ROOT, state['configuration'], config):
+                raise ValueError('Conjunto/configuracion no corresponde a esta ejecucion')
+            from layer2_processing.checkpoints import resolve
+            if resolve(ROOT, state['raw_path']).resolve() != selected_raw.resolve():
+                raise ValueError('RAW de la ejecucion no corresponde al conjunto configurado')
+            if args.operation == 'knowledge':
+                result = knowledge(ROOT, run)
+            elif args.operation == 'validate':
+                result = graph(ROOT, run)
+            elif args.operation == 'graph':
+                if not args.approve_build:
+                    raise ValueError('Revisar preprocess/review.json; graph requiere --approve-build')
+                result = graph(ROOT, run, build=True)
+            elif args.operation == 'review':
+                result = evaluate(ROOT, run, args.project_id)
+            elif args.operation == 'evaluate':
+                module = engine(ROOT, run)
+                # Never create and authorize an unreviewed plan in one operation.
+                candidates = [d for d in module.BASE.glob('batch_*') if (d / 'plan.json').exists()]
+                if not candidates:
+                    raise ValueError('Ejecutar review y leer review.txt antes de evaluate')
+                selected = args.project_id or [p['source_project_id'] for p in pq.read_table(run / 'workspace/outputs/layer2/canonical/proyectos.parquet').to_pylist()]
+                batch = batch_name(selected)
+                if not (module.BASE / batch / 'review.txt').exists():
+                    raise ValueError('Falta revision de este lote: ejecutar review con los mismos --project-id')
+                result = evaluate(ROOT, run, args.project_id, args.authorize, execute=True)
+            elif args.operation == 'export':
+                result = export(ROOT, run)
+            else:
+                result = graph(ROOT, run) if state['status'] == 'PREPARED' else dict(status='PREPROCESSING_VERIFIED', counts=state['counts'])
+                if (run / 'workspace/outputs/layer3/publication/_manifest.json').exists():
+                    result['graph_manifest'] = validated_graph(ROOT, run)['layer3_run_id']
+                module = engine(ROOT, run)
+                result['evaluations'] = {d.name: module.summary(module.verify_run(d)) for d in module.BASE.glob('batch_*')}
+            check(ROOT, run)
+        print(json.dumps(result, ensure_ascii=True, default=str))
+        return 0
+    except Exception as exc:
+        if run is not None and run.exists():
+            write(run / 'last_error.json', {'operation': args.operation, 'type': type(exc).__name__, 'error': str(exc)})
+        print(json.dumps({'status': 'FAILED_OR_BLOCKED', 'error': str(exc), 'run': str(run)}, ensure_ascii=True), file=sys.stderr)
+        return 2

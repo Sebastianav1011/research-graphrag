@@ -40,7 +40,7 @@ Integración modificada (dieciséis; se conservaron los demás cambios previos d
 Instalar uv siguiendo el Inicio rápido de `README.md`. Desde la raíz del clon:
 
 ```powershell
-uv sync
+uv sync --locked
 uv run python run.py
 ```
 

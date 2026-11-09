@@ -485,13 +485,24 @@
       ]
     },
     "scripts/export_layer4_pilot.py": {
-      "after_sha256": "31cf6bc6471d685009ba738a87207e8f31927bbeb62595bede0c1cf65ecc860a",
+      "after_sha256": "a4fcf0f502ad25245afc594a4ec4f119d75cb32543ae9efa1161af490ad0b473",
       "snapshots": [
         "archives/architecture_20261029/scripts/export_layer4_pilot.py",
         "archives/sad_20261030/scripts/export_layer4_pilot.py",
         "archives/sad_data_20261030/scripts/export_layer4_pilot.py",
+        "docs/architecture/uv_command_compatibility/cdaa276ad4d1b1c87a9473480f66d8aada0870be2b78d5d0dd36260c513e110b.py.snapshot",
         "outputs/layer4/auditoria/codigo_original/08b091deb20bad5df42a76eec6809295a0a0f87391f716b386b1fc4b3e504efd.py"
-      ]
+      ],
+      "related_sha256": {
+        "run.py": "e3b0470c749ab3aa3073dcc084da1583cdda1834e3e06e0e5e428af577c479ed",
+        "scripts/pipeline_coordinator.py": "1e73bc72c2fa24af9c0a2efee91388b469396b7fab7a4cbae0c79d7691bb2081",
+        "scripts/export_layer4_pilot.py": "a4fcf0f502ad25245afc594a4ec4f119d75cb32543ae9efa1161af490ad0b473",
+        "scripts/auxiliary/verify_layer4_preparation.py": "b072e062aca4e0bbdc56ad1500ab342a6d82e06b5b6135f1215c681ee1bfa174",
+        "src/autonomous_execution/lifecycle.py": "faffeba945bdff372d1d61a81a497a257253556309766ac4a4298c7c27654700",
+        "src/autonomous_execution/prepare_menu.py": "ef97cf15abbe4b2bd7091b7fcab4ab31374dfac2d32d3a3790b0c28d17255794",
+        "src/layer4_evaluation/indicators/openai_provider.py": "fab0007b87f97e9d907cd2a4937f2f3dccfc625f4caaf868b832feb3f8ffe13f"
+      },
+      "reason": "uv command/help text only; pipeline behavior and all run artifacts unchanged"
     },
     "scripts/export_layer4_powerbi.py": {
       "after_sha256": "9415085d3f7f1254a5c87bb5f7a662e618d638cdd23d91112e2afafc46e57f4e",
@@ -548,13 +559,24 @@
       ]
     },
     "scripts/auxiliary/verify_layer4_preparation.py": {
-      "after_sha256": "c1acf073900a0591c778c7ffc6548b3c542dcb69535ddc53d73e3a0040d9748f",
+      "after_sha256": "b072e062aca4e0bbdc56ad1500ab342a6d82e06b5b6135f1215c681ee1bfa174",
       "snapshots": [
         "archives/architecture_20261029/scripts/auxiliary/verify_layer4_preparation.py",
         "archives/sad_20261030/scripts/auxiliary/verify_layer4_preparation.py",
         "archives/sad_data_20261030/scripts/auxiliary/verify_layer4_preparation.py",
+        "docs/architecture/uv_command_compatibility/b56e6ba279382099f210289a3076bb8c44c2b9e838d3f3a9b61c7bee26a799f5.py.snapshot",
         "outputs/layer4/auditoria/codigo_original/b34f80782a15a92ba3f03f4d3d3f664237dd3eb788110982295251d3d423c83c.py"
-      ]
+      ],
+      "related_sha256": {
+        "run.py": "e3b0470c749ab3aa3073dcc084da1583cdda1834e3e06e0e5e428af577c479ed",
+        "scripts/pipeline_coordinator.py": "1e73bc72c2fa24af9c0a2efee91388b469396b7fab7a4cbae0c79d7691bb2081",
+        "scripts/export_layer4_pilot.py": "a4fcf0f502ad25245afc594a4ec4f119d75cb32543ae9efa1161af490ad0b473",
+        "scripts/auxiliary/verify_layer4_preparation.py": "b072e062aca4e0bbdc56ad1500ab342a6d82e06b5b6135f1215c681ee1bfa174",
+        "src/autonomous_execution/lifecycle.py": "faffeba945bdff372d1d61a81a497a257253556309766ac4a4298c7c27654700",
+        "src/autonomous_execution/prepare_menu.py": "ef97cf15abbe4b2bd7091b7fcab4ab31374dfac2d32d3a3790b0c28d17255794",
+        "src/layer4_evaluation/indicators/openai_provider.py": "fab0007b87f97e9d907cd2a4937f2f3dccfc625f4caaf868b832feb3f8ffe13f"
+      },
+      "reason": "uv command/help text only; pipeline behavior and all run artifacts unchanged"
     },
     "config/layer4_closure.yaml": {
       "after_sha256": "5269271ed163b8f1fa74bec4947061d68a2ecaec8df7998cb1c1f4f3a842a4f2",
@@ -661,7 +683,7 @@
       "related_sha256": {
         "src/layer2_processing/pipeline.py": "da4d995dfe70c84a774310bc1fd9b7a4eb0403ea56e4af74711bd4d7ddd04b0e",
         "src/layer2_processing/checkpoints.py": "86945b075c8e2ce63ee93832ff648c8c087ca2bdbfb2b235cee07e105f1652c8",
-        "scripts/pipeline_coordinator.py": "0abcaa3ab5a6949736c84ea4fb0f1a67461ab928ce00482860f2a42dbe620abe",
+        "scripts/pipeline_coordinator.py": "1e73bc72c2fa24af9c0a2efee91388b469396b7fab7a4cbae0c79d7691bb2081",
         "src/layer4_evaluation/indicators/context_budget.py": "21646764fab11b0f0da9f54c63658b989db6794b60efa19f80dd94b2f8b1079c"
       }
     },
@@ -1419,7 +1441,7 @@
       "related_sha256": {
         "src/layer2_processing/pipeline.py": "da4d995dfe70c84a774310bc1fd9b7a4eb0403ea56e4af74711bd4d7ddd04b0e",
         "src/layer2_processing/checkpoints.py": "86945b075c8e2ce63ee93832ff648c8c087ca2bdbfb2b235cee07e105f1652c8",
-        "scripts/pipeline_coordinator.py": "0abcaa3ab5a6949736c84ea4fb0f1a67461ab928ce00482860f2a42dbe620abe"
+        "scripts/pipeline_coordinator.py": "1e73bc72c2fa24af9c0a2efee91388b469396b7fab7a4cbae0c79d7691bb2081"
       }
     },
     "src/layer5_results/paths.py": {
@@ -1432,7 +1454,7 @@
       "related_sha256": {
         "src/layer2_processing/pipeline.py": "da4d995dfe70c84a774310bc1fd9b7a4eb0403ea56e4af74711bd4d7ddd04b0e",
         "src/layer2_processing/checkpoints.py": "86945b075c8e2ce63ee93832ff648c8c087ca2bdbfb2b235cee07e105f1652c8",
-        "scripts/pipeline_coordinator.py": "0abcaa3ab5a6949736c84ea4fb0f1a67461ab928ce00482860f2a42dbe620abe"
+        "scripts/pipeline_coordinator.py": "1e73bc72c2fa24af9c0a2efee91388b469396b7fab7a4cbae0c79d7691bb2081"
       }
     },
     "src/layer5_results/README.md": {
@@ -2230,7 +2252,7 @@
       "related_sha256": {
         "src/layer2_processing/pipeline.py": "da4d995dfe70c84a774310bc1fd9b7a4eb0403ea56e4af74711bd4d7ddd04b0e",
         "src/layer2_processing/checkpoints.py": "86945b075c8e2ce63ee93832ff648c8c087ca2bdbfb2b235cee07e105f1652c8",
-        "scripts/pipeline_coordinator.py": "0abcaa3ab5a6949736c84ea4fb0f1a67461ab928ce00482860f2a42dbe620abe"
+        "scripts/pipeline_coordinator.py": "1e73bc72c2fa24af9c0a2efee91388b469396b7fab7a4cbae0c79d7691bb2081"
       }
     },
     "scripts/run_territories.py": {
@@ -3524,16 +3546,21 @@
       ]
     },
     "src/layer4_evaluation/live_execution.py": {
-      "after_sha256": "ad9b3bdb527fdede6ef56903383659b8a6725bd5bad2e08cb420703703db7217",
+      "after_sha256": "186fdff5ddf0d0c7a6e251d0050811f8b90d7b62067672d2744764a969e015b1",
       "snapshots": [
+        "archives/bounded_evaluation_context/71843311280814cc13da4b04b2ff7c61a4d3e8819e5590a4a683aea9f99bfa24.py",
+        "archives/ollama_provider_migration/e44133b3ece564448261b2e676f3a74cada663a0137da9aa88d9642ecc837196.py",
         "archives/sad_20261030/src/layer5_results/live_execution.py",
         "archives/sad_data_20261030/src/layer4_evaluation/live_execution.py",
-        "archives/ollama_provider_migration/e44133b3ece564448261b2e676f3a74cada663a0137da9aa88d9642ecc837196.py",
-        "archives/bounded_evaluation_context/71843311280814cc13da4b04b2ff7c61a4d3e8819e5590a4a683aea9f99bfa24.py"
+        "docs/architecture/resume_compatibility/566069f46db7fe2e205439528502674630129cdba907ce63c2bfb5fc451776be.py.snapshot"
       ],
       "related_sha256": {
-        "src/layer4_evaluation/indicators/context_budget.py": "21646764fab11b0f0da9f54c63658b989db6794b60efa19f80dd94b2f8b1079c"
-      }
+        "src/layer4_evaluation/indicators/context_budget.py": "ba6acee678b3763437e485f85131e6e8cf8a73bf8fb20cfc723c9fab0a1c7e4b",
+        "scripts/pipeline_coordinator.py": "1e73bc72c2fa24af9c0a2efee91388b469396b7fab7a4cbae0c79d7691bb2081",
+        "src/layer4_evaluation/live_execution.py": "186fdff5ddf0d0c7a6e251d0050811f8b90d7b62067672d2744764a969e015b1",
+        "src/layer4_evaluation/indicators/ollama_provider.py": "db0a2e66603d0d821232ddb3dd3532004064eac5b53c6ca0d721c0872a9c30fb"
+      },
+      "reason": "Bounded blocked-indicator resume; original plans, calls, metrics and inputs preserved"
     },
     "src/layer2_processing/checkpoints.py": {
       "after_sha256": "86945b075c8e2ce63ee93832ff648c8c087ca2bdbfb2b235cee07e105f1652c8",
@@ -3564,25 +3591,36 @@
       ]
     },
     "scripts/pipeline_coordinator.py": {
-      "after_sha256": "0abcaa3ab5a6949736c84ea4fb0f1a67461ab928ce00482860f2a42dbe620abe",
+      "after_sha256": "1e73bc72c2fa24af9c0a2efee91388b469396b7fab7a4cbae0c79d7691bb2081",
       "snapshots": [
-        "archives/sad_20261030/src/manual_pipeline/runner.py",
-        "archives/sad_data_20261030/scripts/pipeline_coordinator.py",
-        "archives/ollama_provider_migration/6787402b24763c2083fe824a7efa5db7edf8ed8c3338552106aa0c4a9e63b5bf.py",
-        "archives/ollama_connection_closure/800ff5c928ee267c5cd7810b92f79bfb518205fdb5bee5f93a00caa055bb35c7.py",
-        "archives/unified_runner_selection/783302e809ce8be715e6840e42c353cc4d520b3f8d48a83930063feea7876fe4.py",
+        "archives/bounded_evaluation_context/5db0dcdd9eb653925d7d5a207d98187a5f79ac7491e83db6db224b926429267e.py",
+        "archives/execution_modes/42d0175694f691576a98c84e9deb2855088a4ca5628b75ab259199613457ddab.py",
         "archives/file_project_selection/2e39ae29f093a06f0593b27355c1a202b444196f17d7be63f8687fbecb7717ab.py",
         "archives/metadata_only_input_fix/055cdea2b09af2d17b9cd3c04fdc38b1e8cbb6974ed264b6613e1311efa88657.py",
+        "archives/ollama_connection_closure/800ff5c928ee267c5cd7810b92f79bfb518205fdb5bee5f93a00caa055bb35c7.py",
+        "archives/ollama_provider_migration/6787402b24763c2083fe824a7efa5db7edf8ed8c3338552106aa0c4a9e63b5bf.py",
+        "archives/sad_20261030/src/manual_pipeline/runner.py",
+        "archives/sad_data_20261030/scripts/pipeline_coordinator.py",
         "archives/scoped_identity_quarantine/4371aefe4000063fa2626e4a03c04c8861a0ab714dd4ce09e646a430719a5461.py",
-        "archives/execution_modes/42d0175694f691576a98c84e9deb2855088a4ca5628b75ab259199613457ddab.py",
-        "archives/bounded_evaluation_context/5db0dcdd9eb653925d7d5a207d98187a5f79ac7491e83db6db224b926429267e.py"
+        "archives/unified_runner_selection/783302e809ce8be715e6840e42c353cc4d520b3f8d48a83930063feea7876fe4.py",
+        "docs/architecture/resume_compatibility/e8522dff7d3d7b75952068c978faa5d5906124483f9f55338603656cf4b336d8.py.snapshot",
+        "docs/architecture/uv_command_compatibility/bf9df7d09e59ca582d07ecead6d893fe11b6cd0cf3a0d60f6376161b13a0d086.py.snapshot"
       ],
       "related_sha256": {
-        "src/layer2_processing/pipeline.py": "da4d995dfe70c84a774310bc1fd9b7a4eb0403ea56e4af74711bd4d7ddd04b0e",
-        "src/layer2_processing/checkpoints.py": "86945b075c8e2ce63ee93832ff648c8c087ca2bdbfb2b235cee07e105f1652c8",
-        "scripts/pipeline_coordinator.py": "0abcaa3ab5a6949736c84ea4fb0f1a67461ab928ce00482860f2a42dbe620abe",
-        "src/layer4_evaluation/indicators/context_budget.py": "21646764fab11b0f0da9f54c63658b989db6794b60efa19f80dd94b2f8b1079c"
-      }
+        "src/layer2_processing/pipeline.py": "1cb88167233958a826d2d98d5c611bbbe86028c4d079f19c6924d7e989b160ff",
+        "src/layer2_processing/checkpoints.py": "9d6e4e0fa8e5a53bf51484574a37a80ccfceae536d614585e969f4a9b0df168b",
+        "scripts/pipeline_coordinator.py": "1e73bc72c2fa24af9c0a2efee91388b469396b7fab7a4cbae0c79d7691bb2081",
+        "src/layer4_evaluation/indicators/context_budget.py": "ba6acee678b3763437e485f85131e6e8cf8a73bf8fb20cfc723c9fab0a1c7e4b",
+        "src/layer4_evaluation/live_execution.py": "186fdff5ddf0d0c7a6e251d0050811f8b90d7b62067672d2744764a969e015b1",
+        "src/layer4_evaluation/indicators/ollama_provider.py": "db0a2e66603d0d821232ddb3dd3532004064eac5b53c6ca0d721c0872a9c30fb",
+        "run.py": "e3b0470c749ab3aa3073dcc084da1583cdda1834e3e06e0e5e428af577c479ed",
+        "scripts/export_layer4_pilot.py": "a4fcf0f502ad25245afc594a4ec4f119d75cb32543ae9efa1161af490ad0b473",
+        "scripts/auxiliary/verify_layer4_preparation.py": "b072e062aca4e0bbdc56ad1500ab342a6d82e06b5b6135f1215c681ee1bfa174",
+        "src/autonomous_execution/lifecycle.py": "faffeba945bdff372d1d61a81a497a257253556309766ac4a4298c7c27654700",
+        "src/autonomous_execution/prepare_menu.py": "ef97cf15abbe4b2bd7091b7fcab4ab31374dfac2d32d3a3790b0c28d17255794",
+        "src/layer4_evaluation/indicators/openai_provider.py": "fab0007b87f97e9d907cd2a4937f2f3dccfc625f4caaf868b832feb3f8ffe13f"
+      },
+      "reason": "uv command/help text only; pipeline behavior and all run artifacts unchanged"
     },
     "src/layer4_evaluation/indicators/assessment.py": {
       "after_sha256": "f67f0b393dc2a6e5c75a8419679016fe6b8f20cc2e850eb61fc0e546c97ea663",
@@ -4036,26 +4074,90 @@
     },
     "src/layer4_evaluation/indicators/ollama_provider.py": {
       "snapshots": [
+        "archives/bounded_evaluation_context/7958b83f6641897a6dabd5304bb34c8be6f9a59dc897e1312f43680311b90e8d.py",
         "archives/ollama_connection_closure/de4934318f08ab6e3ae715296f4526238bb6ef5f3f50bfa818dcdabd660340ba.py",
-        "archives/bounded_evaluation_context/7958b83f6641897a6dabd5304bb34c8be6f9a59dc897e1312f43680311b90e8d.py"
+        "docs/architecture/resume_compatibility/b3726547e7a9f937ba1739e1d24dba43203747ea5857fa59c088247f936fb5ef.py.snapshot"
       ],
-      "after_sha256": "b31fc51aef63077f2beea87629de9bddd5750cd2f3c1a39009f99d76e3cf4e97",
+      "after_sha256": "db0a2e66603d0d821232ddb3dd3532004064eac5b53c6ca0d721c0872a9c30fb",
       "related_sha256": {
-        "src/layer4_evaluation/indicators/context_budget.py": "21646764fab11b0f0da9f54c63658b989db6794b60efa19f80dd94b2f8b1079c"
-      }
+        "src/layer4_evaluation/indicators/context_budget.py": "ba6acee678b3763437e485f85131e6e8cf8a73bf8fb20cfc723c9fab0a1c7e4b",
+        "scripts/pipeline_coordinator.py": "1e73bc72c2fa24af9c0a2efee91388b469396b7fab7a4cbae0c79d7691bb2081",
+        "src/layer4_evaluation/live_execution.py": "186fdff5ddf0d0c7a6e251d0050811f8b90d7b62067672d2744764a969e015b1",
+        "src/layer4_evaluation/indicators/ollama_provider.py": "db0a2e66603d0d821232ddb3dd3532004064eac5b53c6ca0d721c0872a9c30fb"
+      },
+      "reason": "Bounded blocked-indicator resume; original plans, calls, metrics and inputs preserved"
     },
     "run.py": {
       "snapshots": [
+        "archives/file_project_selection/e5802ddd8e7c4e9264fb6b65685c0ac4cb7eb902b924d0b5ec27ba5e104b06a7.py",
         "archives/unified_runner_selection/7d7051fa98aebdee517adbed3087119c2e941d985e2c816312266168550fb222.py",
-        "archives/file_project_selection/e5802ddd8e7c4e9264fb6b65685c0ac4cb7eb902b924d0b5ec27ba5e104b06a7.py"
+        "docs/architecture/uv_command_compatibility/15ab958a7b69237d6613713051e47318231877005440d536bf876e23a77f6b67.py.snapshot"
       ],
-      "after_sha256": "380329e45440b071ccf805121232ce2a1d03f6db02dbec821fd118839e602f9b"
+      "after_sha256": "e3b0470c749ab3aa3073dcc084da1583cdda1834e3e06e0e5e428af577c479ed",
+      "related_sha256": {
+        "run.py": "e3b0470c749ab3aa3073dcc084da1583cdda1834e3e06e0e5e428af577c479ed",
+        "scripts/pipeline_coordinator.py": "1e73bc72c2fa24af9c0a2efee91388b469396b7fab7a4cbae0c79d7691bb2081",
+        "scripts/export_layer4_pilot.py": "a4fcf0f502ad25245afc594a4ec4f119d75cb32543ae9efa1161af490ad0b473",
+        "scripts/auxiliary/verify_layer4_preparation.py": "b072e062aca4e0bbdc56ad1500ab342a6d82e06b5b6135f1215c681ee1bfa174",
+        "src/autonomous_execution/lifecycle.py": "faffeba945bdff372d1d61a81a497a257253556309766ac4a4298c7c27654700",
+        "src/autonomous_execution/prepare_menu.py": "ef97cf15abbe4b2bd7091b7fcab4ab31374dfac2d32d3a3790b0c28d17255794",
+        "src/layer4_evaluation/indicators/openai_provider.py": "fab0007b87f97e9d907cd2a4937f2f3dccfc625f4caaf868b832feb3f8ffe13f"
+      },
+      "reason": "uv command/help text only; pipeline behavior and all run artifacts unchanged"
     },
     "src/layer4_evaluation/indicators/context_budget.py": {
       "snapshots": [
         "archives/bounded_evaluation_context/27b053bdd7f76e5f8703539f9543295116c456d6f50ba50534dd9aac1beaae2b.py"
       ],
       "after_sha256": "21646764fab11b0f0da9f54c63658b989db6794b60efa19f80dd94b2f8b1079c"
+    },
+    "src/autonomous_execution/lifecycle.py": {
+      "after_sha256": "faffeba945bdff372d1d61a81a497a257253556309766ac4a4298c7c27654700",
+      "snapshots": [
+        "docs/architecture/uv_command_compatibility/2e07a2721f79f79d7a1e829f628b3efda24cc4f536000371883d25728ec3706b.py.snapshot"
+      ],
+      "related_sha256": {
+        "run.py": "e3b0470c749ab3aa3073dcc084da1583cdda1834e3e06e0e5e428af577c479ed",
+        "scripts/pipeline_coordinator.py": "1e73bc72c2fa24af9c0a2efee91388b469396b7fab7a4cbae0c79d7691bb2081",
+        "scripts/export_layer4_pilot.py": "a4fcf0f502ad25245afc594a4ec4f119d75cb32543ae9efa1161af490ad0b473",
+        "scripts/auxiliary/verify_layer4_preparation.py": "b072e062aca4e0bbdc56ad1500ab342a6d82e06b5b6135f1215c681ee1bfa174",
+        "src/autonomous_execution/lifecycle.py": "faffeba945bdff372d1d61a81a497a257253556309766ac4a4298c7c27654700",
+        "src/autonomous_execution/prepare_menu.py": "ef97cf15abbe4b2bd7091b7fcab4ab31374dfac2d32d3a3790b0c28d17255794",
+        "src/layer4_evaluation/indicators/openai_provider.py": "fab0007b87f97e9d907cd2a4937f2f3dccfc625f4caaf868b832feb3f8ffe13f"
+      },
+      "reason": "uv command/help text only; pipeline behavior and all run artifacts unchanged"
+    },
+    "src/autonomous_execution/prepare_menu.py": {
+      "after_sha256": "ef97cf15abbe4b2bd7091b7fcab4ab31374dfac2d32d3a3790b0c28d17255794",
+      "snapshots": [
+        "docs/architecture/uv_command_compatibility/5aef83f83bf9d99205f604c39490051cc052a0cface8351498e5e375a37272dd.py.snapshot"
+      ],
+      "related_sha256": {
+        "run.py": "e3b0470c749ab3aa3073dcc084da1583cdda1834e3e06e0e5e428af577c479ed",
+        "scripts/pipeline_coordinator.py": "1e73bc72c2fa24af9c0a2efee91388b469396b7fab7a4cbae0c79d7691bb2081",
+        "scripts/export_layer4_pilot.py": "a4fcf0f502ad25245afc594a4ec4f119d75cb32543ae9efa1161af490ad0b473",
+        "scripts/auxiliary/verify_layer4_preparation.py": "b072e062aca4e0bbdc56ad1500ab342a6d82e06b5b6135f1215c681ee1bfa174",
+        "src/autonomous_execution/lifecycle.py": "faffeba945bdff372d1d61a81a497a257253556309766ac4a4298c7c27654700",
+        "src/autonomous_execution/prepare_menu.py": "ef97cf15abbe4b2bd7091b7fcab4ab31374dfac2d32d3a3790b0c28d17255794",
+        "src/layer4_evaluation/indicators/openai_provider.py": "fab0007b87f97e9d907cd2a4937f2f3dccfc625f4caaf868b832feb3f8ffe13f"
+      },
+      "reason": "uv command/help text only; pipeline behavior and all run artifacts unchanged"
+    },
+    "src/layer4_evaluation/indicators/openai_provider.py": {
+      "after_sha256": "fab0007b87f97e9d907cd2a4937f2f3dccfc625f4caaf868b832feb3f8ffe13f",
+      "snapshots": [
+        "docs/architecture/uv_command_compatibility/9dfab1581bd364cca31f2c321d1422546c18034893eb98d2b8ed99b36cfe5dc2.py.snapshot"
+      ],
+      "related_sha256": {
+        "run.py": "e3b0470c749ab3aa3073dcc084da1583cdda1834e3e06e0e5e428af577c479ed",
+        "scripts/pipeline_coordinator.py": "1e73bc72c2fa24af9c0a2efee91388b469396b7fab7a4cbae0c79d7691bb2081",
+        "scripts/export_layer4_pilot.py": "a4fcf0f502ad25245afc594a4ec4f119d75cb32543ae9efa1161af490ad0b473",
+        "scripts/auxiliary/verify_layer4_preparation.py": "b072e062aca4e0bbdc56ad1500ab342a6d82e06b5b6135f1215c681ee1bfa174",
+        "src/autonomous_execution/lifecycle.py": "faffeba945bdff372d1d61a81a497a257253556309766ac4a4298c7c27654700",
+        "src/autonomous_execution/prepare_menu.py": "ef97cf15abbe4b2bd7091b7fcab4ab31374dfac2d32d3a3790b0c28d17255794",
+        "src/layer4_evaluation/indicators/openai_provider.py": "fab0007b87f97e9d907cd2a4937f2f3dccfc625f4caaf868b832feb3f8ffe13f"
+      },
+      "reason": "uv command/help text only; pipeline behavior and all run artifacts unchanged"
     }
   },
   "prefixes": {

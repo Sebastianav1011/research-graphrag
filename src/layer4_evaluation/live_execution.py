@@ -21,7 +21,8 @@ ROOT=Path(__file__).resolve().parents[2]
 from layer4_evaluation.indicators import assessment_v3 as v3, global_discovery_v3_3 as gd
 
 from layer4_evaluation.indicators.ollama_provider import (
-    OllamaClient, OllamaAssessmentProvider, context_guard, configuration as llm_configuration, create_client)
+    OllamaClient, OllamaAssessmentProvider, context_guard, configuration as llm_configuration, create_client,
+    CORRECTION_VERSION, corrective_request)
 
 from layer4_evaluation.indicators.experiment_inputs import read, sha256, verify_hashes
 
@@ -109,7 +110,8 @@ def verify_run(directory):
     for p in plan['projects']:
         bounded = plan.get('request_protocol') == CONTEXT_VERSION
         pid=p['project_id'];state=dict(project_id=pid,siap_id=p['siap_id'],discovery_complete=bounded,
-            selected=sorted(plan['profiles']) if bounded else [],rows=[],complete=False,reused=False,blocked_indicators={})
+            selected=sorted(plan['profiles']) if bounded else [],rows=[],complete=False,reused=False,blocked_indicators={},retryable_indicators=[])
+        failed_messages = {}
         if bounded:
             state['context_limits'] = {iid:r['context_selection']['status'] for iid,r in plan['context_requests'][pid].items()
                 if r['context_selection']['status'] != 'READY'}
@@ -133,7 +135,7 @@ def verify_run(directory):
                 cp=read(out/'plan.json')
                 require(not bounded or cp['phase']=='assessment' and len(cp['indicator_ids'])==1,'Fase incompatible con contexto por indicador')
                 require(cp['run_plan_sha256']==sha256(directory/'plan.json'),'Plan de llamada no coincide')
-                request=request_for(plan,p,cp['phase'],cp['indicator_ids'])
+                request=call_request(plan,p,cp)
                 require(cp['request_sha256']==canonical_hash(request),'Request de llamada modificado')
                 expected_schema=gd.selection_schema(p['fields']) if cp['phase']=='discovery' else v3.schemas(p['fields'])['assessment_batch']
                 require(read(out/'schema.json')==expected_schema,'Schema modificado')
@@ -152,20 +154,31 @@ def verify_run(directory):
                         state['blocked_indicators'].update({iid:'BLOCKED_ERROR' for iid in cp['indicator_ids']})
                     continue
                 retries=plan.get('token_limit_retries',0) if bounded else 0
+                corrective = cp.get('corrective_retries', 0)
+                require(type(corrective) is int and 0 <= corrective <= 2 and
+                    (not corrective or cp.get('correction_version') == CORRECTION_VERSION), 'Reintentos correctivos incompatibles')
+                retries=max(retries,corrective)
                 require(1 <= len(record['calls']) <= retries+1,'Numero de llamadas fuera del limite')
+                attempt_request=request
                 for index, call in enumerate(record['calls']):
+                    if index and record['calls'][index-1]['exit_status']=='INVALID_ASSESSMENT':
+                        previous=record['calls'][index-1]
+                        require(index<=corrective and not any(i.get('category')=='INTERNAL_VALIDATION_ERROR'
+                            for i in previous['validation_issues']), 'Reintento correctivo no permitido')
+                        attempt_request=corrective_request(request,expected_schema,plan['runtime']['configuration'],previous['validation_issues'])
                     attempt=out/cp['phase']/('ollama_runs' if local else 'codex_runs')/pid/('attempt_'+str(index+1))
                     require(read(attempt/'call.json')==call and call['retry']==index,'Metadatos nativos/reintento diferentes')
-                    require(index==len(record['calls'])-1 or call['exit_status']=='TOKEN_LIMIT','Solo se reintenta el limite de salida')
-                    require(call['prompt_sha256']==__import__('hashlib').sha256(request['prompt'].encode()).hexdigest() and
-                        (attempt/'prompt.txt').read_text(encoding='utf-8')==request['prompt'] and
+                    require(index==len(record['calls'])-1 or call['exit_status']=='TOKEN_LIMIT' or
+                        corrective and call['exit_status']=='INVALID_ASSESSMENT','Tipo de reintento no permitido')
+                    require(call['prompt_sha256']==__import__('hashlib').sha256(attempt_request['prompt'].encode()).hexdigest() and
+                        (attempt/'prompt.txt').read_text(encoding='utf-8')==attempt_request['prompt'] and
                         call['schema_sha256']==sha256(out/'schema.json') and
                         call['events_sha256']==sha256(attempt/'events.jsonl') and
                         call['stderr_sha256']==sha256(attempt/'stderr.txt'),'Artefactos de intento diferentes')
                     if local:
                         require(call['runtime']==read(directory/'provider.json'),'Runtime de reintento diferente')
                         sent=read(attempt/'request.json')
-                        require(sent['messages']==[dict(role='user',content=request['prompt'])] and
+                        require(sent['messages']==[dict(role='user',content=attempt_request['prompt'])] and
                             sent['format']==expected_schema,'Solicitud de reintento diferente')
                         options=sent['options'];configured=plan['runtime']['configuration']
                         require(options['num_ctx']==configured['num_ctx'] and
@@ -178,8 +191,8 @@ def verify_run(directory):
                         cp['runtime'] == binding and cp['provider_binding_sha256'] == sha256(directory/'provider.json'),
                         'Proveedor/modelo/digest no corresponden al checkpoint Ollama')
                     require(binding['configuration'] == plan['runtime']['configuration'], 'Configuracion de proveedor distinta del plan')
-                    require(native['prompt_sha256'] == __import__('hashlib').sha256(request['prompt'].encode()).hexdigest(), 'Prompt Ollama modificado')
-                require((attempt/'prompt.txt').read_text(encoding='utf-8')==request['prompt'] and
+                    require(native['prompt_sha256'] == __import__('hashlib').sha256(attempt_request['prompt'].encode()).hexdigest(), 'Prompt Ollama modificado')
+                require((attempt/'prompt.txt').read_text(encoding='utf-8')==attempt_request['prompt'] and
                     native['schema_sha256']==sha256(out/'schema.json'),'Prompt/schema nativos difieren')
                 require(native['events_sha256']==sha256(attempt/'events.jsonl') and native['stderr_sha256']==sha256(attempt/'stderr.txt'),'Logs nativos diferentes')
                 auth=read(out/'authorization.used.json')
@@ -188,9 +201,12 @@ def verify_run(directory):
                 if verification['status']!='PASS' or record['status']!='VALID':
                     message=pid+': '+verification['status']+'; '+str(record.get('error'))+'; ver '+str(out)
                     errors.append(message)
+                    failed_messages[message]=cp['indicator_ids']
                     if bounded and plan.get('isolate_indicator_errors'):
                         isolated_errors.append(message)
                         state['blocked_indicators'].update({iid:verification['status'] for iid in cp['indicator_ids']})
+                        if verification['status']=='BLOCKED_ERROR' and all(c['exit_status'] in ('INVALID_ASSESSMENT','TOKEN_LIMIT') for c in record['calls']):
+                            state['retryable_indicators']+=cp['indicator_ids']
                     continue
                 require(native['successful_transport'] and native['response_sha256']==sha256(attempt/'response.json') and
                     read(attempt/'response.json')==record['wrapper'],'Respuesta nativa diferente/no valida')
@@ -213,6 +229,11 @@ def verify_run(directory):
                     state['rows']+=saved['rows']
             ids=[r['indicator_id'] for r in state['rows']]
             require(len(ids)==len(set(ids)) and set(ids)<=set(state['selected']),'Assessment duplicado o no seleccionado')
+            resolved={message for message, indicators in failed_messages.items() if set(indicators)<=set(ids)}
+            errors[:]=[e for e in errors if e not in resolved]
+            isolated_errors[:]=[e for e in isolated_errors if e not in resolved]
+            state['blocked_indicators']={i:s for i,s in state['blocked_indicators'].items() if i not in ids}
+            state['retryable_indicators']=sorted(set(state['retryable_indicators'])-set(ids))
             state['complete']=state['discovery_complete'] and set(ids)==set(state['selected']) and not any(e.startswith(pid+':') for e in errors)
         state['pending']=[i for i in state['selected'] if i not in {r['indicator_id'] for r in state['rows']}]
         states.append(state)
@@ -227,6 +248,19 @@ def request_for(plan,project,phase,ids):
         return plan['context_requests'][project['project_id']][ids[0]]
     return gd.make_input(project,plan['profiles'],plan['rules']) if phase=='discovery' else v3.make_input(
         dict(project_id=project['project_id'],fields=project['fields']),[plan['profiles'][i] for i in ids],plan['rules'],plan['rubrics'])
+
+
+def call_request(plan, project, call_plan):
+    request=request_for(plan,project,call_plan['phase'],call_plan['indicator_ids'])
+    if call_plan.get('correction_version'):
+        require(call_plan['correction_version']==CORRECTION_VERSION, 'Version correctiva incompatible')
+        request=corrective_request(request,v3.schemas(project['fields'])['assessment_batch'],plan['runtime']['configuration'])
+    return request
+
+
+def runnable_indicator(state, iid, attempted):
+    return (iid not in state.get('context_limits', {}) and (state['project_id'],iid) not in attempted and
+        (iid not in state['blocked_indicators'] or iid in state.get('retryable_indicators', [])))
 
 
 def validate_context_evidence(request, wrapper):
@@ -279,8 +313,9 @@ def execute(args):
         require(plan.get('runtime', {}).get('provider') in ('ollama','openai'),
                 'Plan historico Codex: solo verificable/exportable; crear una nueva ejecucion Ollama, sin reutilizar sus respuestas')
         settings = llm_configuration(plan['runtime']['configuration'])
+        attempted=set()
         if plan.get('request_protocol') == CONTEXT_VERSION and not any(
-                iid not in p['context_limits'] and iid not in p['blocked_indicators'] for p in state['projects'] for iid in p['pending']):
+                runnable_indicator(p,iid,attempted) for p in state['projects'] for iid in p['pending']):
             write(directory/'status.json', summary(state))
             return summary(state)
         client = OllamaClient(settings) if settings['provider']=='ollama' else create_client(settings)
@@ -298,7 +333,7 @@ def execute(args):
             require(not state['blocking_errors'],'Ejecucion bloqueada; no se reintenta: '+'; '.join(state['blocking_errors']))
             bounded = plan.get('request_protocol') == CONTEXT_VERSION
             runnable = [s for s in state['projects'] if not s['complete'] and
-                (not bounded or any(i not in s['context_limits'] and i not in s['blocked_indicators'] for i in s['pending']))]
+                (not bounded or any(runnable_indicator(s,i,attempted) for i in s['pending']))]
             if not runnable:
                 write(directory/'status.json', summary(state))
                 return summary(state)  # Explicit partial coverage, never invented decisions.
@@ -306,10 +341,14 @@ def execute(args):
             require(any((p['fields'].get(f) or '').strip() for f in substantive_fields(p['fields'])),'No hay campos sustantivos; corregir la extraccion y preparar otra ejecucion antes de inferir')
             phase='assessment' if st['discovery_complete'] else 'discovery';ids=st['pending'][:3] if phase=='assessment' else []
             if bounded:
-                ids=[i for i in st['pending'] if i not in st['context_limits'] and i not in st['blocked_indicators']][:1]
+                ids=[i for i in st['pending'] if runnable_indicator(st,i,attempted)][:1]
             request=request_for(plan,p,phase,ids);reservation=plan['budgets'][phase+'_reservation']
             retries=plan.get('token_limit_retries',0) if bounded else 0
             schema = gd.selection_schema(p['fields']) if phase=='discovery' else v3.schemas(p['fields'])['assessment_batch']
+            correction = bounded and settings['provider']=='ollama' and plan.get('isolate_indicator_errors')
+            if correction:
+                request=corrective_request(request,schema,settings)
+            attempted.update((p['project_id'],iid) for iid in ids)
             estimate=(context_guard(request['prompt'],schema,settings,runtime,request['context_budget']) if bounded else
                 math.ceil(len(request['prompt'])*plan['observed_character_ratio']*1.25)+12000)
             require(estimate<=reservation,'Solicitud excede reserva estimada; no truncar texto ni despachar')
@@ -323,6 +362,8 @@ def execute(args):
             cp=dict(project_id=p['project_id'],phase=phase,indicator_ids=ids,run_plan_sha256=sha256(directory/'plan.json'),
                 request_sha256=canonical_hash(request),runtime=runtime,provider_binding_sha256=sha256(binding_path),requested_model=plan['requested_model'],
                 execution_id=plan['execution_id'],maximum_new_calls=1+retries,max_retries=retries,timeout_seconds=plan['timeout_seconds'],reservation=reservation,estimated_tokens=estimate)
+            if correction:
+                cp.update(correction_version=CORRECTION_VERSION,corrective_retries=retries)
             write(out/'plan.json',cp);write(out/'schema.json',schema)
             call_auth=dict(authorized=True,project_ids=[p['project_id']],phase=phase,indicator_ids=ids,plan_sha256=sha256(out/'plan.json'),
                 request_sha256=cp['request_sha256'],token_budget=reservation,maximum_new_calls=1+retries,max_retries=retries,
@@ -345,7 +386,8 @@ def execute(args):
             emit(dict(status='CALL_STARTED',project_id=p['project_id'],phase=phase,indicator_ids=ids,token_reservation=reservation))
             provider = OllamaAssessmentProvider(out/phase/'ollama_runs', out/'schema.json', lambda p,i:request,
                 settings=settings, client=client, runtime=runtime, wrapper_validator=gate,
-                execution_id=plan['execution_id'], max_retries=0, max_indicators=3, token_limit_retries=retries)
+                execution_id=plan['execution_id'], max_retries=0, max_indicators=3, token_limit_retries=retries,
+                corrective_retries=retries if correction else 0)
             error = None
             try:
                 provider.evaluate(dict(project_id=p['project_id'], fields=p['fields']),

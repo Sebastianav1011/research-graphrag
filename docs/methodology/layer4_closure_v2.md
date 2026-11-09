@@ -70,13 +70,13 @@ Hay veinte proyectos y veintinueve pares: ocho reutilizados y veintiuno pendient
 en quince proyectos. Las respuestas reutilizadas no consumen inferencia nueva.
 
 ```powershell
-.\.venv\Scripts\python.exe -B scripts/run_layer4_closure.py --settings config/layer4_closure_definitive.yaml verify
+uv run python -B scripts/run_layer4_closure.py --settings config/layer4_closure_definitive.yaml verify
 ```
 
 Ejecutar este comando tres veces, verificando cada lote de cinco:
 
 ```powershell
-.\.venv\Scripts\python.exe -B scripts/run_layer4_closure.py --settings config/layer4_closure_definitive.yaml execute-remaining --authorization outputs/layer4/pruebas/piloto_v2/cierre_20/authorization.remaining.json --pilot-approval outputs/layer4/pruebas/piloto_v2/aceptado_5/pilot_approval.definitive.json --batch-size 5
+uv run python -B scripts/run_layer4_closure.py --settings config/layer4_closure_definitive.yaml execute-remaining --authorization outputs/layer4/pruebas/piloto_v2/cierre_20/authorization.remaining.json --pilot-approval outputs/layer4/pruebas/piloto_v2/aceptado_5/pilot_approval.definitive.json --batch-size 5
 ```
 
 El control comprueba plan, autorización, aceptación del piloto, runtime y hashes.
@@ -111,8 +111,8 @@ completos, pares válidos únicos, citas y confianza verificables y aceptación
 ligada al plan y hash exacto de resultados.
 
 ```powershell
-.\.venv\Scripts\python.exe -B scripts/run_layer4_closure.py --settings config/layer4_closure_definitive.yaml finalize --approval outputs/layer4/pruebas/piloto_v2/cierre_20/final_approval.json --review outputs/layer4/pruebas/piloto_v2/cierre_20/human_review.json
-.\.venv\Scripts\python.exe -B scripts/run_layer4_closure.py --settings config/layer4_closure_definitive.yaml verify-final
+uv run python -B scripts/run_layer4_closure.py --settings config/layer4_closure_definitive.yaml finalize --approval outputs/layer4/pruebas/piloto_v2/cierre_20/final_approval.json --review outputs/layer4/pruebas/piloto_v2/cierre_20/human_review.json
+uv run python -B scripts/run_layer4_closure.py --settings config/layer4_closure_definitive.yaml verify-final
 ```
 
 La aprobación incluye supplemental_output_directory para enlazar el cierre

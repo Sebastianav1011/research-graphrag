@@ -115,7 +115,7 @@ class OpenAIClient:
                     logging.getLogger(name).disabled=True
                 self.sdk=OpenAI(api_key=key,base_url='https://api.openai.com/v1',
                     timeout=self.settings['timeout_seconds'],max_retries=0)
-            except Exception:raise OllamaError('API_CONFIGURATION','Ejecute uv sync y revise la configuracion local del SDK') from None
+            except Exception:raise OllamaError('API_CONFIGURATION','Ejecute uv sync --locked y revise la configuracion local del SDK') from None
         api=self.settings['api'];ledger=Ledger(self.directory/'api-ledger.sqlite',api)
         # Use UTF-8 bytes as a conservative bound and reserve reasoning within max_output_tokens.
         input_bound=len(json.dumps(payload['messages'],ensure_ascii=False).encode())+len(json.dumps(payload['format']).encode())+2048

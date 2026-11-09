@@ -344,6 +344,7 @@ def export(root, run):
     if any(module.BASE.glob('batch_*')):
         validated_graph(root, run)
     rows, lineage, processed, selected, errors = [], [], set(), set(), []
+    coverage, valid_results=[], []
     evaluated_projects, blocked_results = set(), set()
     all_projects = {p['source_project_id'] for p in pq.read_table(run / 'workspace/outputs/layer2/canonical/proyectos.parquet').to_pylist()}
     request = read(run_file(run, 'execution.json')) if (run_file(run, 'execution.json')).exists() else {}
@@ -362,11 +363,17 @@ def export(root, run):
             if any(error.startswith(s['project_id']+':') for error in state['errors']):blocked_results.add(p['siap_id'])
             if s['complete']:
                 processed.add(p['siap_id'])
+            valid_ids={r['indicator_id'] for r in s['rows']}
+            for iid in s['selected']:
+                status=('VALID' if iid in valid_ids else s['blocked_indicators'].get(iid) or
+                    s.get('context_limits',{}).get(iid) or 'PENDING')
+                coverage.append(dict(siap_id=p['siap_id'],indicator_id=iid,status=status,project_complete=s['complete']))
             for row in s['rows']:
                 iid = row['indicator_id']
                 assessment = module.assessment_from_row(row)
                 if module.v3.validate(p['fields'], plan['profiles'][iid], assessment, plan['rubrics'][iid]):
                     raise ValueError('Assessment guardado invalido')
+                valid_results.append(dict(row,siap_id=p['siap_id']))
                 locations = module.evidence_locations(p, assessment)
                 relevant = any(c['support'] in ('CLEAR', 'PARTIAL') and any(assessment['evidence'][i]['field'] in substantive_fields(p['fields']) for i in c['evidence_indices']) for c in assessment['criterion_assessments'])
                 if not relevant or not locations or not all(e['match_valid'] and e['section_id'] for e in locations):
@@ -422,11 +429,20 @@ def export(root, run):
     candidate.replace(output)
     csv_result = write_results(run, COLUMNS+['estado_cumplimiento'],
                                [csv_records[(r[0], r[1])] for r in rows], codes_by_pair)
-    result = dict(status='BLOCKED' if errors else ('COMPLETE' if target_projects == processed else 'PARTIAL'), excel=str(output),
+    coverage_path=run/'resultados/estado_indicadores.json'
+    write(coverage_path,dict(status='COMPLETE' if target_projects==processed else 'PARTIAL',
+        note='VALID identifica evaluaciones verificadas; los demas estados no son evaluaciones completas.',indicators=coverage))
+    valid_path=run/'resultados/evaluaciones_validas.json'
+    write(valid_path,dict(status='COMPLETE' if target_projects==processed else 'PARTIAL',assessments=valid_results))
+    result = dict(status='COMPLETE' if target_projects == processed and not errors else 'PARTIAL', excel=str(output),
         preprocessed_projects=len(all_projects), scoped_projects=len(target_projects), pending_projects=sorted(target_projects - processed), errors=errors,
         selected_projects=len(selected), processed_projects=len(processed), represented_projects=len({r[0] for r in rows}),
         relationships=len(rows), territories=0, excel_sha256=sha(output), power_bi_desktop_tested=False)
     result['csv'] = csv_result
+    result['indicator_statuses']=str(coverage_path)
+    result['valid_results']=str(valid_path)
+    result['valid_assessments']=sum(c['status']=='VALID' for c in coverage)
+    result['blocked_indicators']=[c for c in coverage if c['status']!='VALID']
     result['note'] = ('Analisis terminado sin candidatos con evidencia pertinente' if not rows and result['status'] == 'COMPLETE'
         else 'Resultados parciales; consultar proyectos pendientes' if result['status'] != 'COMPLETE'
         else 'Analisis completo de los proyectos preparados')
@@ -709,7 +725,7 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
     def quoted(value):
         return "'" + str(value).replace("'", "''") + "'"
     config_argument = ' --config ' + quoted(config_path) if config_path != 'config/pipeline_manual.json' else ''
-    restart = 'python run.py run' + config_argument
+    restart = 'uv run python run.py run' + config_argument
     if input_file is not None:
         restart += ' --file ' + quoted(input_file)
     elif delivery is not None:
@@ -729,7 +745,7 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
                 pass
         value = dict(status=status, run_id=name, location=str(run), stage=current,
                      updated_at=datetime.now(timezone.utc).isoformat(),
-                     resume_command=('python run.py resume --run-id ' + name + config_argument if run.is_dir() else restart) + ' --through ' + target,
+                     resume_command=('uv run python run.py resume --run-id ' + name + config_argument if run.is_dir() else restart) + ' --through ' + target,
                      checkpoint_available=checkpoint, **detail)
         if run.is_dir():
             write(run_file(run, 'progress.json'), value)
@@ -1034,11 +1050,6 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
                         directories = list(module.BASE.glob('batch_*'))
                         if not directories:
                             raise ValueError('Exportacion requiere evaluaciones verificadas')
-                        for directory in directories:
-                            verified = module.verify_run(directory)
-                            if verified['errors'] or verified['status'] != 'COMPLETE':
-                                return progress('PARTIAL',evaluations=[module.summary(module.verify_run(d)) for d in directories],
-                                    message='Evaluacion finalizada con indicadores bloqueados. Checkpoints conservados; no se publica un Excel completo.')
                         result = export(root, run)
                         if result['status'] != 'COMPLETE':
                             return progress(result['status'], result=result)
@@ -1060,7 +1071,7 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
         except KeyboardInterrupt:
             if any((run/'workspace/outputs/layer4').glob('batch_*')):
                 try:export(root,run)
-                except Exception:write(run/'partial_export.pending.json',dict(reason='Reintentar python run.py export --run-id '+name))
+                except Exception:write(run/'partial_export.pending.json',dict(reason='Reintentar uv run python run.py export --run-id '+name))
             progress('INTERRUPTED', message='Reanudar el mismo run; conservar checkpoints y claims del proveedor')
             raise
         except Exception as exc:

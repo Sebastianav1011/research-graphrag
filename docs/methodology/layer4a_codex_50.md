@@ -308,9 +308,9 @@ institucional ni calibrar probabilidades antes del benchmark independiente.
 Desde la raíz, con dependencias instaladas y publicaciones privadas disponibles:
 
 ```powershell
-.\.venv\Scripts\python.exe -B scripts/run_layer4_experiment.py prepare
-.\.venv\Scripts\python.exe -B scripts/run_layer4_experiment.py verify
-.\.venv\Scripts\python.exe -B scripts/run_layer4_experiment.py export
+uv run python -B scripts/run_layer4_experiment.py prepare
+uv run python -B scripts/run_layer4_experiment.py verify
+uv run python -B scripts/run_layer4_experiment.py export
 ```
 
 `prepare` no sobrescribe un experimento existente. Para otro experimento, copiar
@@ -325,9 +325,9 @@ authorization_reference, authorized_at, el selection_sha256 exacto y scope=pilot
 El software verifica la constancia, no otorga autorización institucional.
 
 ```powershell
-.\.venv\Scripts\python.exe -B scripts/run_layer4_experiment.py execute-batch --stage pilot --authorization <autorizacion_piloto.json>
-.\.venv\Scripts\python.exe -B scripts/run_layer4_experiment.py report
-.\.venv\Scripts\python.exe -B scripts/run_layer4_experiment.py export
+uv run python -B scripts/run_layer4_experiment.py execute-batch --stage pilot --authorization <autorizacion_piloto.json>
+uv run python -B scripts/run_layer4_experiment.py report
+uv run python -B scripts/run_layer4_experiment.py export
 ```
 
 Repetir el comando piloto tras interrupción solo recupera/salta transportes
@@ -337,7 +337,7 @@ progress.json, approved=true, approved_by y approved_at. La autorización para
 continuar debe registrar scope=continue y cubrir los restantes proyectos:
 
 ```powershell
-.\.venv\Scripts\python.exe -B scripts/run_layer4_experiment.py execute-batch --stage continue --authorization <autorizacion_continuacion.json> --pilot-approval <aprobacion_piloto.json>
+uv run python -B scripts/run_layer4_experiment.py execute-batch --stage continue --authorization <autorizacion_continuacion.json> --pilot-approval <aprobacion_piloto.json>
 ```
 
 Ejecutar ese comando una vez por lote siguiente. Reanudar no repite proyectos
@@ -348,9 +348,9 @@ Ante ERROR, INVALID o UNCERTAIN, revisar los archivos del proyecto y documentar
 una resolución antes de cambiar el estado o crear un experimento correctivo.
 
 ```powershell
-.\.venv\Scripts\python.exe -B scripts/run_layer4_experiment.py finalize
-.\.venv\Scripts\python.exe -B scripts/run_layer4_experiment.py verify
-.\.venv\Scripts\python.exe -B scripts/run_layer4_experiment.py human-metrics <revisor_1.xlsx> <revisor_2.xlsx>
+uv run python -B scripts/run_layer4_experiment.py finalize
+uv run python -B scripts/run_layer4_experiment.py verify
+uv run python -B scripts/run_layer4_experiment.py human-metrics <revisor_1.xlsx> <revisor_2.xlsx>
 ```
 
 El importador verifica selección, snapshot de resultados e identidades contra
@@ -376,7 +376,7 @@ probabilidad NULL. No se hace commit/push ni se publica en servicios externos.
 Pruebas offline relevantes:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -p no:cacheprovider tests/layer4_experiment tests/layer4_preliminary tests/layer4_preparation tests/layer4_confidence tests/layer4_powerbi tests/territories
+uv run python -m pytest -p no:cacheprovider tests/layer4_experiment tests/layer4_preliminary tests/layer4_preparation tests/layer4_confidence tests/layer4_powerbi tests/territories
 ```
 
 El cierre académico requiere todavía ejecución real autorizada, aprobación del

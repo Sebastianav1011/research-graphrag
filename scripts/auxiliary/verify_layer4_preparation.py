@@ -70,7 +70,7 @@ def verify(root=ROOT):
         done=subprocess.run([sys.executable,'-B',str(root/'scripts'/script),'--check'],cwd=root,
             capture_output=True,text=True,encoding='utf-8',errors='replace')
         if done.returncode:raise ValueError('Schema check failed: '+script+': '+done.stderr[-1000:])
-        schema_checks.append({'command':f'python -B scripts/{script} --check','status':'PASS','output':done.stdout.strip()})
+        schema_checks.append({'command':f'uv run python -B scripts/{script} --check','status':'PASS','output':done.stdout.strip()})
     check_contracts(root)
     report=read(out/'preparation_acceptance.json')
     if (report['status']!='LAYER4_PRELIMINARY_INPUTS_READY'

@@ -27,8 +27,8 @@ original y clase. Se revalidan antes de borrar y se restauran como alias despué
 de recuperar los bytes. Junctions y enlaces a destinos externos siguen bloqueados.
 
 ```powershell
-.\.venv\Scripts\python.exe -B scripts/cleanup_layer4.py inventory --output outputs/layer4/auditoria/cierre_v2/cleanup/inventory_expanded.json
-.\.venv\Scripts\python.exe -B scripts/cleanup_layer4.py plan --inventory outputs/layer4/auditoria/cierre_v2/cleanup/inventory_expanded.json --directory outputs/layer4/preliminary_tests --output outputs/layer4/auditoria/cierre_v2/cleanup/dry_run.json
+uv run python -B scripts/cleanup_layer4.py inventory --output outputs/layer4/auditoria/cierre_v2/cleanup/inventory_expanded.json
+uv run python -B scripts/cleanup_layer4.py plan --inventory outputs/layer4/auditoria/cierre_v2/cleanup/inventory_expanded.json --directory outputs/layer4/preliminary_tests --output outputs/layer4/auditoria/cierre_v2/cleanup/dry_run.json
 ```
 
 Antes de `apply` se inspecciona el inventario y el dry-run. El script repite la
@@ -40,7 +40,7 @@ este respaldo cuando no forman parte de la operación. Toda ruta recursiva se
 resuelve y contrasta con la allowlist dentro de outputs/layer4 antes de mutar.
 
 ```powershell
-.\.venv\Scripts\python.exe -B scripts/cleanup_layer4.py apply --plan outputs/layer4/auditoria/cierre_v2/cleanup/dry_run.json --backup archives/layer4/cleanup_recovery_20261024.zip --journal outputs/layer4/auditoria/cierre_v2/cleanup/deletion_journal.json
+uv run python -B scripts/cleanup_layer4.py apply --plan outputs/layer4/auditoria/cierre_v2/cleanup/dry_run.json --backup archives/layer4/cleanup_recovery_20261024.zip --journal outputs/layer4/auditoria/cierre_v2/cleanup/deletion_journal.json
 ```
 
 El ZIP no es una nueva salida activa ni un archivo completo de todos los
@@ -50,7 +50,7 @@ journal parcial exige inspección; no se vuelve a ejecutar una eliminación con 
 plan desactualizado ni se cambian sus hashes para aceptarlo.
 
 ```powershell
-.\.venv\Scripts\python.exe -B scripts/cleanup_layer4.py restore --journal outputs/layer4/auditoria/cierre_v2/cleanup/deletion_journal.json
+uv run python -B scripts/cleanup_layer4.py restore --journal outputs/layer4/auditoria/cierre_v2/cleanup/deletion_journal.json
 ```
 
 La recuperación verifica el ZIP y las rutas contra el journal y reconstruye

@@ -311,7 +311,7 @@ def exit_code(result):
 
 
 def parser():
-    result = argparse.ArgumentParser(description='GraphRag: ejecucion por capas SAD. Sin comando abre el menu.')
+    result = argparse.ArgumentParser(prog='uv run python run.py', description='GraphRag: ejecucion por capas SAD. Sin comando abre el menu.')
     result.add_argument('command', nargs='?', choices=('run', 'stage', 'resume', 'verify', 'status',
         'prepare','authorize','start','export','retry-pending','stop','model','contracts','contract-create','cleanup','migrate-runs','restore-run'))
     result.add_argument('--apply',action='store_true',help='cleanup: confirmar y aplicar solo eliminaciones verificadas')

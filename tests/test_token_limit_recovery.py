@@ -66,7 +66,8 @@ def test_limit_recovery_or_isolation_continues_next_indicator_and_project(live_r
     assert receipt['tokens']['output_tokens'] == sum(c['usage_observations'][0]['output_tokens'] for c in record['calls'])
     assert [c['retry'] for c in record['calls']] == list(range(len(record['calls'])))
     live.execute(SimpleNamespace(run='batch_test', authorize=False))
-    assert client.request.call_count == (4 + min(failures, 2))
+    # Explicit resume recovers the exhausted indicator without repeating valid siblings.
+    assert client.request.call_count == (4 + min(failures, 2) + int(failures > 2))
 
 
 def test_stop_at_output_cap_is_not_accepted_as_valid(provider_case):

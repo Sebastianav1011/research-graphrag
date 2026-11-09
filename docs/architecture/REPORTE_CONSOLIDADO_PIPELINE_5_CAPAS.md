@@ -186,25 +186,25 @@ Desde la raíz, para uno o dos proyectos originales depositados por el usuario:
 
 ```powershell
 $ejecucion = 'vivo_' + (Get-Date -Format 'yyyyMMdd_HHmmss_fff')
-.\.venv\Scripts\python.exe -B scripts/run_layer1_raw.py --dataset prueba_en_vivo
-.\.venv\Scripts\python.exe -B scripts/run_layer2_preprocessing.py --dataset prueba_en_vivo --run-id $ejecucion
-.\.venv\Scripts\python.exe -B scripts/run_layer3_knowledge.py --dataset prueba_en_vivo --run-id $ejecucion
-.\.venv\Scripts\python.exe -B scripts/run_pipeline_manual.py validate --dataset prueba_en_vivo --run-id $ejecucion
+uv run python -B scripts/run_layer1_raw.py --dataset prueba_en_vivo
+uv run python -B scripts/run_layer2_preprocessing.py --dataset prueba_en_vivo --run-id $ejecucion
+uv run python -B scripts/run_layer3_knowledge.py --dataset prueba_en_vivo --run-id $ejecucion
+uv run python -B scripts/run_pipeline_manual.py validate --dataset prueba_en_vivo --run-id $ejecucion
 ```
 
 GraphRAG y los resultados se ejecutan solo cuando se desean y se aprueban:
 
 ```powershell
-.\.venv\Scripts\python.exe -B scripts/run_layer4_graphrag.py --dataset prueba_en_vivo --run-id $ejecucion --approve-build
-.\.venv\Scripts\python.exe -B scripts/run_layer5_results.py review --dataset prueba_en_vivo --run-id $ejecucion
+uv run python -B scripts/run_layer4_graphrag.py --dataset prueba_en_vivo --run-id $ejecucion --approve-build
+uv run python -B scripts/run_layer5_results.py review --dataset prueba_en_vivo --run-id $ejecucion
 ```
 
 Después de leer review.txt:
 
 ```powershell
-.\.venv\Scripts\python.exe -B scripts/run_layer5_results.py evaluate --dataset prueba_en_vivo --run-id $ejecucion --authorize
-.\.venv\Scripts\python.exe -B scripts/run_layer5_results.py export --dataset prueba_en_vivo --run-id $ejecucion
-.\.venv\Scripts\python.exe -B scripts/run_layer5_results.py verify --dataset prueba_en_vivo --run-id $ejecucion
+uv run python -B scripts/run_layer5_results.py evaluate --dataset prueba_en_vivo --run-id $ejecucion --authorize
+uv run python -B scripts/run_layer5_results.py export --dataset prueba_en_vivo --run-id $ejecucion
+uv run python -B scripts/run_layer5_results.py verify --dataset prueba_en_vivo --run-id $ejecucion
 ```
 
 Pipeline con el mismo coordinador: `run --through knowledge` prepara las capas 2/3;

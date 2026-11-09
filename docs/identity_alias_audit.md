@@ -68,4 +68,4 @@ de coexistencia, alias único y aliases documentales en el script de auditoría.
 SHA-256 de fuentes, catálogo y todos los archivos de canonical iguales antes/después.
 
 Evidencia privada agregada: outputs/layer1/reports/identity_alias_audit.json.
-Reproducción: python scripts/audit_identity_aliases.py. El script solo escribe su informe.
+Reproducción: uv run python scripts/audit_identity_aliases.py. El script solo escribe su informe.

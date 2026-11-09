@@ -1,0 +1,14 @@
+version: LAYER4A_50_V1
+project_count: 50
+candidate_limit_per_project: 2
+batch_size: 5
+pilot_project_count: 5
+seed: LAYER4A_50_V1
+secondary_rank_window: 3
+engine: CODEX_CLI
+model: null
+timeout_seconds: 600
+max_technical_retries: 1
+layer3_manifest: outputs/layer3/publication/_manifest.json
+territory_manifest: outputs/layer4/territorios/publicacion/territory_manifest.json
+output_directory: outputs/layer4/pruebas/piloto_v2/original_5

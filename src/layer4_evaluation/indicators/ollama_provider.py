@@ -102,6 +102,33 @@ def strict_json(text):
     return json.loads(text, object_pairs_hook=pairs, parse_constant=constant)
 
 
+CORRECTION_VERSION = 'LITERAL_GRAPH_EVIDENCE_V1'
+CORRECTION = '''
+CORRECTIVE_JSON_RULES:
+evidence.text: copia LITERAL continua de project.fields[evidence.field] del INPUT_JSON,
+solo del fragmento enviado; no reformules ni inventes.
+evidence_indices: posiciones 0..len(evidence)-1 de TU array, nunca IDs de fragmentos.
+NOT_SUPPORTED: todos NOT_DEMONSTRATED, strength=0. Apoyo parcial: INSUFFICIENT_EVIDENCE.
+Respeta IDs y temporalidad de rubrica. Devuelve JSON completo corregido.
+'''
+
+
+def corrective_request(request, schema, settings, issues=None):
+    """Keep the exact evidence payload; budget and fingerprint the actual prompt."""
+    from .context_budget import estimate
+    revised = dict(request)
+    prefix, marker, payload = request['prompt'].partition('INPUT_JSON:\n')
+    if not marker:
+        raise ValueError('Solicitud correctiva sin INPUT_JSON')
+    prefix = prefix.split('\nCORRECTIVE_JSON_RULES:\n', 1)[0]
+    feedback = ('\nERRORES: ' + '; '.join(sorted({i['category'] for i in issues}))
+                if issues else '')
+    revised['prompt'] = prefix + CORRECTION + feedback + '\n' + marker + payload
+    revised['context_budget'] = estimate(revised['prompt'], schema, settings,
+        tokenizer=request.get('context_budget', {}).get('tokenizer'))
+    return revised
+
+
 def context_guard(prompt, schema, settings, runtime=None, budget=None):
     if budget is not None:
         from .context_budget import estimate
@@ -221,7 +248,7 @@ class OllamaAssessmentProvider:
     def __init__(self, run_directory, schema_path, input_factory, *, settings=None, client=None,
                  runtime=None, timeout=None, model=None, max_retries=0, max_indicators=3,
                  wrapper_validator=None, execution_id=None, stop_on_uncertain=True, output_adapter=None,
-                 token_limit_retries=0):
+                 token_limit_retries=0, corrective_retries=0):
         options = dict(settings or {})
         if timeout is not None:
             options['timeout_seconds'] = timeout
@@ -231,6 +258,9 @@ class OllamaAssessmentProvider:
         if type(token_limit_retries) is not int or not 0 <= token_limit_retries <= self.settings['token_limit_retries']:
             raise ValueError('Reintentos de salida fuera de la configuracion')
         self.token_limit_retries = token_limit_retries
+        if type(corrective_retries) is not int or not 0 <= corrective_retries <= 2:
+            raise ValueError('Maximo dos reintentos correctivos')
+        self.corrective_retries = corrective_retries
         if max_retries != 0 or max_indicators not in (1, 2, 3, 5) or not stop_on_uncertain:
             raise ValueError('Ollama requiere ejecucion secuencial sin reintentos automaticos')
         self.directory, self.schema = Path(run_directory), Path(schema_path)
@@ -245,13 +275,23 @@ class OllamaAssessmentProvider:
     def evaluate(self, project, indicators):
         # Retries are explicitly enabled by the live run plan. Other callers keep
         # their existing outer retry policy and do not multiply inference calls.
-        retries = self.token_limit_retries
+        retries = max(self.token_limit_retries, self.corrective_retries)
         output = self.settings['num_predict']
+        request = self.input_factory(project, indicators)
         for attempt in range(retries + 1):
             try:
-                return self._evaluate_once(project, indicators, attempt=attempt, output=output)
+                return self._evaluate_once(project, indicators, attempt=attempt, output=output, request=request)
             except OllamaError as exc:
-                if exc.code != 'TOKEN_LIMIT' or attempt == retries:
+                if attempt == retries:
+                    raise
+                if exc.code == 'INVALID_ASSESSMENT' and attempt < self.corrective_retries:
+                    if any(i.get('category') == 'INTERNAL_VALIDATION_ERROR' for i in self.calls[-1]['validation_issues']):
+                        raise
+                    request = corrective_request(self.input_factory(project, indicators),
+                        strict_json(self.schema.read_text(encoding='utf-8')), self.settings,
+                        self.calls[-1]['validation_issues'])
+                    continue
+                if exc.code != 'TOKEN_LIMIT' or attempt >= self.token_limit_retries:
                     raise
                 budget = self.calls[-1].get('context_budget')
                 input_tokens = (budget['estimated_input_tokens'] if budget else
@@ -264,11 +304,11 @@ class OllamaAssessmentProvider:
                 if ceiling > output:
                     output = min(output * 2, ceiling)
 
-    def _evaluate_once(self, project, indicators, *, attempt=0, output=None):
+    def _evaluate_once(self, project, indicators, *, attempt=0, output=None, request=None):
         self.last_output = None
         if not 1 <= len(indicators) <= self.max_indicators or not re.fullmatch(r'[A-Za-z0-9_-]+', project['project_id']):
             raise ValueError('Identificador de proyecto o lote invalido')
-        request = self.input_factory(project, indicators)
+        request = request or self.input_factory(project, indicators)
         prompt = request['prompt']
         schema = strict_json(self.schema.read_text(encoding='utf-8'))
         Draft202012Validator.check_schema(schema)

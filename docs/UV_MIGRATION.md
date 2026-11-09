@@ -67,7 +67,7 @@ con cambios previos del usuario. Los entrypoints y paquetes actuales que todaví
 están sin seguimiento deben publicarse junto con esta configuración: consultar
 [Git y mantenimiento](instalacion.md#git-y-mantenimiento).
 
-Después de esa publicación, el flujo del clon es `uv sync` y
+Después de esa publicación, el flujo del clon es `uv sync --locked` y
 `uv run python run.py`. La resolución incluye Linux y macOS, pero solo se
 sincronizó y verificó un runtime Windows durante esta tarea. Ejecutar todo
 GraphRAG continúa requiriendo pesos, datos/catálogos autorizados y el hardware

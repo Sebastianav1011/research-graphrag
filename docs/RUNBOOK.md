@@ -15,7 +15,7 @@ los procedimientos históricos y sus prerrequisitos; no son una instalación nue
 ```powershell
 git clone https://github.com/Sebastianav1011/research-graphrag.git
 cd research-graphrag
-uv sync
+uv sync --locked
 uv run python run.py
 ```
 
@@ -23,7 +23,7 @@ Python 3.14.0 queda fijado en `.python-version`. `uv.lock` fija el runtime,
 pruebas y grupos opcionales para las plataformas declaradas; no se necesita
 activar `.venv`. No instalar manualmente las dependencias transitivas.
 Los locks y requirements anteriores se conservan por compatibilidad.
-Para una instalación existente usar `uv sync --inexact` si se desea conservar
+Para una instalación existente usar `uv sync --locked --inexact` si se desea conservar
 paquetes adicionales ajenos al proyecto. No se eliminan entornos ni datos.
 
 ## 2. Datos que no vienen con Git

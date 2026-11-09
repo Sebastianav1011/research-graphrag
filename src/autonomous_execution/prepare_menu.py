@@ -213,7 +213,7 @@ def prepare(root,args,coordinator,original_dispatch):
     (directory/'review_summary.txt').write_text(summary,encoding='utf-8')
     print('\n'+summary)
     print('Puede conservar esta revision y autorizarla mas tarde con:')
-    print(f'python run.py authorize --run-id {name} --manifest-sha256 {digest}')
+    print(f'uv run python run.py authorize --run-id {name} --manifest-sha256 {digest}')
     try:
         approval=input('Autorizar este manifiesto e iniciar en segundo plano [AUTORIZAR/Enter para dejar pendiente]: ').strip()
     except EOFError:

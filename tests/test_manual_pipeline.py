@@ -212,7 +212,8 @@ def test_real_stage_wiring_with_injected_test_embeddings(tmp_path, monkeypatch):
     assert not list(engine.BASE.rglob('authorization.json'))
 
 
-def test_export_keeps_partial_evidence_and_original_numeric_score(sandbox, monkeypatch):
+@pytest.mark.parametrize('blocked', [False, True])
+def test_export_keeps_partial_evidence_and_original_numeric_score(sandbox, monkeypatch, blocked):
     """Real V3 validation/arithmetic on an existing synthetic fixture; no model call."""
     import importlib.util
     from types import SimpleNamespace
@@ -240,13 +241,22 @@ def test_export_keeps_partial_evidence_and_original_numeric_score(sandbox, monke
     directory.mkdir(parents=True)
     plan = dict(projects=[p], profiles={'SYNTH_I': case['profile']}, rubrics={'SYNTH_I': case['rubric']})
     engine = SimpleNamespace(BASE=run / 'layer5_results', check=lambda d: plan,
-        verify_run=lambda d: dict(projects=[dict(project_id=p['project_id'], complete=True, rows=[row])], errors=[]),
+        verify_run=lambda d: dict(projects=[dict(project_id=p['project_id'], complete=not blocked, rows=[row],
+            selected=['SYNTH_I','BLOCKED'] if blocked else ['SYNTH_I'],
+            blocked_indicators={'BLOCKED':'BLOCKED_ERROR'} if blocked else {})],
+            errors=[p['project_id']+': BLOCKED_ERROR'] if blocked else []),
         v3=v3, assessment_from_row=__import__('layer4_evaluation.live_execution', fromlist=['assessment_from_row']).assessment_from_row,
         evidence_locations=evidence_locations, SUBSTANTIVE={'summary', 'methodology', 'objectives', 'expected_results'})
     monkeypatch.setattr(runner, 'engine', lambda r, d: engine)
     monkeypatch.setattr(runner, 'validated_graph', lambda r, d: {})
     result = runner.export(root, run)
-    assert result['relationships'] == 1 and result['status'] == 'COMPLETE'
+    assert result['relationships'] == 1 and result['status'] == ('PARTIAL' if blocked else 'COMPLETE')
+    assert result['valid_assessments']==1
+    assert read(Path(result['valid_results']))['assessments']==[dict(row,siap_id='000701')]
+    assert bool(result['blocked_indicators'])==blocked
+    if blocked:
+        assert result['blocked_indicators'][0]['status']=='BLOCKED_ERROR'
+        assert not result['blocked_indicators'][0]['project_complete']
     import csv
     with (run/'resultados/indicadores.csv').open(encoding='utf-8-sig',newline='') as stream:
         exported = list(csv.DictReader(stream,delimiter=';'))

@@ -32,7 +32,7 @@ Operación y contrato: [pipeline_manual.md](pipeline_manual.md).
 
 1. **13 pruebas nuevas aprobadas**, en 32,69 s:
 
-   `python -B -m pytest -q -p no:cacheprovider tests/test_manual_pipeline.py --basetemp outputs/pipeline_manual_operational_validation_temp`
+   `uv run python -B -m pytest -q -p no:cacheprovider tests/test_manual_pipeline.py --basetemp outputs/pipeline_manual_operational_validation_temp`
 
    Cubren JSON nuevo, CSV institucional con columnas faltantes, XLSX, DOCX, nulos,
    ID con ceros iniciales, ID de artículo, duplicados, título de miembros, vínculos
