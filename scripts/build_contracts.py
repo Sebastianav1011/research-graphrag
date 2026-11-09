@@ -1,16 +1,12 @@
-"""Build empty future-output template and machine-readable contracts; not an ETL stage."""
+"""Build JSON contracts and verify the supplied template without regenerating it."""
 import csv
 import json
 import sys
 from pathlib import Path
-from openpyxl import Workbook, load_workbook
-from openpyxl.styles import Alignment, Font, PatternFill
-from openpyxl.worksheet.datavalidation import DataValidation
-from openpyxl.utils import get_column_letter
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-from layer1_data.contracts import FIELDS, FINAL_FIELDS, NON_NULL, PROVENANCE, fields, logical_schema
+from layer2_processing.preprocessing.contracts import FIELDS, FINAL_FIELDS, NON_NULL, PROVENANCE, fields, logical_schema
 
 DESCRIPTIONS = {
     "project_id": "Clave canónica estable del proyecto",
@@ -111,37 +107,10 @@ def main():
                                  "description": DESCRIPTIONS[field], "source": "config/sources.yaml; provenance_json.field_mapping",
                                  "transformation": "provenance.py" if field in PROVENANCE else
                                  ("identity.py" if dataset == "investigadores" else "normalize.py; canonicalize.py")})
-    book = Workbook()
-    book.remove(book.active)
-    for sheet_name, source_type in (("Proyectos", "PROJECT"), ("Artículos", "ARTICLE")):
-        sheet = book.create_sheet(sheet_name)
-        sheet.append(FINAL_FIELDS)
-        sheet.freeze_panes = "D2"
-        sheet.auto_filter.ref = "A1:P1"
-        sheet.sheet_view.showGridLines = False
-        sheet.row_dimensions[1].height = 34
-        for column, field in enumerate(FINAL_FIELDS, 1):
-            cell = sheet.cell(1, column)
-            cell.font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
-            cell.fill = PatternFill("solid", fgColor="17365D" if column <= 7 else "27636B")
-            cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
-            sheet.column_dimensions[get_column_letter(column)].width = max(20, min(32, len(field) + 3))
-        validation = DataValidation(type="list", formula1='"' + source_type + '"', allow_blank=False)
-        validation.errorTitle = "Tipo de fuente inválido"
-        validation.error = "Utilice el tipo correspondiente a esta hoja."
-        validation.showErrorMessage = True
-        validation.errorStyle = "stop"
-        sheet.add_data_validation(validation)
-        validation.add("B2:B1048576")
-    destination = ROOT / "templates/resultado_final_indicadores.xlsx"
-    book.save(destination)
-    check = load_workbook(destination, read_only=True)
-    assert check.sheetnames == ["Proyectos", "Artículos"]
-    for sheet in check:
-        assert sheet.max_row == 1 and sheet.max_column == 16
-        assert list(next(sheet.values)) == FINAL_FIELDS
-    check.close()
-    print("Contracts generated; empty template verified (2 sheets, 16 columns, zero data rows)")
+    from autonomous_execution.final_output import load_template
+    book=load_template(ROOT);book.close()
+    print('Contracts generated; user-supplied template verified (INDICADORES / TERRITORIOS); template not rewritten')
+
 
 
 if __name__ == "__main__":

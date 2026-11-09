@@ -1,0 +1,4 @@
+# Optional sensors. CPU time and native RSS work without these packages.
+psutil>=7.0,<8
+# Optional NVIDIA NVML binding; unsupported hardware/driver metrics stay blank.
+nvidia-ml-py>=12

@@ -5,8 +5,8 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'src'))
-from layer4.indicators import experiment
-from layer4.indicators import experiment_export
+from layer4_evaluation.indicators import experiment
+from layer4_evaluation.indicators import experiment_export
 
 
 def main():
@@ -30,10 +30,10 @@ def main():
     metrics.add_argument('workbooks',type=Path,nargs='+')
     args=parser.parse_args()
     if args.command=='audit':
-        from layer4.indicators.closure_audit import audit
+        from layer4_evaluation.indicators.closure_audit import audit
         result=audit(experiment.ROOT)
     elif args.command in ('compare','review','performance','verify-final'):
-        from layer4.indicators import closure_export, performance_report
+        from layer4_evaluation.indicators import closure_export, performance_report
         if args.command=='performance':
             result=performance_report.generate(experiment.ROOT,None if args.historical else args.config)
         elif args.command=='verify-final':
@@ -46,7 +46,7 @@ def main():
     elif args.command in ('export','finalize'):
         config,_=experiment.configuration(path=args.config)
         if experiment.is_v2(config):
-            from layer4.indicators import closure_export
+            from layer4_evaluation.indicators import closure_export
             result=(closure_export.publish(experiment.ROOT,args.config,args.approval,args.review)
                     if args.command=='finalize' else closure_export.review(experiment.ROOT,args.config))
         else:
@@ -54,7 +54,7 @@ def main():
     elif args.command=='human-metrics':
         config,_=experiment.configuration(path=args.config)
         if experiment.is_v2(config):
-            from layer4.indicators.closure_export import review_metrics
+            from layer4_evaluation.indicators.closure_export import review_metrics
             if len(args.workbooks)!=1 or args.workbooks[0].suffix.lower()!='.json':
                 raise ValueError('V2 human-metrics requires one completed human-review JSON')
             result=review_metrics(experiment.ROOT,args.config,args.workbooks[0])

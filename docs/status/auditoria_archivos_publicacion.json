@@ -1,0 +1,2530 @@
+{
+  "proposed_publication_files": [
+    {
+      "path": ".env.example",
+      "tracked": true,
+      "sha256": "988157fc3bb3c77a31988a9364b96e55d9d64e746b9323f53c0c7d387be6b8e7"
+    },
+    {
+      "path": ".gitattributes",
+      "tracked": true,
+      "sha256": "6496e4973dc41361b4873d5aa32bed648c1ea8db8a4b65b72cf5fb83718321ea"
+    },
+    {
+      "path": ".gitignore",
+      "tracked": true,
+      "sha256": "a853ab40080ac48a52f9bdc2510707e810bc5d4f9c4728cb77824c095697a7d3"
+    },
+    {
+      "path": ".python-version",
+      "tracked": true,
+      "sha256": "a3c1031631e89bddd65ef22311f8268e239bee1939a1d9a033e834d4540b4ad9"
+    },
+    {
+      "path": "README.md",
+      "tracked": true,
+      "sha256": "20253fb58c1ec2d095ab4bd1015fdecc2f94d0fb47b77df7287cf026dcdc2635"
+    },
+    {
+      "path": "config/README.md",
+      "tracked": true,
+      "sha256": "0e01bf9bbaf8b92190afa86bc031459f0d122a33f5ba00043e6c203bd06b6761"
+    },
+    {
+      "path": "config/autonomous.json",
+      "tracked": true,
+      "sha256": "85af351317cc8712b067728e3fee98703a1bb7039b24590ba47d36f63af8027d"
+    },
+    {
+      "path": "config/autonomous_optimized.json",
+      "tracked": true,
+      "sha256": "6f6154b9c33f87d61388f0f13e6f9ce43251f5c80a9e9661a0943b6500733629"
+    },
+    {
+      "path": "config/autonomous_phase11.json",
+      "tracked": true,
+      "sha256": "0ccf183a49e4acecfff79ca373eb8a8bb805a6de8e56894a679e54b5d1350b6b"
+    },
+    {
+      "path": "config/autonomous_phase12.json",
+      "tracked": true,
+      "sha256": "70989cdb6c25e0bdc47792cdd0ec654c1ed10dff35a45db1abb279ecf749d3a5"
+    },
+    {
+      "path": "config/autonomous_resources.json",
+      "tracked": true,
+      "sha256": "0896520dc6ddc1d0409ddbeda11c665e0a87e4dc22075b024ae9fc290008ae42"
+    },
+    {
+      "path": "config/layer1.yaml",
+      "tracked": true,
+      "sha256": "68f898bee238956a1d6189c324f33859d97180bef6afab7fcae92a6655a396af"
+    },
+    {
+      "path": "config/layer2.yaml",
+      "tracked": true,
+      "sha256": "2a17cf81a5006966dfd5e59f00aed0d18e3a2cae53977a096007dff604c9df39"
+    },
+    {
+      "path": "config/layer3.yaml",
+      "tracked": true,
+      "sha256": "7895619628217f3d366dc1d583161c980776ebcf538e81b7e86be9817a70d943"
+    },
+    {
+      "path": "config/layer4_closure.yaml",
+      "tracked": true,
+      "sha256": "5269271ed163b8f1fa74bec4947061d68a2ecaec8df7998cb1c1f4f3a842a4f2"
+    },
+    {
+      "path": "config/layer4_closure_definitive.yaml",
+      "tracked": true,
+      "sha256": "764ba5910c316373a25570d70618c4372bbff22b5cf0d34a03a37754043dd869"
+    },
+    {
+      "path": "config/layer4_confidence.yaml",
+      "tracked": true,
+      "sha256": "6763c19f415b83c87840aa005d67c4f9702556f16fe9f7c877b60962d76c281f"
+    },
+    {
+      "path": "config/layer4_experiment.yaml",
+      "tracked": true,
+      "sha256": "84cfea53dce2871b692a60476086b667f09235952a43a6ffa4e19b1f8c9ba511"
+    },
+    {
+      "path": "config/layer4_final.yaml",
+      "tracked": true,
+      "sha256": "57ad56049e215211979e6e8e505e7d213f8f8acfc5b44b9679c0b9911cb0e3fa"
+    },
+    {
+      "path": "config/layer4_preliminary.yaml",
+      "tracked": true,
+      "sha256": "691db43fb35dbd7bb8baffeb352d0610b99c812fae71da1d162a545c83566e54"
+    },
+    {
+      "path": "config/openai.json",
+      "tracked": true,
+      "sha256": "c33622fbe6276892a457f7b6a891e9832ec335b6c2daa6d57b0e32f0e08365dd"
+    },
+    {
+      "path": "config/pipeline_manual.json",
+      "tracked": true,
+      "sha256": "b45e0e65d45c900e638179be9c53587b8ea3525f5ceed28ab886e4a73d5ba023"
+    },
+    {
+      "path": "config/pipeline_validacion_integral.json",
+      "tracked": true,
+      "sha256": "af76a8f4af2eb9a1a7488e5ecad5e6ddc55e7998ac28b358167a6b372f6b382e"
+    },
+    {
+      "path": "config/qwen_tokenizer.json",
+      "tracked": true,
+      "sha256": "5a5e9f29e8d0f9b59ccab7d684f3683860bc23d611757731cb1a826cd2e951c4"
+    },
+    {
+      "path": "config/sad_relocations.json",
+      "tracked": true,
+      "sha256": "1c771d94a7a2a2890e3529fe071218bd620875c6fc2094418582c98c048d014e"
+    },
+    {
+      "path": "config/sources.example.yaml",
+      "tracked": true,
+      "sha256": "ab933a267e58c90504f18caec6ccfdb0b6d1521c8159ee54d424c0224040b605"
+    },
+    {
+      "path": "config/sources.synthetic.yaml",
+      "tracked": true,
+      "sha256": "d41b2e24bd6369783ba2345875599998b6e31f9fc32eaf33e00c9c20441cc5d6"
+    },
+    {
+      "path": "data/contratos/tesis_comparacion_30.v1.json",
+      "tracked": true,
+      "sha256": "3ff98a8d2e0f901ab1aff0b08f90f60b46d7b4aba002eea1d6b6e318b375ed21"
+    },
+    {
+      "path": "data/layer1_sources/README.md",
+      "tracked": true,
+      "sha256": "a9a1015ac0084abc0745e309dad95d2b8dd96d9bac5cf6b99f59e2451047044e"
+    },
+    {
+      "path": "data/layer1_sources/base/.gitkeep",
+      "tracked": true,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "data/layer1_sources/incoming/.gitkeep",
+      "tracked": true,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "data/layer1_sources/reference/.gitkeep",
+      "tracked": true,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "data/templates/plantilla_entrada_proyectos.xlsx",
+      "tracked": true,
+      "sha256": "0fec25e21f555928b1e3337778a3c53b4145fa0a4ec7f306f5cd5141450ecc55"
+    },
+    {
+      "path": "data/templates/plantilla_resultado_final_indicadores_territorios.xlsx",
+      "tracked": true,
+      "sha256": "3d692a8b4a5af95ecfffabd3fe85efc4f09f3955e13d0db3f8793f1d7102b6d8"
+    },
+    {
+      "path": "data/templates/resultado_final_indicadores.xlsx",
+      "tracked": true,
+      "sha256": "1567f315dfbae7681f29c83d9482ffe3d2ed8077bfc51ac51c94712381988caa"
+    },
+    {
+      "path": "docs/ALMACENAMIENTO.md",
+      "tracked": true,
+      "sha256": "4b6a7a61458f6f6ea9ee7c84a158d8e8c57c5a627f914c439dc684a7d175bb0c"
+    },
+    {
+      "path": "docs/OPENAI_EXPERIMENTS.md",
+      "tracked": true,
+      "sha256": "320ac6cc0576b771526f1e91fb17563f645e8e0703dedcab8ed509188e6c6645"
+    },
+    {
+      "path": "docs/README.md",
+      "tracked": true,
+      "sha256": "f2e787c0624155ac84fac60c5cde044c188e4d95d20c093e94eb78e4e1d32c20"
+    },
+    {
+      "path": "docs/UV_MIGRATION.md",
+      "tracked": true,
+      "sha256": "9cf9c35f0f263aa8aae4a2a90c977319173a5386bd8e86aeab0dbc28584bc96a"
+    },
+    {
+      "path": "docs/contracts/canonical_data_contract.md",
+      "tracked": true,
+      "sha256": "71d90ed855a20c59dbf54204d1bab34693ce66929d20e1894e07babfa0670459"
+    },
+    {
+      "path": "docs/contracts/chunking_contract.md",
+      "tracked": true,
+      "sha256": "d7e6fd8518738918a73604abb47c24435f2bf6211ec25c62b8d5d22c0e008807"
+    },
+    {
+      "path": "docs/contracts/cinco_capas.md",
+      "tracked": true,
+      "sha256": "001745c0ca455d79aa09a8d7e68a9ce4842c444a39f59555116b7cbc885a567f"
+    },
+    {
+      "path": "docs/contracts/final_output_contract.md",
+      "tracked": true,
+      "sha256": "547c648cd4377d3f71f83be903c3a876e49a8124433b6280b28415b162fa44b5"
+    },
+    {
+      "path": "docs/contracts/graph_contract.md",
+      "tracked": true,
+      "sha256": "0ad6f0200dfa93d2ef763d062a9069c15504bad05cff2b70e9bdc44254451520"
+    },
+    {
+      "path": "docs/contracts/layer2_knowledge_contract.md",
+      "tracked": true,
+      "sha256": "39b2ee7441f5aa9b7cb9d2d945629d95daa9b5d8ec4719cfcfbb5b3c14f2b558"
+    },
+    {
+      "path": "docs/contracts/layer3_graphrag_contract.md",
+      "tracked": true,
+      "sha256": "efb888e9e2d481d37769b1a67a964f3b0e4d5bf48d7be1f9efc5e6e9589dcffd"
+    },
+    {
+      "path": "docs/contracts/layer4_assessment_contract.md",
+      "tracked": true,
+      "sha256": "eb0cb5cac744c2aaef9ba679ef213a65c2b50ed5432c9a6c6fd28d7c8ee43b76"
+    },
+    {
+      "path": "docs/contracts/layer4_assessment_v2_contract.md",
+      "tracked": true,
+      "sha256": "5d6c2db64349eb857d6576fa893a6ab166e7012b63866842d19510e79e38340d"
+    },
+    {
+      "path": "docs/contracts/layer4_assessment_v3_contract.md",
+      "tracked": true,
+      "sha256": "6a5121ed4d2c51eb03106f958d99ad02b6f3bf79a8fd640e24c1c242e5de206c"
+    },
+    {
+      "path": "docs/contracts/layer4_confidence_contract.md",
+      "tracked": true,
+      "sha256": "9c33e54e8530d2da9cf5fec62cba12bbaa56ef41b87333521c806dd078956a9d"
+    },
+    {
+      "path": "docs/contracts/layer4_discovery_v3_3_contract.md",
+      "tracked": true,
+      "sha256": "921145216d22671991367dd24d4880bcf979181b72c89bb8a4b9d3675b8eeb9f"
+    },
+    {
+      "path": "docs/contracts/layer4_indicator_profiles_contract.md",
+      "tracked": true,
+      "sha256": "a33638f680cef008c33cc2a855348f72ce4173e1472966416e85de2ced98afff"
+    },
+    {
+      "path": "docs/contracts/layer4_output_contract.md",
+      "tracked": true,
+      "sha256": "004b3a24cbf62a51997c8376ece96d7becd454d120563b2bed51d432be04411e"
+    },
+    {
+      "path": "docs/contracts/layer4_powerbi_contract.md",
+      "tracked": true,
+      "sha256": "f35b96314796bf84633540c246509edab461bab5f5562fd9126d46555a0c12ac"
+    },
+    {
+      "path": "docs/contracts/retrieval_contract.md",
+      "tracked": true,
+      "sha256": "a65bb67d7b6f7ca2396311ef750bd3d643948fffa05296eb727fe5f663ff13ea"
+    },
+    {
+      "path": "docs/data_dictionary/data_dictionary.csv",
+      "tracked": true,
+      "sha256": "906df3bcbbc98bb63501af84a51c536c7435b44dcb5869e2bf25abaf85342f4f"
+    },
+    {
+      "path": "docs/instalacion.md",
+      "tracked": true,
+      "sha256": "0bdc85f471a5eebd4942523cb2b183a340c2996b33783bd6929840d361adb996"
+    },
+    {
+      "path": "docs/status/almacenamiento_final.md",
+      "tracked": true,
+      "sha256": "07567ed41fc06f511d23d5afb6ca6b60782aaeaa193d3998308d2014c0980179"
+    },
+    {
+      "path": "docs/status/auditoria_final_repositorio.md",
+      "tracked": true,
+      "sha256": "469cc3109c6316d53896a533754ea97b55253f71f12925e07f9c873e446966c3"
+    },
+    {
+      "path": "docs/status/validacion_contrato_tesis30.md",
+      "tracked": true,
+      "sha256": "4390b08817ad53adc96247deebb294cee99c3fdfb5f1599328b7952af2006120"
+    },
+    {
+      "path": "pyproject.toml",
+      "tracked": true,
+      "sha256": "690f0bd9b25a057f0c6c8389f7f7e9487da3abfe898247b779ef38225ac226d8"
+    },
+    {
+      "path": "pytest.ini",
+      "tracked": true,
+      "sha256": "f744c843627031cafc4db8e881cc0625895794587af832d6a8df6a9afa9b3b67"
+    },
+    {
+      "path": "requirements-dev.txt",
+      "tracked": true,
+      "sha256": "6bf39bb211120c40427ec3589056452f0af1bbb120fed0d1d5c359b7f631b53d"
+    },
+    {
+      "path": "requirements.txt",
+      "tracked": true,
+      "sha256": "ac3683254f4588419fad1686b6b1430397957411f758d23b79e45d54315dd647"
+    },
+    {
+      "path": "requirements/README.md",
+      "tracked": true,
+      "sha256": "cf5a3f35c76a0300ed079ae2c0b31de2491a18d2b4dc5e833fd70938734c45c6"
+    },
+    {
+      "path": "requirements/dev-constraints.txt",
+      "tracked": true,
+      "sha256": "2142f142f5a5ac23f00f899e1751ec689cfc579341b6fadd6b4624d182dbe8cc"
+    },
+    {
+      "path": "requirements/layer3-windows-cuda.lock.txt",
+      "tracked": true,
+      "sha256": "ebcd120c0037edc9058384e514e83f1f19a8ced27d2e78b181cdb78d330341ea"
+    },
+    {
+      "path": "requirements/layer3.txt",
+      "tracked": true,
+      "sha256": "456c59fc5f8801c4d7ac8cfc7d45a147d6b49c39095a5e61f7d281b5bce482cd"
+    },
+    {
+      "path": "requirements/manual-input.txt",
+      "tracked": true,
+      "sha256": "22cc8cdbb633c633a0ffcdcd6a60befedac30ba87618741206313c85b7aa87ae"
+    },
+    {
+      "path": "requirements/performance.txt",
+      "tracked": true,
+      "sha256": "c55975f663bf1f1f48dbc7cf436c98e79847b958cd103cb2b4a87eef79324b11"
+    },
+    {
+      "path": "requirements/runtime-constraints.txt",
+      "tracked": true,
+      "sha256": "4fcc83d1ec85f5e008cdcf146427fccf2a08f45e1f1604a84d5a3294d768b702"
+    },
+    {
+      "path": "run.py",
+      "tracked": true,
+      "sha256": "7328fca1528ca193918a324766d91c6a539e766abb1b5f2805d5dc1edb92e9c3"
+    },
+    {
+      "path": "schemas/README.md",
+      "tracked": true,
+      "sha256": "1cabf1d6d7ee97fea564d32e3abc8bb5aceb90f9b7810c7fef1302e07aa38f3a"
+    },
+    {
+      "path": "schemas/articulo.schema.json",
+      "tracked": true,
+      "sha256": "312880ea46096af0231660740cbab0dc7d2f27a3653be16e04a8ea51fe5b77d3"
+    },
+    {
+      "path": "schemas/final_output.schema.json",
+      "tracked": true,
+      "sha256": "835a9cc46f66be20fd19ddf25c18f7c03214abc52da89744aabf9bba35ad5a7c"
+    },
+    {
+      "path": "schemas/indicador.schema.json",
+      "tracked": true,
+      "sha256": "53f29f336eaa68e3d439be6cdc479c42b8332db234594935c20d87358ae57291"
+    },
+    {
+      "path": "schemas/investigador.schema.json",
+      "tracked": true,
+      "sha256": "3da23447c7c3a0777649cc0f677e029f135da2ed9c30f8bda34d2b1798bb88b5"
+    },
+    {
+      "path": "schemas/layer2/README.md",
+      "tracked": true,
+      "sha256": "21ce55a409aed8222a00a66160b6379fd1a0bcefebc43e825323862fe9cd2d58"
+    },
+    {
+      "path": "schemas/layer2/entities.schema.json",
+      "tracked": true,
+      "sha256": "b39317623414a8172f348cd3a7ab69d551525132aaa7fa07a49b86096d18a71a"
+    },
+    {
+      "path": "schemas/layer2/layer2_manifest.schema.json",
+      "tracked": true,
+      "sha256": "c20c902c24414eee8f66dbe5af48191acee2c4c07e2bfac356be270228c684a7"
+    },
+    {
+      "path": "schemas/layer2/reference_chunks.schema.json",
+      "tracked": true,
+      "sha256": "c80abe0c29603107a81b1f7f35d3170eb5da71f1efba994dedaa8bab100aec78"
+    },
+    {
+      "path": "schemas/layer2/reference_documents.schema.json",
+      "tracked": true,
+      "sha256": "7d2ade03e38fd7b2ab5f521a1b2b1942a0335758ea47a11070f73963a1a0f5be"
+    },
+    {
+      "path": "schemas/layer2/reference_sections.schema.json",
+      "tracked": true,
+      "sha256": "3733c188890c10478f7c01a409f95e22d61b3a82918490a718dfec4765851444"
+    },
+    {
+      "path": "schemas/layer2/relations.schema.json",
+      "tracked": true,
+      "sha256": "464ff6b10bfc4e3c2523193722f25d2be443780e6d4fdac14d82af21b2df94d5"
+    },
+    {
+      "path": "schemas/layer2/source_chunks.schema.json",
+      "tracked": true,
+      "sha256": "e879f249cc67a6d09cc0d9aaa4f6f5a42bc0a2da381b729690fb2b061bde71f0"
+    },
+    {
+      "path": "schemas/layer2/source_documents.schema.json",
+      "tracked": true,
+      "sha256": "210c0e49a64bf5950473d4eac7164726df9c2d77c40f013126d833851c5d1eed"
+    },
+    {
+      "path": "schemas/layer2/source_sections.schema.json",
+      "tracked": true,
+      "sha256": "7519449dee9ac31a571fb37a8beb9c5e361b2cb3a4d8d8e9501ddf5423a68888"
+    },
+    {
+      "path": "schemas/layer3/context_package.schema.json",
+      "tracked": true,
+      "sha256": "ca27229e091eb61291c06899e28e3ac4a216a93b3794c0c1a2d62d30546ce4db"
+    },
+    {
+      "path": "schemas/layer3/embedding.schema.json",
+      "tracked": true,
+      "sha256": "7869a955fa31879e40b6ac421055a7c1b5476d75f4ceaeadf557179453627f8c"
+    },
+    {
+      "path": "schemas/layer3/evaluation_query.schema.json",
+      "tracked": true,
+      "sha256": "fb8cd8f79682a4911cced7cb58bfce1aa1be6ad9f8c32b9daa38040afb470e2e"
+    },
+    {
+      "path": "schemas/layer3/indicator_profile.schema.json",
+      "tracked": true,
+      "sha256": "dbb4f2f93d2fd280befc554560f05fa96faf5805563ea2216b73c735a4f68a19"
+    },
+    {
+      "path": "schemas/layer3/layer3_manifest.schema.json",
+      "tracked": true,
+      "sha256": "f085586631f6ec368daf2043ba01f9e8230bdc6b2819a430be87e0dec74df288"
+    },
+    {
+      "path": "schemas/layer3/source_context_package.schema.json",
+      "tracked": true,
+      "sha256": "cb92877ba6bf49c0cdfec9fd45f1ba8f5640693b7960f3824895dc62d2e06385"
+    },
+    {
+      "path": "schemas/layer3/source_indicator_candidate.schema.json",
+      "tracked": true,
+      "sha256": "381f09cbd23233f6c5f16f2706e3d85bd3efe54563b6af26b2e176db532b3a56"
+    },
+    {
+      "path": "schemas/layer4_assessment/README.md",
+      "tracked": true,
+      "sha256": "7ad9fb5740952a4c296386ff9adde74c85650b684b1afe37eec7e9dba16297a1"
+    },
+    {
+      "path": "schemas/layer4_assessment/assessment.schema.json",
+      "tracked": true,
+      "sha256": "8a0e1501c6855b6f879375d8dd52815ecd780f0df8294c34291bcf150a60db5d"
+    },
+    {
+      "path": "schemas/layer4_assessment/indicator_profile.schema.json",
+      "tracked": true,
+      "sha256": "93a6462d62f696fff70f6f7506ddaed8d30d80b1ad8c0e098c21da79b9f64c2c"
+    },
+    {
+      "path": "schemas/layer4_assessment/metadata.schema.json",
+      "tracked": true,
+      "sha256": "6051b2c0d19eb2ed5160f498fbd0aa43fa181c5096fd180c3416fd7da436416e"
+    },
+    {
+      "path": "schemas/layer4_assessment/project_indicator.schema.json",
+      "tracked": true,
+      "sha256": "9ae44c13a88406e38a5ba0dc0305c2081d005f7a3c928e594909f5e9309dc754"
+    },
+    {
+      "path": "schemas/layer4_assessment/project_territory.schema.json",
+      "tracked": true,
+      "sha256": "e16b711d4ca4b8468e5dff37ba65e772024f084caee50273348d1d98082537a2"
+    },
+    {
+      "path": "schemas/layer4_assessment/workbook_data.schema.json",
+      "tracked": true,
+      "sha256": "3cf2fa792579bcd0b297ef2d0644fe9b51a0ecfcb8c2fbe42b22500e2106d2bd"
+    },
+    {
+      "path": "schemas/layer4_assessment_v2/assessment.schema.json",
+      "tracked": true,
+      "sha256": "80aa7b1bee67160b6d00382126b236e9819a77bd40aa0857ac365b32b8b2a796"
+    },
+    {
+      "path": "schemas/layer4_assessment_v2/assessment_batch.schema.json",
+      "tracked": true,
+      "sha256": "73c21c740878485c00443c907c8db72f19c4f2d1cc4467ced2659b0c08a561c0"
+    },
+    {
+      "path": "schemas/layer4_assessment_v2/confidence_result.schema.json",
+      "tracked": true,
+      "sha256": "c8f4778b1d98032e51b61fd8f4c69c31ecf4e901cc0e843913db4601d7ae280f"
+    },
+    {
+      "path": "schemas/layer4_assessment_v3/assessment.schema.json",
+      "tracked": true,
+      "sha256": "0d2ebaad6ef35818a63600463d00ce90505787c963a25d9f700ca801b004ba2a"
+    },
+    {
+      "path": "schemas/layer4_assessment_v3/assessment_batch.schema.json",
+      "tracked": true,
+      "sha256": "ba6f1f517e425367abbce8170f851cc8c44f6b74e3446afd8ec102ecee015cc5"
+    },
+    {
+      "path": "schemas/layer4_assessment_v3/rubric_batch.schema.json",
+      "tracked": true,
+      "sha256": "6fa56ff4177bf5868dca7865da6cd2bdaa861774033fc587f2675f0b3538fb3b"
+    },
+    {
+      "path": "schemas/layer4_confidence/README.md",
+      "tracked": true,
+      "sha256": "2a361e6d5b1904800248336a92468b07abb8e08acd29f3647a03316f3815fb36"
+    },
+    {
+      "path": "schemas/layer4_confidence/assessment.schema.json",
+      "tracked": true,
+      "sha256": "a324f520c78396e3c656f4df335a6d37d295ed3f0340c6f3348bcb9fd598b25f"
+    },
+    {
+      "path": "schemas/layer4_confidence/confidence_result.schema.json",
+      "tracked": true,
+      "sha256": "fbf30e5be678b9e93405f27ce6094a1bc9d520f70a114a2304461aa9795074e5"
+    },
+    {
+      "path": "schemas/layer4_confidence/indicator_profile.schema.json",
+      "tracked": true,
+      "sha256": "4cb532788981c81580fbb6c871bd8b49a7f277262705f682530e3180000e941e"
+    },
+    {
+      "path": "schemas/layer4_preliminary/README.md",
+      "tracked": true,
+      "sha256": "fbade46104a53d905d837a62fe0f8fde1e7e35835dde9f9f5797fe1f0b10cf82"
+    },
+    {
+      "path": "schemas/layer4_preliminary/assessment_batch.schema.json",
+      "tracked": true,
+      "sha256": "50ac00ba9d59512d9d3119b6203a908d6f0b706188c8049f31b7dc090b2ecf1f"
+    },
+    {
+      "path": "schemas/layer4_preliminary/project_indicator_preliminary.schema.json",
+      "tracked": true,
+      "sha256": "857cef20a145ee9ec1ad5529adbc4e36e495914abbe47f0d726f5e3eed226996"
+    },
+    {
+      "path": "schemas/organizacion.schema.json",
+      "tracked": true,
+      "sha256": "029780c9d3db872c3fecb7fe3522ba3862d9419e622dab6789bb2edd66bc8b06"
+    },
+    {
+      "path": "schemas/proyecto.schema.json",
+      "tracked": true,
+      "sha256": "adc4ad024ac06d3b73d2b8ca20bfd38617c9cd302620ac2389f96be12e9d068f"
+    },
+    {
+      "path": "schemas/relationships.schema.json",
+      "tracked": true,
+      "sha256": "a4d096d1544c83c9cb53f4741fc462da7164af7f6bb4fb79b2b5a418e9152b9c"
+    },
+    {
+      "path": "scripts/README.md",
+      "tracked": true,
+      "sha256": "b8bf92803c44d47f8344b31bfbabaf30ea7d7fa0b025115dffca70dc72122991"
+    },
+    {
+      "path": "scripts/__init__.py",
+      "tracked": true,
+      "sha256": "1726add5257692c7438bc04d056579ba68e23d8953158f90fc6ecd74ac43bd75"
+    },
+    {
+      "path": "scripts/analyze_run_performance.py",
+      "tracked": true,
+      "sha256": "53ecd5d440eee5338b90c6aae30379eadd54cbc429478a19b18e39a53541204a"
+    },
+    {
+      "path": "scripts/auxiliary/README.md",
+      "tracked": true,
+      "sha256": "085c7686fdc791a5926b29b32bdb0b01795b2c765589601b1c77d2ff36961db1"
+    },
+    {
+      "path": "scripts/auxiliary/audit_identity_alias_forensics.py",
+      "tracked": true,
+      "sha256": "3f6e8691929a7b97ba72efb37c308084196355b2792d3515d8eed8a843de8ace"
+    },
+    {
+      "path": "scripts/auxiliary/audit_identity_aliases.py",
+      "tracked": true,
+      "sha256": "568b8a86bf58e6640adaab8d36effbdc9046a4b33b33e4e6130f99dd49a08e6a"
+    },
+    {
+      "path": "scripts/auxiliary/create_source_level_review_workbook.py",
+      "tracked": true,
+      "sha256": "ed0de9abfa316906ace187eff561cc49c5e2ae95c3a32eb3350e234db164aba8"
+    },
+    {
+      "path": "scripts/auxiliary/verify_layer4_layout.py",
+      "tracked": true,
+      "sha256": "0c92a23b8c987fea0de63a17cbec916fc123a6994ed845615e9e5e9fb19f2836"
+    },
+    {
+      "path": "scripts/auxiliary/verify_layer4_preparation.py",
+      "tracked": true,
+      "sha256": "b56e6ba279382099f210289a3076bb8c44c2b9e838d3f3a9b61c7bee26a799f5"
+    },
+    {
+      "path": "scripts/build_contracts.py",
+      "tracked": true,
+      "sha256": "242a6758511a13fd8eb4e0213874178ae5e08dcd06745907b077a13d0add2aea"
+    },
+    {
+      "path": "scripts/build_dane_reference.py",
+      "tracked": true,
+      "sha256": "a0a8736a4c4815224d4232a8ffc25d8508d14ebbfb63ba5e7ffd250bb86a48ef"
+    },
+    {
+      "path": "scripts/build_indicator_assessment_profiles.py",
+      "tracked": true,
+      "sha256": "3f47ee1f16c9c70fc2b6002a8c41ea2f7803f2d4e1efc2aa123572d19d434b3a"
+    },
+    {
+      "path": "scripts/build_layer2_contracts.py",
+      "tracked": true,
+      "sha256": "0bca568451d33a2c45d1db12e0554212fe9b089a619f1247d7d78cfc712ac994"
+    },
+    {
+      "path": "scripts/build_layer3_contracts.py",
+      "tracked": true,
+      "sha256": "e67e283b469d08135e9668cb5350aeb3697538c7d3867c519912d3f1b26171de"
+    },
+    {
+      "path": "scripts/build_layer4_contracts.py",
+      "tracked": true,
+      "sha256": "d46dcd2035a0e2a8bde0a62dc65fa99efbf60933c429186277be07370f1e19c5"
+    },
+    {
+      "path": "scripts/check_environment.py",
+      "tracked": true,
+      "sha256": "f5a19c353b34ff7f51e0ddd851e9d40487d49e49299efa7b0699c21e6b85b0db"
+    },
+    {
+      "path": "scripts/check_shareable_secrets.py",
+      "tracked": true,
+      "sha256": "a71892f77ca1d5c35c4a964a254263d3089ab71b94d41df99580a3b68dff354c"
+    },
+    {
+      "path": "scripts/cleanup_layer4.py",
+      "tracked": true,
+      "sha256": "84460fce27fe7726b3ea21b16f691688e20c441e4abeac0df87dda89eb6c35a8"
+    },
+    {
+      "path": "scripts/compare_evaluation.py",
+      "tracked": true,
+      "sha256": "2033b422fc9251358037a1243f8e1c18de1da2acebaf2f0175420754951747ae"
+    },
+    {
+      "path": "scripts/export_layer4_pilot.py",
+      "tracked": true,
+      "sha256": "cdaa276ad4d1b1c87a9473480f66d8aada0870be2b78d5d0dd36260c513e110b"
+    },
+    {
+      "path": "scripts/export_layer4_powerbi.py",
+      "tracked": true,
+      "sha256": "1fcf75b3dd687fd1a7ac0907cccbde46b4b4aab4678a1371826b02acb88a675b"
+    },
+    {
+      "path": "scripts/pipeline_coordinator.py",
+      "tracked": true,
+      "sha256": "e9e60659e53c2b50ce8dff4dd3a193ea8742bfd7291030d110ccad37e4a27f05"
+    },
+    {
+      "path": "scripts/prepare_layer4_consumer_v3_3.py",
+      "tracked": true,
+      "sha256": "cea58c5ab3a2cd179c822065504198eb15630a2c8a6b04a1cbdfc91d97a59829"
+    },
+    {
+      "path": "scripts/prepare_layer4_inputs.py",
+      "tracked": true,
+      "sha256": "b6c339ce6fc8a09c9943b8906fb96b26b4e8f4b74cda9ebf3a962fc5ab03b1b1"
+    },
+    {
+      "path": "scripts/prepare_qwen_tokenizer.py",
+      "tracked": true,
+      "sha256": "c2dba4657eeb46508e3e5a25445a7591796e40fb0ba8ac58bb528bc5f8c4bbe9"
+    },
+    {
+      "path": "scripts/recover_invalid_assessment.py",
+      "tracked": true,
+      "sha256": "1f32db1850c0ac45368fbe18c08f45840d9025698af3cbb2062710d47ff53c95"
+    },
+    {
+      "path": "scripts/render_layer4_experiment.mjs",
+      "tracked": true,
+      "sha256": "90661447b78bbb58f13613ce5ec72a8270856bd2dd2711b4cc2341c0e3421da2"
+    },
+    {
+      "path": "scripts/render_layer4_pilot.mjs",
+      "tracked": true,
+      "sha256": "6c45879c2fb8e24236198971c3083e546df7598e77987a4b17cdd3a2ad4d63cb"
+    },
+    {
+      "path": "scripts/render_layer4_powerbi.mjs",
+      "tracked": true,
+      "sha256": "69133d27f72bd51cf698c422bc999836139aabe083122a7398d467f59c1f8f1f"
+    },
+    {
+      "path": "scripts/render_layer4_workbook.mjs",
+      "tracked": true,
+      "sha256": "645d9854adbe74d0fd8498f6c005da6175e92eb90817a4aac74818e9bdb36dcf"
+    },
+    {
+      "path": "scripts/render_territory_workbook.mjs",
+      "tracked": true,
+      "sha256": "c4e5c76226d13956155337ee14bf70f40b4ff1ed7c5f33cb210fe42ef6dae715"
+    },
+    {
+      "path": "scripts/run_layer1.py",
+      "tracked": true,
+      "sha256": "19cab66873a75e35e2b9bce82e0dbbbda4e028e1c67c654a0bb813336c93c0f5"
+    },
+    {
+      "path": "scripts/run_layer2.py",
+      "tracked": true,
+      "sha256": "5c8ffcfa776db6cfbfe02b8b024f13a4420d49fe362fe09421eee62fbcba028a"
+    },
+    {
+      "path": "scripts/run_layer3.py",
+      "tracked": true,
+      "sha256": "5edc71adcc27f7b0b25fdc28a069484c7b8ebe415114a79d5deba823c0174365"
+    },
+    {
+      "path": "scripts/run_layer4_closure.py",
+      "tracked": true,
+      "sha256": "0822c8313af5225aebe51d0b4d6b8a671d368c142a110106f15f34ba7c37b362"
+    },
+    {
+      "path": "scripts/run_layer4_coverage_v3.py",
+      "tracked": true,
+      "sha256": "4d6d06a8e5314fb58952e21ee9c85a210e480af4ad9d45c8715b68ac9bf48094"
+    },
+    {
+      "path": "scripts/run_layer4_definitive_v3_3.py",
+      "tracked": true,
+      "sha256": "4daacf57f849d22c356ee4eabcf0ffbb588270181671ab7b027021c7a07937d7"
+    },
+    {
+      "path": "scripts/run_layer4_experiment.py",
+      "tracked": true,
+      "sha256": "2b797464aee279dfcafba693a24714de103b6aedbff9a532d9cf4cfac1025577"
+    },
+    {
+      "path": "scripts/run_layer4_pilot_discovery_v3_3.py",
+      "tracked": true,
+      "sha256": "a352ed7aa988cd1cf9328b67c45854d9dfa25415e74bc69ca27d2c3b1811a4ef"
+    },
+    {
+      "path": "scripts/run_layer4_preliminary.py",
+      "tracked": true,
+      "sha256": "b45b7fa76a501a932d66a41df5b7a24faf74ef6269c8d0435fb6509c45e72a38"
+    },
+    {
+      "path": "scripts/run_pipeline_manual.py",
+      "tracked": true,
+      "sha256": "975fe18f0f883fb4c36be4c16f2f7c87034b5881fc9d5422af9c0e6be4ce03c9"
+    },
+    {
+      "path": "scripts/run_territories.py",
+      "tracked": true,
+      "sha256": "dc50ca5520d5ad6cf2c625d4faf8291e40b95c670c3e8557df02bf5003de1ae4"
+    },
+    {
+      "path": "scripts/territory_integrity.py",
+      "tracked": true,
+      "sha256": "21bf0461d9b9c182dd309ff4b018ddcf110223e83de48d7b2b6dcc9c221c71d8"
+    },
+    {
+      "path": "scripts/verify_layer1.py",
+      "tracked": true,
+      "sha256": "af7c20cd66cf551681eb824165b1e04b3cb83259d526893e787c9dd2360ad8ad"
+    },
+    {
+      "path": "scripts/verify_layer2.py",
+      "tracked": true,
+      "sha256": "d84d8b71e6ddb33bf61ef65b6674e2dfc9dfb541e3b2ba95ada32fb70843ca2f"
+    },
+    {
+      "path": "scripts/verify_layer4_pilot_delivery.py",
+      "tracked": true,
+      "sha256": "ad0412ef2635f31cca4d5235e8e6cc437ae495d412f71e134d182e2ce5164007"
+    },
+    {
+      "path": "scripts/verify_territories.py",
+      "tracked": true,
+      "sha256": "dc409a1c7f2f5e45a256ea2bdec54d6f2d5fa042666db36cac0bce54791d07fa"
+    },
+    {
+      "path": "setup.ps1",
+      "tracked": true,
+      "sha256": "eb3f6a51d7feb0b70a40c9406b72ca6dfa979b761b0db20f637e6cb3137775be"
+    },
+    {
+      "path": "src/README.md",
+      "tracked": true,
+      "sha256": "63cd3d8ba6ae67a3cefd89ef6a2768f0fa426ee392234b8b6a8c63606b47d8b8"
+    },
+    {
+      "path": "src/autonomous_execution/__init__.py",
+      "tracked": true,
+      "sha256": "ff1c7bf59294604ac35413b40b225a93697f0f0c9fad71b820ccbc1909696295"
+    },
+    {
+      "path": "src/autonomous_execution/batching.py",
+      "tracked": true,
+      "sha256": "97e76b66b84620503c8f4b5eace25a72f13b62dc55688ba234e027af378ce556"
+    },
+    {
+      "path": "src/autonomous_execution/cli.py",
+      "tracked": true,
+      "sha256": "b38be52df50d1022a4d1fa86f3e140313725521639979afc32a9be439126feef"
+    },
+    {
+      "path": "src/autonomous_execution/comparison.py",
+      "tracked": true,
+      "sha256": "424645df659c26f9e6ce76c7927219609b28f4fb3121684a9d301190461752b9"
+    },
+    {
+      "path": "src/autonomous_execution/compatibility/resource_wait_scripts_init.txt",
+      "tracked": true,
+      "sha256": "c299476aff251bce28d20ab0415f6358572a2aa6dcd20fe40e36d475d2bebdf2"
+    },
+    {
+      "path": "src/autonomous_execution/discovery.py",
+      "tracked": true,
+      "sha256": "9962995989c10365c25d17e9ba4278eb14db2f01393fa6f30e4a2de23520b882"
+    },
+    {
+      "path": "src/autonomous_execution/engine.py",
+      "tracked": true,
+      "sha256": "cc7669035941018121edf6642f4c0a0a9661a3d1b74c85d1afa7da6465fe451f"
+    },
+    {
+      "path": "src/autonomous_execution/final_output.py",
+      "tracked": true,
+      "sha256": "382212b79403dad102551243cf2aee81597d0e123f1b1399962f2c70e2742f11"
+    },
+    {
+      "path": "src/autonomous_execution/followup.py",
+      "tracked": true,
+      "sha256": "df658bf4097142fb490c67537f4255d08fd7de743772533d6b76ad8940ec14df"
+    },
+    {
+      "path": "src/autonomous_execution/graph_worker.py",
+      "tracked": true,
+      "sha256": "50eb9c17c669644ff7012e0411e8f41addb913c725aa6735db6108e1c4ec9675"
+    },
+    {
+      "path": "src/autonomous_execution/lifecycle.py",
+      "tracked": true,
+      "sha256": "2e07a2721f79f79d7a1e829f628b3efda24cc4f536000371883d25728ec3706b"
+    },
+    {
+      "path": "src/autonomous_execution/minimal.py",
+      "tracked": true,
+      "sha256": "562669f7c9ef8c415534572b4498a6491c9acff8a2999c5a91a1ae12b5409141"
+    },
+    {
+      "path": "src/autonomous_execution/monitor.py",
+      "tracked": true,
+      "sha256": "762a6ea04a31ebc6e7dc204731f84644e67a1f6965749592644c16018364fbea"
+    },
+    {
+      "path": "src/autonomous_execution/packing.py",
+      "tracked": true,
+      "sha256": "d84c10b33e42da325d27578df41e1f29919fbb96887a8ca151688273da37d997"
+    },
+    {
+      "path": "src/autonomous_execution/phase1.py",
+      "tracked": true,
+      "sha256": "7cc7a1760787385511a8fe17b143c7a3c6fc018f43dbce41033943924b268049"
+    },
+    {
+      "path": "src/autonomous_execution/phase11.py",
+      "tracked": true,
+      "sha256": "7f5d871889e1d33864b182943da54b2ac9bf863e2624cacc30bc70aca07a8d4f"
+    },
+    {
+      "path": "src/autonomous_execution/phase12.py",
+      "tracked": true,
+      "sha256": "4dd22a9ab71769b3e771ff69117af78784a16003bc8659487daf3facb82d0d52"
+    },
+    {
+      "path": "src/autonomous_execution/policy.py",
+      "tracked": true,
+      "sha256": "7867ff67d25fb8d3fea0ee932b8548ecad771332a6e5b9faf1d3710bd89a6937"
+    },
+    {
+      "path": "src/autonomous_execution/preparation_integrity.py",
+      "tracked": true,
+      "sha256": "aa095d08ba6a0f594c358430ae703bb8432cfbc3763ec8cfc2ce256146915267"
+    },
+    {
+      "path": "src/autonomous_execution/prepare_menu.py",
+      "tracked": true,
+      "sha256": "5aef83f83bf9d99205f604c39490051cc052a0cface8351498e5e375a37272dd"
+    },
+    {
+      "path": "src/autonomous_execution/resource_wait.py",
+      "tracked": true,
+      "sha256": "742406269b6b6d0a4ea1914ea3017d8d0d0e97aa7cb29c7834d80459a7ac75f5"
+    },
+    {
+      "path": "src/autonomous_execution/scope.py",
+      "tracked": true,
+      "sha256": "b9c1f67b76adf734b70301f59985bd4ad0965002affedf8bfd2f2d3adce1ab9d"
+    },
+    {
+      "path": "src/autonomous_execution/store.py",
+      "tracked": true,
+      "sha256": "0aa53187dc7474dd266d95f271eb35cfd28a35e711164bcb2a0196ca378a1bfb"
+    },
+    {
+      "path": "src/autonomous_execution/transport.py",
+      "tracked": true,
+      "sha256": "72568d8e93c6213b391997de1b1b72e6ffaddd273700871376440b419908d305"
+    },
+    {
+      "path": "src/console_output.py",
+      "tracked": true,
+      "sha256": "1caaf41a953b53c1f5614e28e88cbde933faf6d85dfb8c0b5f151217da538502"
+    },
+    {
+      "path": "src/evaluation_contracts.py",
+      "tracked": true,
+      "sha256": "12a3508fc74e166bcf2bd002227997a94c431f27314111dea927970d4f6e3d8b"
+    },
+    {
+      "path": "src/experiment_runtime.py",
+      "tracked": true,
+      "sha256": "85c8358fdfd615184d7ee34eb00c4c6980fb3381786dc58187c6dce121aa3dde"
+    },
+    {
+      "path": "src/layer2_processing/__init__.py",
+      "tracked": true,
+      "sha256": "996b456ea1a9c643e364f253de5950dce1c88dc95dce58f9d84cbeb6d401ca66"
+    },
+    {
+      "path": "src/layer2_processing/checkpoints.py",
+      "tracked": true,
+      "sha256": "9d6e4e0fa8e5a53bf51484574a37a80ccfceae536d614585e969f4a9b0df168b"
+    },
+    {
+      "path": "src/layer2_processing/knowledge/README.md",
+      "tracked": true,
+      "sha256": "99fb048bd55d3dce1e72b9bbe73ae74bb1f45e2374fe38dea874179ae975d4d8"
+    },
+    {
+      "path": "src/layer2_processing/knowledge/__init__.py",
+      "tracked": true,
+      "sha256": "9fc61c9a7afe32f2000154895ceb66508eea05f34368fbeb64ecca721e08c49d"
+    },
+    {
+      "path": "src/layer2_processing/knowledge/chunking.py",
+      "tracked": true,
+      "sha256": "13101a88f1283d1d757c9c274ea6a83cb7ab4e76576ea7b9b67fa2e37f933c27"
+    },
+    {
+      "path": "src/layer2_processing/knowledge/contracts.py",
+      "tracked": true,
+      "sha256": "2794f4a889196b83215880732fd95c7058d9deb0759bbf56c40f9d2127bdd62f"
+    },
+    {
+      "path": "src/layer2_processing/knowledge/documents.py",
+      "tracked": true,
+      "sha256": "0884057373e33e115cd14d6f30a61be3064a6920c9e5ae5fd6bfe308125ab08c"
+    },
+    {
+      "path": "src/layer2_processing/knowledge/graph_data.py",
+      "tracked": true,
+      "sha256": "968a31f4ffaebff83603e900fd9015ff29adb0431056c5ab2cafed20fbf49597"
+    },
+    {
+      "path": "src/layer2_processing/knowledge/pipeline.py",
+      "tracked": true,
+      "sha256": "e45bcfcb70a1196feed2bca0645c9e8c8af01d6028a461883e178da41a5c0cd0"
+    },
+    {
+      "path": "src/layer2_processing/knowledge/provenance.py",
+      "tracked": true,
+      "sha256": "99b8dedbd198d9a165cb375fd61ae5ed8dd801b70e1942b375a139e91c1183ad"
+    },
+    {
+      "path": "src/layer2_processing/knowledge/quality.py",
+      "tracked": true,
+      "sha256": "32918b9746d5a7cf1540833e5def489f1943040cf41ec0a4cfdb3b6b31039b73"
+    },
+    {
+      "path": "src/layer2_processing/knowledge/security.py",
+      "tracked": true,
+      "sha256": "4f2432d6116b84f77e0ca461082047f52a24416ca0dd6e4858b2b55ab6aba704"
+    },
+    {
+      "path": "src/layer2_processing/knowledge/text_normalization.py",
+      "tracked": true,
+      "sha256": "d4e9e8f37da3db261b9a7111f3ecaa863cdb5c724f50d0d1b1b0ced80a17ffce"
+    },
+    {
+      "path": "src/layer2_processing/knowledge/validate_inputs.py",
+      "tracked": true,
+      "sha256": "f155c3c0ea43385a777e6a110b85a306ae8416797c2cfd1f6e2fe34480110104"
+    },
+    {
+      "path": "src/layer2_processing/pipeline.py",
+      "tracked": true,
+      "sha256": "484202df1e52e177038e1759a175fb51f6166a6b6da0ec15bde29178000cf57c"
+    },
+    {
+      "path": "src/layer2_processing/preprocessing/README.md",
+      "tracked": true,
+      "sha256": "b946c867f005239cf0da8507a9bbbc07054bfcd1e69995fc6a88a33f27b0321c"
+    },
+    {
+      "path": "src/layer2_processing/preprocessing/__init__.py",
+      "tracked": true,
+      "sha256": "60e274f1095b63b839bca2fd73e3c460ab242a0a7605ec8868879c30314124cb"
+    },
+    {
+      "path": "src/layer2_processing/preprocessing/adapters.py",
+      "tracked": true,
+      "sha256": "0d58bd73205992b55ac430f6616bb07ee08d6ca80fa88b5759574f132175446a"
+    },
+    {
+      "path": "src/layer2_processing/preprocessing/canonicalize.py",
+      "tracked": true,
+      "sha256": "94c8c7ad5126914425161fb401d8f4ad70b5aabe0ee47157b5731e7725ad1bc9"
+    },
+    {
+      "path": "src/layer2_processing/preprocessing/contracts.py",
+      "tracked": true,
+      "sha256": "ed17b8a51c855790c6d434ce40ab2e52460b12c7f11a265954ba0718b39dd443"
+    },
+    {
+      "path": "src/layer2_processing/preprocessing/dane_reference.py",
+      "tracked": true,
+      "sha256": "aa90e78ca7078c41e50377b0caa328dfbf9e8af3c4e10c02a09a679ca58b0846"
+    },
+    {
+      "path": "src/layer2_processing/preprocessing/identity.py",
+      "tracked": true,
+      "sha256": "39ab83e9d2b630f62f75540b553069b04a463bc398fee6905ff919ba72cba0e9"
+    },
+    {
+      "path": "src/layer2_processing/preprocessing/ingestion.py",
+      "tracked": true,
+      "sha256": "563407adf6b5862223121cfbd55cc286c21360ef16e71dbda5f59025df4645b0"
+    },
+    {
+      "path": "src/layer2_processing/preprocessing/knowledge_fields.py",
+      "tracked": true,
+      "sha256": "e25366bda8b57f3259685e54fd8d8156e6d89245b67bffef1b12d60553ffe588"
+    },
+    {
+      "path": "src/layer2_processing/preprocessing/normalize.py",
+      "tracked": true,
+      "sha256": "17d8bf4a72bce2ec1d777fa4c879d5430ac249281e1709bced38de4dd6c39dca"
+    },
+    {
+      "path": "src/layer2_processing/preprocessing/pipeline.py",
+      "tracked": true,
+      "sha256": "7a73f7de7cb6849fbc217982985ff0f121f8d04170e8d6d679e39b62573d1a01"
+    },
+    {
+      "path": "src/layer2_processing/preprocessing/project_selection.py",
+      "tracked": true,
+      "sha256": "86f266a1f738e8e1024509ed04578ef427fadc14d27233054569f50c0a81a52f"
+    },
+    {
+      "path": "src/layer2_processing/preprocessing/provenance.py",
+      "tracked": true,
+      "sha256": "69e022ce137b775516722439784c678025d88578f9e8bb7bdd6b10de9644ee02"
+    },
+    {
+      "path": "src/layer2_processing/preprocessing/quality.py",
+      "tracked": true,
+      "sha256": "0a1d23a6dd9ad5627593f43659c48c78cff1637f76f6b191c5b968ac9a843d07"
+    },
+    {
+      "path": "src/layer2_processing/preprocessing/runtime.py",
+      "tracked": true,
+      "sha256": "8e6773a9093438c2ba623e345902f3ca933769e7fbf53ed47e6156444654b2a1"
+    },
+    {
+      "path": "src/layer2_processing/preprocessing/source_scope.py",
+      "tracked": true,
+      "sha256": "090bfac3376dcaddac6866e4e36fe02388ab33e868762f5922482b6d3490b35d"
+    },
+    {
+      "path": "src/layer3_graphrag/__init__.py",
+      "tracked": true,
+      "sha256": "774efe41828c6969c8b91f725f0cc90d9e9cb39154deb4e708a8bc0ee2ed363c"
+    },
+    {
+      "path": "src/layer3_graphrag/configuration.py",
+      "tracked": true,
+      "sha256": "277dd46f45bfa6f5216c1ec2e6fc44d5becfc73f5c883daf3117db085e91d2f3"
+    },
+    {
+      "path": "src/layer3_graphrag/contracts.py",
+      "tracked": true,
+      "sha256": "918d2ce0200ffa52d1710fbbf745e941fd187796e73dc5fa966e5d0c8dd2d308"
+    },
+    {
+      "path": "src/layer3_graphrag/embeddings.py",
+      "tracked": true,
+      "sha256": "9726bd127db7ad2f720b3c06c23b03d3dc9b5a241371082f13f32ee60147776e"
+    },
+    {
+      "path": "src/layer3_graphrag/evaluation.py",
+      "tracked": true,
+      "sha256": "3cf973c9f102523cab18e388b9ad7f599f8622d7498f06c3d2573329a8719162"
+    },
+    {
+      "path": "src/layer3_graphrag/graph.py",
+      "tracked": true,
+      "sha256": "4e07320fb01125e7864f08c1d6ed9ad13300930b157d0e5030c7b77e7c4aab6a"
+    },
+    {
+      "path": "src/layer3_graphrag/graph_retriever.py",
+      "tracked": true,
+      "sha256": "588fc003b1a50b01b65ba4905e78641cf906afbc3d7882248f7676b5d83bad58"
+    },
+    {
+      "path": "src/layer3_graphrag/indicator_retrieval.py",
+      "tracked": true,
+      "sha256": "f1b2f19277accc4aff4acc7987f4ee60b06805bfbf0e1280e37c0aa116adc10c"
+    },
+    {
+      "path": "src/layer3_graphrag/manifest.py",
+      "tracked": true,
+      "sha256": "40b697103d25e439086692eb120709fc25d61b1d742c2747efcff76eb2e34e60"
+    },
+    {
+      "path": "src/layer3_graphrag/model_setup.py",
+      "tracked": true,
+      "sha256": "698ab4d9e6b3b7d1ea10fd33ec8d404bb7dc8721cedd4def0ef601d5be59214c"
+    },
+    {
+      "path": "src/layer3_graphrag/operations.py",
+      "tracked": true,
+      "sha256": "aee013ced8a7a648d7a10575cdc23a945b714973f3f912239f5b98276990771c"
+    },
+    {
+      "path": "src/layer3_graphrag/pipeline.py",
+      "tracked": true,
+      "sha256": "fdfaf705dab36485cc82e53e2cca938339172f8a53287c802af937257fce98e3"
+    },
+    {
+      "path": "src/layer3_graphrag/provenance.py",
+      "tracked": true,
+      "sha256": "e1f52ad5c66f3d9ca7cc3f85e31557475e514851b7555c45c88c00bc787b7be3"
+    },
+    {
+      "path": "src/layer3_graphrag/quality.py",
+      "tracked": true,
+      "sha256": "23a2ac1b64cc9ff9955c93864b7f43cac904e6aede89636dd5f167170ae93347"
+    },
+    {
+      "path": "src/layer3_graphrag/retrieval.py",
+      "tracked": true,
+      "sha256": "6718055c568337b06d97274ce43baed7a3e70db846a22b2e0b9a29d7889a25a2"
+    },
+    {
+      "path": "src/layer3_graphrag/security.py",
+      "tracked": true,
+      "sha256": "cc8ba1565d0ef5827decb8aca79e1b212667977308e043457286e4f2253e5cfe"
+    },
+    {
+      "path": "src/layer3_graphrag/source_context.py",
+      "tracked": true,
+      "sha256": "81207f22fe37d1620efef2147846ad49a23684e277c65850dab46d8d62e7f24c"
+    },
+    {
+      "path": "src/layer3_graphrag/validate_inputs.py",
+      "tracked": true,
+      "sha256": "a34953ae7e7fed3dc8667b2d8178088761d0e60c1ae8f04527f57c5e8a312b8d"
+    },
+    {
+      "path": "src/layer3_graphrag/vector_index.py",
+      "tracked": true,
+      "sha256": "98c84d2c09668f75409dc284160700740bf330f9b2e83d3b731dd370df4b6058"
+    },
+    {
+      "path": "src/layer4_evaluation/README.md",
+      "tracked": true,
+      "sha256": "401f1e5cff4508eb0784a64fb285decb16f00318315db3a4c214426364e49515"
+    },
+    {
+      "path": "src/layer4_evaluation/__init__.py",
+      "tracked": true,
+      "sha256": "ff8ef184b80a14ba1e85df5e2e8ba2d2e0fb947e1baf842241be5edad60c5518"
+    },
+    {
+      "path": "src/layer4_evaluation/history.py",
+      "tracked": true,
+      "sha256": "6158a62263e274656ea2a61f3b1e94d71a5998ad16620d29d181480cb0c2b2f3"
+    },
+    {
+      "path": "src/layer4_evaluation/indicator_csv.py",
+      "tracked": true,
+      "sha256": "67c3abaac10d20e19d0ef91846e83df93e1281b59249ddf36c20bedaa13ec73e"
+    },
+    {
+      "path": "src/layer4_evaluation/indicators/README.md",
+      "tracked": true,
+      "sha256": "ce639104807731beec8144945606a56a4c29cbfd074e1077c48139c76e99af5f"
+    },
+    {
+      "path": "src/layer4_evaluation/indicators/__init__.py",
+      "tracked": true,
+      "sha256": "bb458375798ba94bf04ce7530aad3798bc421c68a5fd7048ae83b8aab5a00b1f"
+    },
+    {
+      "path": "src/layer4_evaluation/indicators/assessment.py",
+      "tracked": true,
+      "sha256": "f67f0b393dc2a6e5c75a8419679016fe6b8f20cc2e850eb61fc0e546c97ea663"
+    },
+    {
+      "path": "src/layer4_evaluation/indicators/assessment_v2.py",
+      "tracked": true,
+      "sha256": "ff38981a6bc27ff3bc3717e8a69c3893af0535aafce98af2f71133984911e665"
+    },
+    {
+      "path": "src/layer4_evaluation/indicators/assessment_v3.py",
+      "tracked": true,
+      "sha256": "05fd70b6fd52878d5a62f5f11f9b05e675ab9665d4d851a890050262e95c6904"
+    },
+    {
+      "path": "src/layer4_evaluation/indicators/cleanup.py",
+      "tracked": true,
+      "sha256": "ac7d14482cdfbb297e89442e35881b52f23a3289de95fe5ac313da7899aadc0b"
+    },
+    {
+      "path": "src/layer4_evaluation/indicators/closure_audit.py",
+      "tracked": true,
+      "sha256": "03e9860d28b6684363e1b811ccc132d38d0b91fb93014e1dfd024af79c0147b5"
+    },
+    {
+      "path": "src/layer4_evaluation/indicators/closure_export.py",
+      "tracked": true,
+      "sha256": "59527a2d90a32255c9fd6a4a6e0cb59e4e82dd6b37da6d7e75ebe0e1d1357cd9"
+    },
+    {
+      "path": "src/layer4_evaluation/indicators/closure_runtime.py",
+      "tracked": true,
+      "sha256": "2ccd85553e04c9b7344e984b29be3104dc2ace76977bddc51b47e17d949324cb"
+    },
+    {
+      "path": "src/layer4_evaluation/indicators/codex_cli.py",
+      "tracked": true,
+      "sha256": "923588fce5eeaae065372aebf7b31664dcdbbcc38f5ebb174abedee2c5c410ac"
+    },
+    {
+      "path": "src/layer4_evaluation/indicators/confidence.py",
+      "tracked": true,
+      "sha256": "3f9ad75cc8167460ea56d80ec9ee43c3dc63727eda9dbae543bd9ee14880233c"
+    },
+    {
+      "path": "src/layer4_evaluation/indicators/consumer_v3_3.py",
+      "tracked": true,
+      "sha256": "21d70a0a3d0119542e6ddbfb3e95756471433309757dd55704a37569e4be8152"
+    },
+    {
+      "path": "src/layer4_evaluation/indicators/context_budget.py",
+      "tracked": true,
+      "sha256": "ba6acee678b3763437e485f85131e6e8cf8a73bf8fb20cfc723c9fab0a1c7e4b"
+    },
+    {
+      "path": "src/layer4_evaluation/indicators/contracts.py",
+      "tracked": true,
+      "sha256": "0bdc37cd12ea9b02490c39d53339cc5377d10b9b37c022e8bef3f887b05b9c0e"
+    },
+    {
+      "path": "src/layer4_evaluation/indicators/experiment.py",
+      "tracked": true,
+      "sha256": "f075693d40fe446c4f5140ebaadae4f2a376b4897c8464ee8c3bb190325852be"
+    },
+    {
+      "path": "src/layer4_evaluation/indicators/experiment_export.py",
+      "tracked": true,
+      "sha256": "62d551fec0b605f41ce5ba87617630be368cd09d86f0c9ff8bf9a27e8a13ca5e"
+    },
+    {
+      "path": "src/layer4_evaluation/indicators/experiment_inputs.py",
+      "tracked": true,
+      "sha256": "a92df8c4c0560ea16d2a26c2bf5630f84f4a2d196b5cce75fb7a4dd5754e29c1"
+    },
+    {
+      "path": "src/layer4_evaluation/indicators/experiment_selection.py",
+      "tracked": true,
+      "sha256": "7ef5d952157bdb5d6d61f5c4a2ed4b50be2ea80ed303ceeaea6cfc495a0444d4"
+    },
+    {
+      "path": "src/layer4_evaluation/indicators/export.py",
+      "tracked": true,
+      "sha256": "1512d5c87038e30b8b2a0f0850a740327ff85fa387f1e800ba26b48757a77920"
+    },
+    {
+      "path": "src/layer4_evaluation/indicators/final_export.py",
+      "tracked": true,
+      "sha256": "7d97327f20a95d0ed13380005167045caf40988bead1e7475f70c833fe77c245"
+    },
+    {
+      "path": "src/layer4_evaluation/indicators/final_projection.py",
+      "tracked": true,
+      "sha256": "34721d6b8df8826c620751dadc10c4b3ca7b601b7de491623757ba33a451f3fb"
+    },
+    {
+      "path": "src/layer4_evaluation/indicators/global_discovery.py",
+      "tracked": true,
+      "sha256": "aaaf3c7c471658f9ba3f0b75bcaafa74b35fe2d99f5db6e2d76b004ad200a978"
+    },
+    {
+      "path": "src/layer4_evaluation/indicators/global_discovery_v3_3.py",
+      "tracked": true,
+      "sha256": "d046d3d1679c02798e187980c400756f671e4ca41fc2c48eeed5331db6136725"
+    },
+    {
+      "path": "src/layer4_evaluation/indicators/global_discovery_v3_3_compact.py",
+      "tracked": true,
+      "sha256": "e698e1cdaf9ff9499691ef0e0f52ef2db4a277cff720d349df6daaac7bb04f38"
+    },
+    {
+      "path": "src/layer4_evaluation/indicators/ollama_provider.py",
+      "tracked": true,
+      "sha256": "b6e2175e2cfdbbb6ca11ad6b4ab2d429041199f5fc8ebd68f98d03fac2df6d8b"
+    },
+    {
+      "path": "src/layer4_evaluation/indicators/openai_provider.py",
+      "tracked": true,
+      "sha256": "9dfab1581bd364cca31f2c321d1422546c18034893eb98d2b8ed99b36cfe5dc2"
+    },
+    {
+      "path": "src/layer4_evaluation/indicators/performance.py",
+      "tracked": true,
+      "sha256": "a5670683a8ceb4161c106b468a76389e414d87a2eb7bacba6a3cc0eaab2bd2c3"
+    },
+    {
+      "path": "src/layer4_evaluation/indicators/performance_report.py",
+      "tracked": true,
+      "sha256": "bf52bf164debefff80505c92451274437c117a32e20b17642f8debee3b091bd0"
+    },
+    {
+      "path": "src/layer4_evaluation/indicators/powerbi.py",
+      "tracked": true,
+      "sha256": "921e6478abf1dd7eb0f674cabd9132359d392ce555252722eb1a2f8dd1a0fab9"
+    },
+    {
+      "path": "src/layer4_evaluation/indicators/preliminary.py",
+      "tracked": true,
+      "sha256": "4062dcac2338a37e4f48e4d771b1585a233e45b6ef9e32ffe0f3fbb10165460c"
+    },
+    {
+      "path": "src/layer4_evaluation/indicators/preliminary_output.py",
+      "tracked": true,
+      "sha256": "f78501301342b8a236315d0440b6dc45de32957eb94eda03eb2de95b572cacdc"
+    },
+    {
+      "path": "src/layer4_evaluation/indicators/preparation.py",
+      "tracked": true,
+      "sha256": "5e688a2cb753ef212c53256e28b97d2dc8cf831c72db2fe78fd559a02b716e5d"
+    },
+    {
+      "path": "src/layer4_evaluation/indicators/profiles.py",
+      "tracked": true,
+      "sha256": "740788917f91f5a1c2272a77ea9a23fafe7c9a9ed60f70d361c0cb298ad5bda9"
+    },
+    {
+      "path": "src/layer4_evaluation/indicators/prompt.py",
+      "tracked": true,
+      "sha256": "da7f9a3ee57cf411aaa83b4c2ebd4c1f933c4476e2ca9911e9e0bb39d4131dd5"
+    },
+    {
+      "path": "src/layer4_evaluation/indicators/review.py",
+      "tracked": true,
+      "sha256": "32b6646fb76eebe60b5b69364540e91ad303e97e99c0f6aca58aa306be0a7e19"
+    },
+    {
+      "path": "src/layer4_evaluation/indicators/selection.py",
+      "tracked": true,
+      "sha256": "886045e7a4d3e5cf62a1f50f168875cbf2b7bb00fac10fa7dd3d732b062e5821"
+    },
+    {
+      "path": "src/layer4_evaluation/indicators/semantic_fallback.py",
+      "tracked": true,
+      "sha256": "1dccc72f8d9c29fc482bb9723a72f6ed8cab13537792ab5fc9591ac8e5420480"
+    },
+    {
+      "path": "src/layer4_evaluation/indicators/token_budget.py",
+      "tracked": true,
+      "sha256": "bbdfecce66ba994b2d36b9425fe04e764a497e2b6fe646fdb099d3ca585d38cc"
+    },
+    {
+      "path": "src/layer4_evaluation/indicators/validation_diagnostics.py",
+      "tracked": true,
+      "sha256": "19c6f8870dd03ca479669e9af2885a5e5f28a35b265212e1527d00aebe367c89"
+    },
+    {
+      "path": "src/layer4_evaluation/live_execution.py",
+      "tracked": true,
+      "sha256": "a338af214fc7fdca4e52a2615c7046c48fe6e63d5d30b54bef9c6a35aff06049"
+    },
+    {
+      "path": "src/layer4_evaluation/paths.py",
+      "tracked": true,
+      "sha256": "a7721681daa48637881d9ea707ded4accf872f60d3c58ed81e29268f02cc01b9"
+    },
+    {
+      "path": "src/layer4_evaluation/territorial_consumption.py",
+      "tracked": true,
+      "sha256": "71de27cfa51b5a28962a2542da15aae65fb4010c70209346728c00f3fd8c964a"
+    },
+    {
+      "path": "src/layer4_evaluation/territories/README.md",
+      "tracked": true,
+      "sha256": "9dd3ae63fd7d28d0b55e97ab88cc8d8e435c63236a366c09eb3a8f24662a41d6"
+    },
+    {
+      "path": "src/layer4_evaluation/territories/__init__.py",
+      "tracked": true,
+      "sha256": "9bd0f92a3fd8c9f3bbc5cf78ca04769f65cb1d45f935e68e97aa9a552f0f1a8c"
+    },
+    {
+      "path": "src/layer4_evaluation/territories/contracts.py",
+      "tracked": true,
+      "sha256": "e38b776ce723fd5489f720520709abfd0a0e2f713d15572e8e533b24bfcf7db8"
+    },
+    {
+      "path": "src/layer4_evaluation/territories/inputs.py",
+      "tracked": true,
+      "sha256": "13f4efd5341ccb7a2227d9b885200015e09143232a28e9055d26cbba82921933"
+    },
+    {
+      "path": "src/layer4_evaluation/territories/matching.py",
+      "tracked": true,
+      "sha256": "9685fcee1e9ed67d044a893168f92f44fd1e0de6aae21df0ec3d8f86119ec803"
+    },
+    {
+      "path": "src/layer4_evaluation/territories/pipeline.py",
+      "tracked": true,
+      "sha256": "ca6a2baf609cc8b1eac93abbe47dab61ca69919509d37008125104e5c5ee3a11"
+    },
+    {
+      "path": "src/layer4_evaluation/territories/workbook.py",
+      "tracked": true,
+      "sha256": "dbececde56de96e045570fb15c35a09d8cab0859c1eb505039954dd96fc40e93"
+    },
+    {
+      "path": "src/model_access.py",
+      "tracked": true,
+      "sha256": "dcefdd95a69af737cddfb74b1e6be0fdd20b3a9fb86d854033b977d5ca19f4ca"
+    },
+    {
+      "path": "src/project_menu.py",
+      "tracked": true,
+      "sha256": "f2923ee8d9046479c3216e2c2d7bff18e725b8dd7ee722ac1279a666bbf601bf"
+    },
+    {
+      "path": "src/run_control.py",
+      "tracked": true,
+      "sha256": "38de166651d3821f5be22feeefbf2400583a5e5dc7a175ffe506b8714fbd0cf8"
+    },
+    {
+      "path": "src/run_paths.py",
+      "tracked": true,
+      "sha256": "b717e595eca6f44aafa977ce7787145ec66b7f1a98de6ee65a77f45e8623f1c3"
+    },
+    {
+      "path": "src/run_storage.py",
+      "tracked": true,
+      "sha256": "0d8bebaad1d89a7e3d26c2662fb283802d8d6038a0943945851287e6e14963b7"
+    },
+    {
+      "path": "tests/README.md",
+      "tracked": true,
+      "sha256": "338b7c9cce7b327c01a4e64abcb24095457ffcdce1069ce1f47e6acf48ac297b"
+    },
+    {
+      "path": "tests/__init__.py",
+      "tracked": true,
+      "sha256": "7c6a7cf02257bb0b706ff20396822bd39b60231e1b86cb34801a64b5095a2302"
+    },
+    {
+      "path": "tests/conftest.py",
+      "tracked": true,
+      "sha256": "4eee36ece351eb9a83a159bd38f5b808ad06e1ddd9e02821c7b94ae321f7a09e"
+    },
+    {
+      "path": "tests/fixtures/prueba_controlada/README.md",
+      "tracked": true,
+      "sha256": "a883da7cd0fb4847c7e2c41b85c075c2d5a5e9814c8ab3787cf8abba1ea36967"
+    },
+    {
+      "path": "tests/fixtures/prueba_en_vivo/README.md",
+      "tracked": true,
+      "sha256": "d1eb8c7dd6c709e3b1c0a3195dae2af04e0bd8d11ca7a46a110fbc7290467d8e"
+    },
+    {
+      "path": "tests/fixtures/synthetic/README.md",
+      "tracked": true,
+      "sha256": "d2f6f987a20ee14bbabfaf7f91614defc701ee96b58cf90cae71ae8ffeeb0f12"
+    },
+    {
+      "path": "tests/fixtures/synthetic/articulos.csv",
+      "tracked": true,
+      "sha256": "37e799d4500fca464f7c8f241049d185ee54d8b92271d5d075b953a1d8e0baba"
+    },
+    {
+      "path": "tests/fixtures/synthetic/indicadores.csv",
+      "tracked": true,
+      "sha256": "94d1baa51a168ed8b6d79e01d9540241a29a3ada158f0d143dc582d3f3e9477a"
+    },
+    {
+      "path": "tests/fixtures/synthetic/investigadores.csv",
+      "tracked": true,
+      "sha256": "9d787e995a97b9da367dfca4400855939eb679a6c6c43d176c47a2614f92581c"
+    },
+    {
+      "path": "tests/fixtures/synthetic/proyectos.csv",
+      "tracked": true,
+      "sha256": "53bc04fed1550a55642b39a414776559f67f7a5164a789458392ce7e76812770"
+    },
+    {
+      "path": "tests/layer2_preprocessing/README.md",
+      "tracked": true,
+      "sha256": "38bada23df63cb0070b4f32527f7f566ce1faa1514b31a06db6192c0b63b9c4d"
+    },
+    {
+      "path": "tests/layer2_preprocessing/__init__.py",
+      "tracked": true,
+      "sha256": "abf53b627d4328720f0ec0a05f97784ccf93b054fde8497734027d52afedb6b0"
+    },
+    {
+      "path": "tests/layer2_preprocessing/conftest.py",
+      "tracked": true,
+      "sha256": "cbb00187aec9769320ff43656419e8998605754d836b61d95553edf1eb25a240"
+    },
+    {
+      "path": "tests/layer2_preprocessing/test_final_domain.py",
+      "tracked": true,
+      "sha256": "a694950596e6a4f18bd17790f59fcea07d4f311621fa5e67ab958f8e6d635458"
+    },
+    {
+      "path": "tests/layer2_preprocessing/test_identity.py",
+      "tracked": true,
+      "sha256": "4ed067b3fa8b06eee99ee45518ddb0f1d1e7a3b8438d3dc5a944bbf560825b9c"
+    },
+    {
+      "path": "tests/layer2_preprocessing/test_ingest.py",
+      "tracked": true,
+      "sha256": "c83781d967482683f2339c3e04dd65a3b7a49f09a88e87bd1f76cde255ee0ce2"
+    },
+    {
+      "path": "tests/layer2_preprocessing/test_normalization.py",
+      "tracked": true,
+      "sha256": "36fc088dc5cdeb4e93633fbb24684f0d36868fee33de252636c6d15d4d4c68a9"
+    },
+    {
+      "path": "tests/layer2_preprocessing/test_pipeline.py",
+      "tracked": true,
+      "sha256": "2cc72bd0aedb8e10879fd6ae5ffc5856a3d4bf335b13fbdf6177e8017dc7af71"
+    },
+    {
+      "path": "tests/layer2_preprocessing/test_validation.py",
+      "tracked": true,
+      "sha256": "79283229f4fef6c1b7397d78acb52ee354092a0354f037941e28b0ff494e118f"
+    },
+    {
+      "path": "tests/layer3_knowledge/README.md",
+      "tracked": true,
+      "sha256": "9a54c3c6ce55c49393979446760acd87a6a2e1588f1d51d823ef2d7938381aa1"
+    },
+    {
+      "path": "tests/layer3_knowledge/test_integration_real.py",
+      "tracked": true,
+      "sha256": "9da8a6fa5d71611e1fb9d827f27a6f08371e890d17ae26ab7f1faee996054d51"
+    },
+    {
+      "path": "tests/layer3_knowledge/test_unit.py",
+      "tracked": true,
+      "sha256": "bfdb2d6e5213f473d93a66ded07a955017f35f5ae84c79fb6c775ae799df0e4f"
+    },
+    {
+      "path": "tests/layer4_graphrag/conftest.py",
+      "tracked": true,
+      "sha256": "c9b1eb3349adb8fe28488035023fc99c3de38d21bd3c0fb8aea09e813cb267cc"
+    },
+    {
+      "path": "tests/layer4_graphrag/test_configuration.py",
+      "tracked": true,
+      "sha256": "769dde4e35630ecbde0ff4e7164e7b75130012ada425ee5ed7eb73d3049a4f6c"
+    },
+    {
+      "path": "tests/layer4_graphrag/test_embeddings.py",
+      "tracked": true,
+      "sha256": "2960c3a2e5aa0bceb0f70fd0cf30d8c83e7aeae6bac0ebd127b04a06c9b812cb"
+    },
+    {
+      "path": "tests/layer4_graphrag/test_evaluation.py",
+      "tracked": true,
+      "sha256": "f342e1ad015196d00da479c83efaaff8f4161757b087c75f95b3e17f785297f3"
+    },
+    {
+      "path": "tests/layer4_graphrag/test_graph.py",
+      "tracked": true,
+      "sha256": "ca44590375b54040aea8cd262b6e8100a2c4c6e3d5a5fcf2c918d9c1dac04520"
+    },
+    {
+      "path": "tests/layer4_graphrag/test_indicator_retrieval.py",
+      "tracked": true,
+      "sha256": "6494f8a25e1ed6844791ea169bd822511302e0c537a1afe7c347a913a3e16901"
+    },
+    {
+      "path": "tests/layer4_graphrag/test_inputs.py",
+      "tracked": true,
+      "sha256": "25d94542cae8226b6d9a0f51ba00fe3f7eb5ba10ad6e09f62318a2f98a5c0039"
+    },
+    {
+      "path": "tests/layer4_graphrag/test_integration_pending.py",
+      "tracked": true,
+      "sha256": "eb3c374bd7ea107264179b44935f1111a84b980651649be89be3a926debc015e"
+    },
+    {
+      "path": "tests/layer4_graphrag/test_orchestration.py",
+      "tracked": true,
+      "sha256": "11b8fd30ef0541d4d958fe2750aeac0ca71572fc571715aec7f9778fa6ec7881"
+    },
+    {
+      "path": "tests/layer4_graphrag/test_provenance.py",
+      "tracked": true,
+      "sha256": "79b92ea2a2812cf41a18cd67c807ad1ee3a992aa298704261fab86edb55f5743"
+    },
+    {
+      "path": "tests/layer4_graphrag/test_source_context.py",
+      "tracked": true,
+      "sha256": "fbe4e589c1a7fe335e14be25bb9c93b39059ac5f2871c455a424151a392af1ee"
+    },
+    {
+      "path": "tests/layer4_graphrag/test_vector.py",
+      "tracked": true,
+      "sha256": "80238cb2e7ec1ff668315d6057837407270f36275e08a25e129b4c705414cee4"
+    },
+    {
+      "path": "tests/layer5_confidence/test_confidence.py",
+      "tracked": true,
+      "sha256": "a134a87e2b6a7ea9dd11c0d4cba54faa4e60948f6ac6329627518f6aaa304b58"
+    },
+    {
+      "path": "tests/layer5_experiment/test_assessment_v3.py",
+      "tracked": true,
+      "sha256": "2648a3c676f6a5cd4173656b8da7061d6ba648caa01118f166ce8583a9d38a5f"
+    },
+    {
+      "path": "tests/layer5_experiment/test_cleanup.py",
+      "tracked": true,
+      "sha256": "d980c27c263de18f7716ea2a8a7fc61b1755de69651c41416fe042d3f7a19197"
+    },
+    {
+      "path": "tests/layer5_experiment/test_closure_control.py",
+      "tracked": true,
+      "sha256": "898f7e30921a0036102ce71809aa4c32738c3e957b0c92d70e472687ae947af2"
+    },
+    {
+      "path": "tests/layer5_experiment/test_closure_recovery.py",
+      "tracked": true,
+      "sha256": "6ba40c19a21ce4f305c45a6b2475b7bc6d89d49070b851bb6034066d4f36afb1"
+    },
+    {
+      "path": "tests/layer5_experiment/test_closure_runtime.py",
+      "tracked": true,
+      "sha256": "92c3d602e386afa082ef302996bae32f56fa1b7d0f1439e4a981971e3a07d4ab"
+    },
+    {
+      "path": "tests/layer5_experiment/test_consumer_v3_3.py",
+      "tracked": true,
+      "sha256": "7faba287650e3966797e54e322288cb4b058696f180505da1e072c1cac8a93a6"
+    },
+    {
+      "path": "tests/layer5_experiment/test_coverage_coordinator_v3.py",
+      "tracked": true,
+      "sha256": "dd3a37146f742c1757df4534edc16d4f9351c1f9705f994991dbb847970cf2a2"
+    },
+    {
+      "path": "tests/layer5_experiment/test_definitive_control.py",
+      "tracked": true,
+      "sha256": "f207b4225a71bda3eb037a73779d62953c73ef978f781e99a9f0e7781886100b"
+    },
+    {
+      "path": "tests/layer5_experiment/test_experiment.py",
+      "tracked": true,
+      "sha256": "6efe1dd7bf99f9622df3d0b2edbe313a24f549eddb6cc1e4da98a432a83172b7"
+    },
+    {
+      "path": "tests/layer5_experiment/test_final_export.py",
+      "tracked": true,
+      "sha256": "9fcfc5b12431949364ce69832e3b1ec1f1985230f8677f0e214f0902c9ff12d1"
+    },
+    {
+      "path": "tests/layer5_experiment/test_final_territories.py",
+      "tracked": true,
+      "sha256": "cadfa6c1e31fcb0d08eed05d5888b8c87cd7cdb2387e657cef6801b0fbf50d5e"
+    },
+    {
+      "path": "tests/layer5_experiment/test_global_discovery.py",
+      "tracked": true,
+      "sha256": "00c9437744a125a1d2ec5cb754ae91adeffc6a38ea08ee6c71774dcf43638d06"
+    },
+    {
+      "path": "tests/layer5_experiment/test_global_discovery_v3_3.py",
+      "tracked": true,
+      "sha256": "38e2c479405ce1a2ea929e72815cb3c56004421701ae5be53846768b7a866513"
+    },
+    {
+      "path": "tests/layer5_experiment/test_global_discovery_v3_3_compact.py",
+      "tracked": true,
+      "sha256": "c7feb658b4624160e1efb185a5114a3dc02c74d158855cfdc2b15146e217c515"
+    },
+    {
+      "path": "tests/layer5_experiment/test_layout_relocation.py",
+      "tracked": true,
+      "sha256": "dc1f9aa5f145e261bb60eb72c53e255af20ab48b7165139e8741139a2fd40fa8"
+    },
+    {
+      "path": "tests/layer5_experiment/test_pilot_single_discovery_control.py",
+      "tracked": true,
+      "sha256": "11afbd169a876ef24198c570b74569644005d80d2b814f370608df58990cbfe3"
+    },
+    {
+      "path": "tests/layer5_experiment/test_semantic_fallback.py",
+      "tracked": true,
+      "sha256": "29ac974b06ee5f5ba10a9a92bd3cd161c025015d59b88d8e9b07f4ad9b01fd40"
+    },
+    {
+      "path": "tests/layer5_experiment/test_territorial_consumption.py",
+      "tracked": true,
+      "sha256": "dc164e2d95f43ef1c9a7042198398261d40ad4f7f92e58863653259b24263380"
+    },
+    {
+      "path": "tests/layer5_experiment/test_v2_closure.py",
+      "tracked": true,
+      "sha256": "4342ba216385a7ce9d5e766c88be0f81d961027b98a3644db50974323766bb56"
+    },
+    {
+      "path": "tests/layer5_experiment/test_v2_workflow.py",
+      "tracked": true,
+      "sha256": "bdc119095e489f74e7d0223350c6cd41c20b8fab11ac18a2f373caec1da9c0a7"
+    },
+    {
+      "path": "tests/layer5_pilot/test_delivery.py",
+      "tracked": true,
+      "sha256": "def4b38d5d40a0b070c24412ee226c905ebe36e68bfa73b870384e948050ab83"
+    },
+    {
+      "path": "tests/layer5_powerbi/test_powerbi.py",
+      "tracked": true,
+      "sha256": "e63680ff3117c01bddd4f66f44937e634f41be749865196e2d395c23f4a4e6b6"
+    },
+    {
+      "path": "tests/layer5_preliminary/test_preliminary.py",
+      "tracked": true,
+      "sha256": "0a5ea43e487f26616c420fac885ed0a776bda61a8b5c862b9fac681a8ce544d5"
+    },
+    {
+      "path": "tests/layer5_preparation/README.md",
+      "tracked": true,
+      "sha256": "590abc6f74d4deefd504267519f6bc6aacf73fc67bd45f17c8685ad3d18d0b96"
+    },
+    {
+      "path": "tests/layer5_preparation/conftest.py",
+      "tracked": true,
+      "sha256": "cc209f1683cae1637df59c7456645fe28e36291641b0b9dc08c938e7228e9217"
+    },
+    {
+      "path": "tests/layer5_preparation/test_assessment_contract.py",
+      "tracked": true,
+      "sha256": "e9e2323abf93a1b761ff90145da49bb4f2915718069779212aa9cbf8d1287529"
+    },
+    {
+      "path": "tests/layer5_preparation/test_dane_unification.py",
+      "tracked": true,
+      "sha256": "626f9d1518a3e291930c77ceeee8735a1ef47edff29ed7b0e8ff4d57fb851438"
+    },
+    {
+      "path": "tests/layer5_preparation/test_migration.py",
+      "tracked": true,
+      "sha256": "f95e31e40a0675cb6db63110ec3c70d226f1e5298f8596b6bd6af40d2b02c20b"
+    },
+    {
+      "path": "tests/layer5_preparation/test_output.py",
+      "tracked": true,
+      "sha256": "1df78cdc4c3924e7fe2619662d78fcb0fab664898444db75949b7a6ad804d6e6"
+    },
+    {
+      "path": "tests/layer5_preparation/test_profiles.py",
+      "tracked": true,
+      "sha256": "9beb0f0b093453ca056466ba1e3146c1b296190cdf5388d11692982336146d56"
+    },
+    {
+      "path": "tests/layer5_preparation/test_territory_contract.py",
+      "tracked": true,
+      "sha256": "7be17335447f2341b2d17ad0263288b7d92891467f388a158fc3069ffd46d363"
+    },
+    {
+      "path": "tests/layer5_territories/README.md",
+      "tracked": true,
+      "sha256": "02cd238443c5d84e0fe125896b7070168fa4ebc20ce9190c9588d82fed3af8f7"
+    },
+    {
+      "path": "tests/layer5_territories/test_dane_reference.py",
+      "tracked": true,
+      "sha256": "5e26e7d00dff603563bfb727a92d9447e3ffe991b0cedfdb9c1e901b252a3342"
+    },
+    {
+      "path": "tests/layer5_territories/test_matching.py",
+      "tracked": true,
+      "sha256": "9ea035bceb9a91e2080aa05e96175f970cc6cbdf9e595c37ae25b135d34aefe6"
+    },
+    {
+      "path": "tests/layer5_territories/test_publication.py",
+      "tracked": true,
+      "sha256": "728bad5795748a4bbdba0db14733956f32bf8584a2d9abd263aeb0fc38d1a3f0"
+    },
+    {
+      "path": "tests/test_api_contract_integration.py",
+      "tracked": true,
+      "sha256": "5340a59caa2d1d66abd41fffbeb724b4a26574e1f6b8f699f999635d66f7a133"
+    },
+    {
+      "path": "tests/test_api_lifecycle_integration.py",
+      "tracked": true,
+      "sha256": "7edb30ec3a8b9585b857dc20699873c0d1fce80443114dfb1bcd024c36dbbae9"
+    },
+    {
+      "path": "tests/test_architecture_consolidation.py",
+      "tracked": true,
+      "sha256": "80c22160f5ae91881f900828a0bd618c13945ca3d86dddd918c2c443dd879cac"
+    },
+    {
+      "path": "tests/test_assessment_recovery.py",
+      "tracked": true,
+      "sha256": "265cd7ac15f2eda00092e85956223d8d2dce89be3186ea45149c064cd5ebb755"
+    },
+    {
+      "path": "tests/test_autonomous_execution.py",
+      "tracked": true,
+      "sha256": "f9d13660afd2026f5f74afc80e9b9fee3675f674f136ffca1cbb13f4d81b20a3"
+    },
+    {
+      "path": "tests/test_autonomous_prepare_menu.py",
+      "tracked": true,
+      "sha256": "2b8b509cac8e74cabd9c24e86b7899a0014e8be287d80acc2aaf42dbcb8535ba"
+    },
+    {
+      "path": "tests/test_batching_monitor.py",
+      "tracked": true,
+      "sha256": "8a8c5842636b3b8e141d73e6ca647bd9d9a6196710d90aa59ae5cfe0039d0607"
+    },
+    {
+      "path": "tests/test_context_budget.py",
+      "tracked": true,
+      "sha256": "40a333062378af88a99878c06986cfd92a33059c36fefb78c417f169cf12e19a"
+    },
+    {
+      "path": "tests/test_environment_setup.py",
+      "tracked": true,
+      "sha256": "bfcefa3d395d113affad4a83c3ee73f90d1466f23a4b6a43cc659712bf8edcf4"
+    },
+    {
+      "path": "tests/test_evaluable_contracts.py",
+      "tracked": true,
+      "sha256": "da836e136d20ae5cd4471e19231139e23ea7fa274284d13061623bd48c8b3b7a"
+    },
+    {
+      "path": "tests/test_evaluation_input_isolation.py",
+      "tracked": true,
+      "sha256": "ea7ad731fcdf87f2608e257aaeb60460498430c3bf72d0c80227ed464a5efa61"
+    },
+    {
+      "path": "tests/test_final_audit_regressions.py",
+      "tracked": true,
+      "sha256": "5b4e707823fa687ccb21d73e4c463e05f87d4521756ebce89ee6e27056111569"
+    },
+    {
+      "path": "tests/test_final_output.py",
+      "tracked": true,
+      "sha256": "23d0ebaef9e67c858eaf8f8ae5a5100501f06b4384f1eababbc9cb910bf29f94"
+    },
+    {
+      "path": "tests/test_flexible_preprocessing.py",
+      "tracked": true,
+      "sha256": "1f2518cbc04fa6c0c17c106e07929155e9bb04469d50c61d77642165b1a5faa1"
+    },
+    {
+      "path": "tests/test_independent_sources.py",
+      "tracked": true,
+      "sha256": "7899c7c00c4331b6a76570ccb9f6a302cb191f31be45832362610d71db35a7c4"
+    },
+    {
+      "path": "tests/test_indicator_csv.py",
+      "tracked": true,
+      "sha256": "d9bfa8a66fcd0ab2ffbc552939c2a7286a02a4777998c12f245b48cf4aa721e2"
+    },
+    {
+      "path": "tests/test_knowledge_discovery.py",
+      "tracked": true,
+      "sha256": "928929e45546ad3339332953d4ab0754fdaa9678fd60b67d520c4955fdeb4577"
+    },
+    {
+      "path": "tests/test_layer1_intake.py",
+      "tracked": true,
+      "sha256": "d6dbb78bb3ba0364d30dbf07c4c33f71522d66bffb2ca1aab0d0116bca91d98e"
+    },
+    {
+      "path": "tests/test_manual_pipeline.py",
+      "tracked": true,
+      "sha256": "d899d2413448014605369ee726e9aed3e802cd02ddcc2900bb18ec02be1eb50d"
+    },
+    {
+      "path": "tests/test_metadata_only_input.py",
+      "tracked": true,
+      "sha256": "feecb869b484a47d02d8815780b9e0f76fbf76dd4f8062d30dad749eb86391bd"
+    },
+    {
+      "path": "tests/test_minimal_evaluation.py",
+      "tracked": true,
+      "sha256": "31dba6fd70b3994ae7381b7ab55705eaf71749a4ff01946c0c1dbda6ecbe9f8c"
+    },
+    {
+      "path": "tests/test_ollama_provider.py",
+      "tracked": true,
+      "sha256": "3a6b278c0ebf97b80ee1f9f9a6e0b17a90cb67507d86f94abb6cfc3ac67f0357"
+    },
+    {
+      "path": "tests/test_output_layout.py",
+      "tracked": true,
+      "sha256": "e1a4e45badd20402d0aa5cfcc791efc70f1d3c32c22c7ed06d4de912780d583a"
+    },
+    {
+      "path": "tests/test_phase11_evaluation.py",
+      "tracked": true,
+      "sha256": "cc0338a395d664f6b29a43ef842f9372b6389b0dbd8d6031b5e4a3cabc42b21b"
+    },
+    {
+      "path": "tests/test_phase12_evaluation.py",
+      "tracked": true,
+      "sha256": "f8cee26a01c8577c93004c5593855ff3f36e41948b69f11151edf18b38ca4b88"
+    },
+    {
+      "path": "tests/test_phase1_evaluation.py",
+      "tracked": true,
+      "sha256": "3851525fe71842bf2ce6e00a67f0f982de1b86f85984315e42599c95a6a11fe1"
+    },
+    {
+      "path": "tests/test_preparation_integrity.py",
+      "tracked": true,
+      "sha256": "601f724acfd6fe5d8d157e43acf4f63884cccce9f6ffe09d11441d4d45e6a3b4"
+    },
+    {
+      "path": "tests/test_project_selection.py",
+      "tracked": true,
+      "sha256": "0d4fae5788dc2883ab9ce075eb2fd13c215c0563a3c9492818510ce9780e0320"
+    },
+    {
+      "path": "tests/test_python_runner.py",
+      "tracked": true,
+      "sha256": "96f40f67b21921ff64a87743edfd1554ae8dc649b7c1b41903d99f7254ea5a39"
+    },
+    {
+      "path": "tests/test_resource_wait.py",
+      "tracked": true,
+      "sha256": "2229af8ca30e209bbdbe0058d8198be4a5bced40f31e1adc5f6edd779d660a1b"
+    },
+    {
+      "path": "tests/test_run_performance.py",
+      "tracked": true,
+      "sha256": "5edaa1319ed58ebb142f0fca87370a37d6785d9fa0c61895de714f9ec785a04f"
+    },
+    {
+      "path": "tests/test_run_storage.py",
+      "tracked": true,
+      "sha256": "1bb419b497a4359ff34439e84e40aa7e7b4f57d3e8a1a49867b537784758cb0c"
+    },
+    {
+      "path": "tests/test_sad_source_migration.py",
+      "tracked": true,
+      "sha256": "83afe847115fa159fc7b98f865b12a46e3228efb3a1bc4df3ed57e1b16146262"
+    },
+    {
+      "path": "tests/test_scoped_identity.py",
+      "tracked": true,
+      "sha256": "a40bef67fe4d45b98bddc79e9a3dd99b5aa248559b1dd0ff98db5c03de95a7da"
+    },
+    {
+      "path": "tests/test_selection_console.py",
+      "tracked": true,
+      "sha256": "217da60cba7bbccf010acef5c4aa9614d7c3f02307041948188930d5e8de955b"
+    },
+    {
+      "path": "tests/test_storage_integration.py",
+      "tracked": true,
+      "sha256": "571b63c40838a85b64a370f59434c474d9fa7039f2eaf9b5fed88bf428219385"
+    },
+    {
+      "path": "tests/test_unified_runner.py",
+      "tracked": true,
+      "sha256": "383ee2e878b1e855b6e8ee1b3058b08b23adf14fac4671657a1d200fee705157"
+    },
+    {
+      "path": "uv.lock",
+      "tracked": true,
+      "sha256": "df33487939a59ec971c2370e244368c6ce3d10a869c5f64f08272fff750dfec7"
+    }
+  ],
+  "publication_files": [
+    ".env.example",
+    ".gitattributes",
+    ".gitignore",
+    ".python-version",
+    "README.md",
+    "config/README.md",
+    "config/autonomous.json",
+    "config/autonomous_optimized.json",
+    "config/autonomous_phase11.json",
+    "config/autonomous_phase12.json",
+    "config/autonomous_resources.json",
+    "config/layer1.yaml",
+    "config/layer2.yaml",
+    "config/layer3.yaml",
+    "config/layer4_closure.yaml",
+    "config/layer4_closure_definitive.yaml",
+    "config/layer4_confidence.yaml",
+    "config/layer4_experiment.yaml",
+    "config/layer4_final.yaml",
+    "config/layer4_preliminary.yaml",
+    "config/openai.json",
+    "config/pipeline_manual.json",
+    "config/pipeline_validacion_integral.json",
+    "config/qwen_tokenizer.json",
+    "config/sad_relocations.json",
+    "config/sources.example.yaml",
+    "config/sources.synthetic.yaml",
+    "data/contratos/tesis_comparacion_30.v1.json",
+    "data/layer1_sources/README.md",
+    "data/layer1_sources/base/.gitkeep",
+    "data/layer1_sources/incoming/.gitkeep",
+    "data/layer1_sources/reference/.gitkeep",
+    "data/templates/plantilla_entrada_proyectos.xlsx",
+    "data/templates/plantilla_resultado_final_indicadores_territorios.xlsx",
+    "data/templates/resultado_final_indicadores.xlsx",
+    "docs/ALMACENAMIENTO.md",
+    "docs/OPENAI_EXPERIMENTS.md",
+    "docs/README.md",
+    "docs/UV_MIGRATION.md",
+    "docs/contracts/canonical_data_contract.md",
+    "docs/contracts/chunking_contract.md",
+    "docs/contracts/cinco_capas.md",
+    "docs/contracts/final_output_contract.md",
+    "docs/contracts/graph_contract.md",
+    "docs/contracts/layer2_knowledge_contract.md",
+    "docs/contracts/layer3_graphrag_contract.md",
+    "docs/contracts/layer4_assessment_contract.md",
+    "docs/contracts/layer4_assessment_v2_contract.md",
+    "docs/contracts/layer4_assessment_v3_contract.md",
+    "docs/contracts/layer4_confidence_contract.md",
+    "docs/contracts/layer4_discovery_v3_3_contract.md",
+    "docs/contracts/layer4_indicator_profiles_contract.md",
+    "docs/contracts/layer4_output_contract.md",
+    "docs/contracts/layer4_powerbi_contract.md",
+    "docs/contracts/retrieval_contract.md",
+    "docs/data_dictionary/data_dictionary.csv",
+    "docs/instalacion.md",
+    "docs/status/almacenamiento_final.md",
+    "docs/status/auditoria_archivos_publicacion.json",
+    "docs/status/auditoria_final_repositorio.md",
+    "docs/status/validacion_contrato_tesis30.md",
+    "pyproject.toml",
+    "pytest.ini",
+    "requirements-dev.txt",
+    "requirements.txt",
+    "requirements/README.md",
+    "requirements/dev-constraints.txt",
+    "requirements/layer3-windows-cuda.lock.txt",
+    "requirements/layer3.txt",
+    "requirements/manual-input.txt",
+    "requirements/performance.txt",
+    "requirements/runtime-constraints.txt",
+    "run.py",
+    "schemas/README.md",
+    "schemas/articulo.schema.json",
+    "schemas/final_output.schema.json",
+    "schemas/indicador.schema.json",
+    "schemas/investigador.schema.json",
+    "schemas/layer2/README.md",
+    "schemas/layer2/entities.schema.json",
+    "schemas/layer2/layer2_manifest.schema.json",
+    "schemas/layer2/reference_chunks.schema.json",
+    "schemas/layer2/reference_documents.schema.json",
+    "schemas/layer2/reference_sections.schema.json",
+    "schemas/layer2/relations.schema.json",
+    "schemas/layer2/source_chunks.schema.json",
+    "schemas/layer2/source_documents.schema.json",
+    "schemas/layer2/source_sections.schema.json",
+    "schemas/layer3/context_package.schema.json",
+    "schemas/layer3/embedding.schema.json",
+    "schemas/layer3/evaluation_query.schema.json",
+    "schemas/layer3/indicator_profile.schema.json",
+    "schemas/layer3/layer3_manifest.schema.json",
+    "schemas/layer3/source_context_package.schema.json",
+    "schemas/layer3/source_indicator_candidate.schema.json",
+    "schemas/layer4_assessment/README.md",
+    "schemas/layer4_assessment/assessment.schema.json",
+    "schemas/layer4_assessment/indicator_profile.schema.json",
+    "schemas/layer4_assessment/metadata.schema.json",
+    "schemas/layer4_assessment/project_indicator.schema.json",
+    "schemas/layer4_assessment/project_territory.schema.json",
+    "schemas/layer4_assessment/workbook_data.schema.json",
+    "schemas/layer4_assessment_v2/assessment.schema.json",
+    "schemas/layer4_assessment_v2/assessment_batch.schema.json",
+    "schemas/layer4_assessment_v2/confidence_result.schema.json",
+    "schemas/layer4_assessment_v3/assessment.schema.json",
+    "schemas/layer4_assessment_v3/assessment_batch.schema.json",
+    "schemas/layer4_assessment_v3/rubric_batch.schema.json",
+    "schemas/layer4_confidence/README.md",
+    "schemas/layer4_confidence/assessment.schema.json",
+    "schemas/layer4_confidence/confidence_result.schema.json",
+    "schemas/layer4_confidence/indicator_profile.schema.json",
+    "schemas/layer4_preliminary/README.md",
+    "schemas/layer4_preliminary/assessment_batch.schema.json",
+    "schemas/layer4_preliminary/project_indicator_preliminary.schema.json",
+    "schemas/organizacion.schema.json",
+    "schemas/proyecto.schema.json",
+    "schemas/relationships.schema.json",
+    "scripts/README.md",
+    "scripts/__init__.py",
+    "scripts/analyze_run_performance.py",
+    "scripts/auxiliary/README.md",
+    "scripts/auxiliary/audit_identity_alias_forensics.py",
+    "scripts/auxiliary/audit_identity_aliases.py",
+    "scripts/auxiliary/create_source_level_review_workbook.py",
+    "scripts/auxiliary/verify_layer4_layout.py",
+    "scripts/auxiliary/verify_layer4_preparation.py",
+    "scripts/build_contracts.py",
+    "scripts/build_dane_reference.py",
+    "scripts/build_indicator_assessment_profiles.py",
+    "scripts/build_layer2_contracts.py",
+    "scripts/build_layer3_contracts.py",
+    "scripts/build_layer4_contracts.py",
+    "scripts/check_environment.py",
+    "scripts/check_shareable_secrets.py",
+    "scripts/cleanup_layer4.py",
+    "scripts/compare_evaluation.py",
+    "scripts/export_layer4_pilot.py",
+    "scripts/export_layer4_powerbi.py",
+    "scripts/pipeline_coordinator.py",
+    "scripts/prepare_layer4_consumer_v3_3.py",
+    "scripts/prepare_layer4_inputs.py",
+    "scripts/prepare_qwen_tokenizer.py",
+    "scripts/recover_invalid_assessment.py",
+    "scripts/render_layer4_experiment.mjs",
+    "scripts/render_layer4_pilot.mjs",
+    "scripts/render_layer4_powerbi.mjs",
+    "scripts/render_layer4_workbook.mjs",
+    "scripts/render_territory_workbook.mjs",
+    "scripts/run_layer1.py",
+    "scripts/run_layer2.py",
+    "scripts/run_layer3.py",
+    "scripts/run_layer4_closure.py",
+    "scripts/run_layer4_coverage_v3.py",
+    "scripts/run_layer4_definitive_v3_3.py",
+    "scripts/run_layer4_experiment.py",
+    "scripts/run_layer4_pilot_discovery_v3_3.py",
+    "scripts/run_layer4_preliminary.py",
+    "scripts/run_pipeline_manual.py",
+    "scripts/run_territories.py",
+    "scripts/territory_integrity.py",
+    "scripts/verify_layer1.py",
+    "scripts/verify_layer2.py",
+    "scripts/verify_layer4_pilot_delivery.py",
+    "scripts/verify_territories.py",
+    "setup.ps1",
+    "src/README.md",
+    "src/autonomous_execution/__init__.py",
+    "src/autonomous_execution/batching.py",
+    "src/autonomous_execution/cli.py",
+    "src/autonomous_execution/comparison.py",
+    "src/autonomous_execution/compatibility/resource_wait_scripts_init.txt",
+    "src/autonomous_execution/discovery.py",
+    "src/autonomous_execution/engine.py",
+    "src/autonomous_execution/final_output.py",
+    "src/autonomous_execution/followup.py",
+    "src/autonomous_execution/graph_worker.py",
+    "src/autonomous_execution/lifecycle.py",
+    "src/autonomous_execution/minimal.py",
+    "src/autonomous_execution/monitor.py",
+    "src/autonomous_execution/packing.py",
+    "src/autonomous_execution/phase1.py",
+    "src/autonomous_execution/phase11.py",
+    "src/autonomous_execution/phase12.py",
+    "src/autonomous_execution/policy.py",
+    "src/autonomous_execution/preparation_integrity.py",
+    "src/autonomous_execution/prepare_menu.py",
+    "src/autonomous_execution/resource_wait.py",
+    "src/autonomous_execution/scope.py",
+    "src/autonomous_execution/store.py",
+    "src/autonomous_execution/transport.py",
+    "src/console_output.py",
+    "src/evaluation_contracts.py",
+    "src/experiment_runtime.py",
+    "src/layer2_processing/__init__.py",
+    "src/layer2_processing/checkpoints.py",
+    "src/layer2_processing/knowledge/README.md",
+    "src/layer2_processing/knowledge/__init__.py",
+    "src/layer2_processing/knowledge/chunking.py",
+    "src/layer2_processing/knowledge/contracts.py",
+    "src/layer2_processing/knowledge/documents.py",
+    "src/layer2_processing/knowledge/graph_data.py",
+    "src/layer2_processing/knowledge/pipeline.py",
+    "src/layer2_processing/knowledge/provenance.py",
+    "src/layer2_processing/knowledge/quality.py",
+    "src/layer2_processing/knowledge/security.py",
+    "src/layer2_processing/knowledge/text_normalization.py",
+    "src/layer2_processing/knowledge/validate_inputs.py",
+    "src/layer2_processing/pipeline.py",
+    "src/layer2_processing/preprocessing/README.md",
+    "src/layer2_processing/preprocessing/__init__.py",
+    "src/layer2_processing/preprocessing/adapters.py",
+    "src/layer2_processing/preprocessing/canonicalize.py",
+    "src/layer2_processing/preprocessing/contracts.py",
+    "src/layer2_processing/preprocessing/dane_reference.py",
+    "src/layer2_processing/preprocessing/identity.py",
+    "src/layer2_processing/preprocessing/ingestion.py",
+    "src/layer2_processing/preprocessing/knowledge_fields.py",
+    "src/layer2_processing/preprocessing/normalize.py",
+    "src/layer2_processing/preprocessing/pipeline.py",
+    "src/layer2_processing/preprocessing/project_selection.py",
+    "src/layer2_processing/preprocessing/provenance.py",
+    "src/layer2_processing/preprocessing/quality.py",
+    "src/layer2_processing/preprocessing/runtime.py",
+    "src/layer2_processing/preprocessing/source_scope.py",
+    "src/layer3_graphrag/__init__.py",
+    "src/layer3_graphrag/configuration.py",
+    "src/layer3_graphrag/contracts.py",
+    "src/layer3_graphrag/embeddings.py",
+    "src/layer3_graphrag/evaluation.py",
+    "src/layer3_graphrag/graph.py",
+    "src/layer3_graphrag/graph_retriever.py",
+    "src/layer3_graphrag/indicator_retrieval.py",
+    "src/layer3_graphrag/manifest.py",
+    "src/layer3_graphrag/model_setup.py",
+    "src/layer3_graphrag/operations.py",
+    "src/layer3_graphrag/pipeline.py",
+    "src/layer3_graphrag/provenance.py",
+    "src/layer3_graphrag/quality.py",
+    "src/layer3_graphrag/retrieval.py",
+    "src/layer3_graphrag/security.py",
+    "src/layer3_graphrag/source_context.py",
+    "src/layer3_graphrag/validate_inputs.py",
+    "src/layer3_graphrag/vector_index.py",
+    "src/layer4_evaluation/README.md",
+    "src/layer4_evaluation/__init__.py",
+    "src/layer4_evaluation/history.py",
+    "src/layer4_evaluation/indicator_csv.py",
+    "src/layer4_evaluation/indicators/README.md",
+    "src/layer4_evaluation/indicators/__init__.py",
+    "src/layer4_evaluation/indicators/assessment.py",
+    "src/layer4_evaluation/indicators/assessment_v2.py",
+    "src/layer4_evaluation/indicators/assessment_v3.py",
+    "src/layer4_evaluation/indicators/cleanup.py",
+    "src/layer4_evaluation/indicators/closure_audit.py",
+    "src/layer4_evaluation/indicators/closure_export.py",
+    "src/layer4_evaluation/indicators/closure_runtime.py",
+    "src/layer4_evaluation/indicators/codex_cli.py",
+    "src/layer4_evaluation/indicators/confidence.py",
+    "src/layer4_evaluation/indicators/consumer_v3_3.py",
+    "src/layer4_evaluation/indicators/context_budget.py",
+    "src/layer4_evaluation/indicators/contracts.py",
+    "src/layer4_evaluation/indicators/experiment.py",
+    "src/layer4_evaluation/indicators/experiment_export.py",
+    "src/layer4_evaluation/indicators/experiment_inputs.py",
+    "src/layer4_evaluation/indicators/experiment_selection.py",
+    "src/layer4_evaluation/indicators/export.py",
+    "src/layer4_evaluation/indicators/final_export.py",
+    "src/layer4_evaluation/indicators/final_projection.py",
+    "src/layer4_evaluation/indicators/global_discovery.py",
+    "src/layer4_evaluation/indicators/global_discovery_v3_3.py",
+    "src/layer4_evaluation/indicators/global_discovery_v3_3_compact.py",
+    "src/layer4_evaluation/indicators/ollama_provider.py",
+    "src/layer4_evaluation/indicators/openai_provider.py",
+    "src/layer4_evaluation/indicators/performance.py",
+    "src/layer4_evaluation/indicators/performance_report.py",
+    "src/layer4_evaluation/indicators/powerbi.py",
+    "src/layer4_evaluation/indicators/preliminary.py",
+    "src/layer4_evaluation/indicators/preliminary_output.py",
+    "src/layer4_evaluation/indicators/preparation.py",
+    "src/layer4_evaluation/indicators/profiles.py",
+    "src/layer4_evaluation/indicators/prompt.py",
+    "src/layer4_evaluation/indicators/review.py",
+    "src/layer4_evaluation/indicators/selection.py",
+    "src/layer4_evaluation/indicators/semantic_fallback.py",
+    "src/layer4_evaluation/indicators/token_budget.py",
+    "src/layer4_evaluation/indicators/validation_diagnostics.py",
+    "src/layer4_evaluation/live_execution.py",
+    "src/layer4_evaluation/paths.py",
+    "src/layer4_evaluation/territorial_consumption.py",
+    "src/layer4_evaluation/territories/README.md",
+    "src/layer4_evaluation/territories/__init__.py",
+    "src/layer4_evaluation/territories/contracts.py",
+    "src/layer4_evaluation/territories/inputs.py",
+    "src/layer4_evaluation/territories/matching.py",
+    "src/layer4_evaluation/territories/pipeline.py",
+    "src/layer4_evaluation/territories/workbook.py",
+    "src/model_access.py",
+    "src/project_menu.py",
+    "src/run_control.py",
+    "src/run_paths.py",
+    "src/run_storage.py",
+    "tests/README.md",
+    "tests/__init__.py",
+    "tests/conftest.py",
+    "tests/fixtures/prueba_controlada/README.md",
+    "tests/fixtures/prueba_en_vivo/README.md",
+    "tests/fixtures/synthetic/README.md",
+    "tests/fixtures/synthetic/articulos.csv",
+    "tests/fixtures/synthetic/indicadores.csv",
+    "tests/fixtures/synthetic/investigadores.csv",
+    "tests/fixtures/synthetic/proyectos.csv",
+    "tests/layer2_preprocessing/README.md",
+    "tests/layer2_preprocessing/__init__.py",
+    "tests/layer2_preprocessing/conftest.py",
+    "tests/layer2_preprocessing/test_final_domain.py",
+    "tests/layer2_preprocessing/test_identity.py",
+    "tests/layer2_preprocessing/test_ingest.py",
+    "tests/layer2_preprocessing/test_normalization.py",
+    "tests/layer2_preprocessing/test_pipeline.py",
+    "tests/layer2_preprocessing/test_validation.py",
+    "tests/layer3_knowledge/README.md",
+    "tests/layer3_knowledge/test_integration_real.py",
+    "tests/layer3_knowledge/test_unit.py",
+    "tests/layer4_graphrag/conftest.py",
+    "tests/layer4_graphrag/test_configuration.py",
+    "tests/layer4_graphrag/test_embeddings.py",
+    "tests/layer4_graphrag/test_evaluation.py",
+    "tests/layer4_graphrag/test_graph.py",
+    "tests/layer4_graphrag/test_indicator_retrieval.py",
+    "tests/layer4_graphrag/test_inputs.py",
+    "tests/layer4_graphrag/test_integration_pending.py",
+    "tests/layer4_graphrag/test_orchestration.py",
+    "tests/layer4_graphrag/test_provenance.py",
+    "tests/layer4_graphrag/test_source_context.py",
+    "tests/layer4_graphrag/test_vector.py",
+    "tests/layer5_confidence/test_confidence.py",
+    "tests/layer5_experiment/test_assessment_v3.py",
+    "tests/layer5_experiment/test_cleanup.py",
+    "tests/layer5_experiment/test_closure_control.py",
+    "tests/layer5_experiment/test_closure_recovery.py",
+    "tests/layer5_experiment/test_closure_runtime.py",
+    "tests/layer5_experiment/test_consumer_v3_3.py",
+    "tests/layer5_experiment/test_coverage_coordinator_v3.py",
+    "tests/layer5_experiment/test_definitive_control.py",
+    "tests/layer5_experiment/test_experiment.py",
+    "tests/layer5_experiment/test_final_export.py",
+    "tests/layer5_experiment/test_final_territories.py",
+    "tests/layer5_experiment/test_global_discovery.py",
+    "tests/layer5_experiment/test_global_discovery_v3_3.py",
+    "tests/layer5_experiment/test_global_discovery_v3_3_compact.py",
+    "tests/layer5_experiment/test_layout_relocation.py",
+    "tests/layer5_experiment/test_pilot_single_discovery_control.py",
+    "tests/layer5_experiment/test_semantic_fallback.py",
+    "tests/layer5_experiment/test_territorial_consumption.py",
+    "tests/layer5_experiment/test_v2_closure.py",
+    "tests/layer5_experiment/test_v2_workflow.py",
+    "tests/layer5_pilot/test_delivery.py",
+    "tests/layer5_powerbi/test_powerbi.py",
+    "tests/layer5_preliminary/test_preliminary.py",
+    "tests/layer5_preparation/README.md",
+    "tests/layer5_preparation/conftest.py",
+    "tests/layer5_preparation/test_assessment_contract.py",
+    "tests/layer5_preparation/test_dane_unification.py",
+    "tests/layer5_preparation/test_migration.py",
+    "tests/layer5_preparation/test_output.py",
+    "tests/layer5_preparation/test_profiles.py",
+    "tests/layer5_preparation/test_territory_contract.py",
+    "tests/layer5_territories/README.md",
+    "tests/layer5_territories/test_dane_reference.py",
+    "tests/layer5_territories/test_matching.py",
+    "tests/layer5_territories/test_publication.py",
+    "tests/test_api_contract_integration.py",
+    "tests/test_api_lifecycle_integration.py",
+    "tests/test_architecture_consolidation.py",
+    "tests/test_assessment_recovery.py",
+    "tests/test_autonomous_execution.py",
+    "tests/test_autonomous_prepare_menu.py",
+    "tests/test_batching_monitor.py",
+    "tests/test_context_budget.py",
+    "tests/test_environment_setup.py",
+    "tests/test_evaluable_contracts.py",
+    "tests/test_evaluation_input_isolation.py",
+    "tests/test_final_audit_regressions.py",
+    "tests/test_final_output.py",
+    "tests/test_flexible_preprocessing.py",
+    "tests/test_independent_sources.py",
+    "tests/test_indicator_csv.py",
+    "tests/test_knowledge_discovery.py",
+    "tests/test_layer1_intake.py",
+    "tests/test_manual_pipeline.py",
+    "tests/test_metadata_only_input.py",
+    "tests/test_minimal_evaluation.py",
+    "tests/test_ollama_provider.py",
+    "tests/test_output_layout.py",
+    "tests/test_phase11_evaluation.py",
+    "tests/test_phase12_evaluation.py",
+    "tests/test_phase1_evaluation.py",
+    "tests/test_preparation_integrity.py",
+    "tests/test_project_selection.py",
+    "tests/test_python_runner.py",
+    "tests/test_resource_wait.py",
+    "tests/test_run_performance.py",
+    "tests/test_run_storage.py",
+    "tests/test_sad_source_migration.py",
+    "tests/test_scoped_identity.py",
+    "tests/test_selection_console.py",
+    "tests/test_storage_integration.py",
+    "tests/test_unified_runner.py",
+    "uv.lock"
+  ],
+  "essential_not_tracked": [],
+  "contract_authorized": true,
+  "contract_path": "data/contratos/tesis_comparacion_30.v1.json",
+  "contract_file_sha256": "3ff98a8d2e0f901ab1aff0b08f90f60b46d7b4aba002eea1d6b6e318b375ed21",
+  "clean_clone": {
+    "status": "PASS",
+    "sync": "LOCKED_OFFLINE_SEPARATE_ENV_REUSED",
+    "cli": [
+      {
+        "args": [],
+        "status": "PASS"
+      },
+      {
+        "args": [
+          "--provider",
+          "openai"
+        ],
+        "status": "PASS"
+      },
+      {
+        "args": [
+          "model"
+        ],
+        "status": "PASS"
+      },
+      {
+        "args": [
+          "contracts"
+        ],
+        "status": "PASS"
+      },
+      {
+        "args": [
+          "status"
+        ],
+        "status": "PASS"
+      },
+      {
+        "args": [
+          "--help"
+        ],
+        "status": "PASS"
+      },
+      {
+        "args": [
+          "cleanup",
+          "--dry-run"
+        ],
+        "status": "PASS"
+      }
+    ],
+    "subdirectory": "PASS",
+    "unit_tests": "48 PASS",
+    "contract": "BYTE_IDENTICAL_FROM_GIT_INDEX",
+    "private_sources": "ABSENT",
+    "models_and_api": "BLOCKED",
+    "platform": "Windows x64 only",
+    "scope": "Indexed tree without local files; installed package bytes reused, not a fresh network download"
+  },
+  "parsed_python": 265,
+  "secret_findings": [],
+  "excluded_categories": [
+    "outputs",
+    "institutional data",
+    "credentials",
+    "models and caches",
+    "unreviewed historical reports"
+  ],
+  "note": "Prepared index only; no commit/push. This inventory excludes its own checksum to avoid self-reference. Private inputs must be obtained separately."
+}

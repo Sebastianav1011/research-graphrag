@@ -45,7 +45,7 @@ class SourceContextResolver:
                     raise ValueError('Section SOURCE mapping mismatch')
                 if not section['text_normalized'].strip():
                     continue
-                role = 'substantive' if section['field_name'] in FIELD_ROLES[source_type]['substantive'] else 'orientation'
+                role = 'substantive' if section['field_name'] in FIELD_ROLES[source_type]['substantive'] or section['field_name'].startswith('text__') else 'orientation'
                 groups[role].append({'field_name':section['field_name'], 'section_id':section['section_id'],
                     'text_hash':section.get('text_hash_normalized', section.get('text_hash',digest(section['text_normalized']))),
                     'chunk_ids': [r['chunk_id'] for r in sorted(self.by_section[section['section_id']],key=lambda r:(r.get('chunk_index',0),r['chunk_id']))]})

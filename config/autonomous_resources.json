@@ -1,0 +1,11 @@
+{
+  "extends": "config/autonomous.json",
+  "resource_wait": {
+    "version": "RESOURCE_WAIT_V1",
+    "poll_seconds": 60,
+    "max_poll_seconds": 300,
+    "resume_headroom_mib": 256,
+    "stable_samples": 2,
+    "max_wait_seconds": 0
+  }
+}

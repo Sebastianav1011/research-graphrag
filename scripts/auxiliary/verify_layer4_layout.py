@@ -12,7 +12,7 @@ import sys
 
 ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT/'src'))
-from layer4.paths import verify_expected, resolve
+from layer4_evaluation.paths import verify_expected, resolve
 
 
 def main():
@@ -32,10 +32,14 @@ def main():
             except Exception as exc:result['errors'].append(dict(path=row['path'],error=str(exc)))
     registry=json.loads((audit/'rutas.json').read_text(encoding='utf-8'))
     for name,binding in registry['runtime_bindings'].items():
-        for path,expected in ((resolve(ROOT,name),binding['after_sha256']),
-                              (ROOT/binding['snapshot'],binding['before_sha256'])):
-            if hashlib.sha256(path.read_bytes()).hexdigest()!=expected:
-                result['errors'].append(dict(path=str(path),error='Migration binding mismatch'))
+        try:
+            # Verify the previous runtime bytes and separately pinned relocation.
+            verify_expected(ROOT,name,binding['after_sha256'])
+            path=ROOT/binding['snapshot']
+            if hashlib.sha256(path.read_bytes()).hexdigest()!=binding['before_sha256']:
+                raise ValueError('Original migration snapshot mismatch')
+        except Exception as exc:
+            result['errors'].append(dict(path=name,error=str(exc)))
     v2=ROOT/'outputs/layer4/final/resultado_capa4.xlsx'
     result['v2_sha256']=hashlib.sha256(v2.read_bytes()).hexdigest()
     if result['v2_sha256']!='fc6f876493ee327f140f5fbdbd234b93242eeaee15d86aa752388980f03332e1':

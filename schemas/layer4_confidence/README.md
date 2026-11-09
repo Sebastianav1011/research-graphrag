@@ -35,5 +35,5 @@ de exportación al resultado; no sustituye estos gates.
 ## Ejecución
 
 No tiene CLI generador propio. Se comprueba mediante
-`python -B -m pytest tests/layer4_confidence -q -p no:cacheprovider`.
+`uv run python -B -m pytest tests/layer4_confidence -q -p no:cacheprovider`.
 La configuración es [layer4_confidence.yaml](../../config/layer4_confidence.yaml).

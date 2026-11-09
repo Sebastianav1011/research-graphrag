@@ -62,7 +62,8 @@ class SentenceTransformersProvider(EmbeddingProvider):
             if self.settings.get('local_model_path'):
                 from pathlib import Path
                 root = Path(__file__).resolve().parents[2]
-                path = (root / location).resolve()
+                from layer2_processing.checkpoints import resolve
+                path = resolve(root, location).resolve()
                 if not path.is_relative_to(root / 'outputs/layer3/models'):
                     raise ValueError('Local model must be inside official Layer 3 outputs')
                 location = str(path)
@@ -85,7 +86,8 @@ class SentenceTransformersProvider(EmbeddingProvider):
             from pathlib import Path
             from .provenance import file_hash
             root = Path(__file__).resolve().parents[2]
-            location = (root / self.settings['local_model_path']).resolve()
+            from layer2_processing.checkpoints import resolve
+            location = resolve(root, self.settings['local_model_path']).resolve()
             if not location.is_relative_to(root / 'outputs/layer3/models'):
                 raise ValueError('Local model escapes official root')
             if file_hash(location / 'pytorch_model.bin') != self.settings['weights_sha256']:

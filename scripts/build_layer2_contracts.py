@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src'))
-from layer2_knowledge.contracts import SCHEMAS, logical_schema, manifest_schema
+from layer2_processing.knowledge.contracts import SCHEMAS, logical_schema, manifest_schema
 
 
 def main():

@@ -1,0 +1,2 @@
+# Optional only for text-extractable PDF; DOCX uses Python's standard library.
+pypdf>=6.10,<7

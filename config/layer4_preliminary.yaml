@@ -8,12 +8,12 @@ candidate_limit_per_project: 2
 assessment_engine: UNCONFIGURED
 assessment_engine_status: NOT_EXECUTED
 assessment_indicator_version: catalogo_indicadores_v2.xlsx
-indicator_profiles_manifest: data/reference/processed/indicator_assessment_profiles_manifest.json
-layer3_manifest: data/graphrag/_manifest.json
+indicator_profiles_manifest: outputs/layer4/indicator_profiles/indicator_assessment_profiles_manifest.json
+layer3_manifest: outputs/layer3/publication/_manifest.json
 retrieval_indicator_version: catalogo_indicadores.xlsx@L2_run_20261005T204120_837354Z
 confidence_version: RAW_CONFIDENCE_V1
 territory_version: PROJECT_TERRITORY_V1
 territory_manifest: outputs/layer4/territorios/publicacion/territory_manifest.json
-dane_reference_manifest: data/reference/processed/dane_reference_manifest.json
+dane_reference_manifest: outputs/layer2/reference/dane_reference_manifest.json
 country_internal_code: '000'
 country_internal_code_system: INTERNAL

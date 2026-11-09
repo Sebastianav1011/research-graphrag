@@ -1,6 +1,6 @@
 proyectos:
   enabled: true
-  path: data/samples/synthetic/proyectos.csv
+  path: tests/fixtures/synthetic/proyectos.csv
   type: csv
   mapping:
     source_project_id: id
@@ -13,7 +13,7 @@ proyectos:
     keywords: palabras
 articulos:
   enabled: true
-  path: data/samples/synthetic/articulos.csv
+  path: tests/fixtures/synthetic/articulos.csv
   type: csv
   mapping:
     source_article_id: id
@@ -30,7 +30,7 @@ articulos:
     - {column: facultad, type: facultad}
 investigadores:
   enabled: true
-  paths: [data/samples/synthetic/investigadores.csv]
+  paths: [tests/fixtures/synthetic/investigadores.csv]
   type: csv
   mapping:
     institutional_id: id
@@ -45,7 +45,7 @@ investigadores:
     - {column: facultad, type: facultad}
 indicadores:
   enabled: true
-  path: data/samples/synthetic/indicadores.csv
+  path: tests/fixtures/synthetic/indicadores.csv
   type: csv
   mapping:
     indicator_id: id

@@ -13,18 +13,18 @@ import pyarrow.parquet as pq
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'src'))
-from layer1_data.runtime import read_config
-from layer1_data.runtime import resolve_input
-from layer1_data.canonicalize import canonical_entities, canonical_researchers
-from layer1_data.identity import STRONG, evidence_values, resolve
-from layer1_data.ingestion import ingest
-from layer1_data.normalize import header, identifier, name, normalize_record, text
-from layer1_data.pipeline import source_specs
-from layer1_data.provenance import file_hash
-from layer1_data.quality import write_csv
-from layer1_data.ingestion import map_rows, mapped_values, validate_rows
+from layer2_processing.preprocessing.runtime import read_config
+from layer2_processing.preprocessing.runtime import resolve_input
+from layer2_processing.preprocessing.canonicalize import canonical_entities, canonical_researchers
+from layer2_processing.preprocessing.identity import STRONG, evidence_values, resolve
+from layer2_processing.preprocessing.ingestion import ingest
+from layer2_processing.preprocessing.normalize import header, identifier, name, normalize_record, text
+from layer2_processing.preprocessing.pipeline import source_specs
+from layer2_processing.preprocessing.provenance import file_hash
+from layer2_processing.preprocessing.quality import write_csv
+from layer2_processing.preprocessing.ingestion import map_rows, mapped_values, validate_rows
 
-OUT = ROOT / 'outputs/layer1/reports/identity_alias_forensics'
+OUT = ROOT / 'outputs/layer2/preprocessing/reports/identity_alias_forensics'
 CATEGORIES = ('SOURCE_ALREADY_CONFLICTING', 'TRANSFORMATION_CONFLICT', 'COLUMN_MAPPING_ERROR',
               'ROW_ALIGNMENT_ERROR', 'DUPLICATE_RECORD_CONFLICT', 'FORMAT_ONLY', 'UNKNOWN')
 
@@ -127,7 +127,7 @@ def reconstruct_graph(rows):
 
 
 def main():
-    canonical = ROOT / 'data/canonical'
+    canonical = ROOT / 'outputs/layer2/canonical'
     manifest_path = canonical / '_manifest.json'
     manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
     run_id = manifest['run_id']
@@ -135,10 +135,10 @@ def main():
     frozen_paths = list(canonical.iterdir())
     frozen_paths += [Path(meta['path']) for meta in manifest['input_files']]
     frozen_paths += [ROOT / rel for rel in manifest['code_hashes']]
-    frozen_paths += [ROOT / 'config/sources.yaml', ROOT / 'config/layer1.yaml', ROOT / 'templates/resultado_final_indicadores.xlsx']
-    frozen_paths += list((ROOT / 'data/staging').glob('*/' + run_id + '/*.parquet'))
-    frozen_paths += list((ROOT / 'outputs/layer1/quality').iterdir())
-    frozen_paths += [ROOT / 'outputs/layer1/audit/anomalies.csv', ROOT / 'outputs/layer1/latest_run.json']
+    frozen_paths += [ROOT / 'config/sources.yaml', ROOT / 'config/layer1.yaml', ROOT / 'data/templates/plantilla_resultado_final_indicadores_territorios.xlsx']
+    frozen_paths += list((ROOT / 'outputs/layer2/staging').glob('*/' + run_id + '/*.parquet'))
+    frozen_paths += list((ROOT / 'outputs/layer2/preprocessing/quality').iterdir())
+    frozen_paths += [ROOT / 'outputs/layer2/preprocessing/audit/anomalies.csv', ROOT / 'outputs/layer2/preprocessing/latest_run.json']
     protected = {str(path): file_hash(path) for path in frozen_paths if path.is_file()}
     assert all(protected[meta['path']] == meta['sha256'] for meta in manifest['input_files'])
     assert all(file_hash(ROOT / rel) == sha for rel, sha in manifest['code_hashes'].items())
@@ -163,7 +163,7 @@ def main():
     normalized = defaultdict(list)
     batches, mappings, sources_summary = [], [], []
     stages = {}
-    for stage_path in (ROOT / 'data/staging').glob('*/' + run_id + '/*.parquet'):
+    for stage_path in (ROOT / 'outputs/layer2/staging').glob('*/' + run_id + '/*.parquet'):
         for row in pq.read_table(stage_path).to_pylist():
             key = (row['record_source'], row['source_row'])
             assert key not in stages

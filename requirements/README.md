@@ -1,40 +1,51 @@
-# Dependencias de ejecución
+# Dependencias de GraphRAG
 
-## Propósito
+El gestor oficial es **uv**. Desde la raíz del clon:
 
-Define el runtime adicional de embeddings y conserva el lock completo del entorno
-Windows/CUDA verificado. No contiene pesos de modelos ni un proyecto npm.
+```powershell
+uv sync
+uv run python run.py
+```
 
-## Archivos principales
+No crear ni activar `.venv` manualmente. Se mantiene excluido de Git.
+La instalación completa se documenta en [instalación](../docs/instalacion.md).
 
-| Archivo | Responsabilidad |
+## Fuentes de configuración
+
+| Archivo | Función |
 |---|---|
-| [layer3.txt](layer3.txt) | Reutiliza requirements.txt y fija sentence-transformers, transformers, huggingface_hub y torch como dependencias directas de embeddings. |
-| [layer3-windows-cuda.lock.txt](layer3-windows-cuda.lock.txt) | Fija runtime completo, transitivas y pytest para Windows x64/Python 3.14; usa índice adicional PyTorch cu128. |
-| [../requirements.txt](../requirements.txt) | Dependencias directas base: pandas, NumPy, PyArrow, openpyxl, PyYAML y jsonschema. |
-| [../requirements-dev.txt](../requirements-dev.txt) | Incluye runtime base y pytest para desarrollar/probar sin instalar el stack completo de modelos. |
+| [pyproject.toml](../pyproject.toml) | Dependencias reales, grupos y plataformas. |
+| [uv.lock](../uv.lock) | Versiones, índices y hashes reproducibles. |
+| [.python-version](../.python-version) | Python 3.14.0. |
+| [requirements.txt](../requirements.txt) y [requirements-dev.txt](../requirements-dev.txt) | Entradas anteriores conservadas por compatibilidad; no son el flujo oficial. |
+| [runtime-constraints.txt](runtime-constraints.txt) y [dev-constraints.txt](dev-constraints.txt) | Referencia del entorno previo; sus restricciones se trasladaron a pyproject. |
+| [layer3-windows-cuda.lock.txt](layer3-windows-cuda.lock.txt) | Lock histórico Windows/CUDA conservado sin regenerar. |
 
-## Funcionamiento
+## Grupos
 
-Pip resuelve las listas elegidas dentro de .venv. Usar el lock completo para
-reproducir el camino verificado, o runtime base + dev para las pruebas ligeras.
-layer3.txt no equivale al lock completo ni certifica otro hardware.
+```powershell
+uv sync --no-dev
+uv sync --group pdf
+uv sync --group performance
+uv sync --all-groups
+```
 
-## Entradas y salidas
+`dev` contiene pytest y se incluye por defecto. Los otros grupos corresponden a
+los anteriores `manual-input.txt` (pypdf) y `performance.txt` (psutil/NVML).
+Los fallbacks de lectores/sensores permanecen sin cambios.
 
-Archivos de requisitos → paquetes instalados en el entorno local. Modelos BGE-M3
-se preparan aparte en outputs/layer3/models; no se distribuyen por Git.
+Para adoptar una `.venv` previa sin retirar sus paquetes adicionales:
 
-## Relación con otras capas
+```powershell
+uv sync --locked --inexact
+```
 
-El runtime base sirve a ETL, referencias, confianza y exportación openpyxl.
-Capa 3 necesita modelos locales y stack de embeddings. Las transitivas del lock,
-incluido scikit-learn, no significan que exista calibración de confianza.
+El proyecto es una aplicación con `package = false`, ejecutada desde la raíz;
+no necesita backend de empaquetado ni modificar imports o entrypoints.
+No requiere un SDK Python de Ollama: usa HTTP estándar y el servicio se instala
+externamente solo para el proveedor local.
 
-## Ejecución
-
-Seguir [instalación del README principal](../README.md#requisitos-e-instalación).
-Node/Artifact Tool y Codex CLI no se instalan mediante estos archivos. No hay
-versiones fijadas de Node o Artifact Tool en el repositorio; su disponibilidad
-debe validarse por separado. La preparación de BGE-M3 requiere descarga o copia
-autorizada de pesos y hardware compatible.
+Actualizar dependencias debe ser deliberado: editar pyproject y ejecutar
+`uv lock`; revisar el diff antes de compartir el lock. No usar `uv lock --upgrade`
+como paso de instalación. No incluir credenciales ni índices privados en estos
+archivos; `uv.toml` queda reservado para ajustes locales ignorados por Git.

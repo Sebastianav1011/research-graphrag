@@ -5,7 +5,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-from layer1_data.dane_reference import build_reference
+from layer2_processing.preprocessing.dane_reference import build_reference
 
 
 def main():

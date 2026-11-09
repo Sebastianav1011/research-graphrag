@@ -1,0 +1,11 @@
+{
+  "reasoning_effort": "low",
+  "max_concurrency": 1,
+  "max_rate_retries": 2,
+  "retry_seconds": 2,
+  "input_usd_per_million": 1,
+  "output_usd_per_million": 5,
+  "pricing_reference_date": "2026-11-08",
+  "pricing_source": "User supplied standard reference rates; verify before execution",
+  "safety_factor": 1.25
+}

@@ -37,5 +37,5 @@ Capa 4B lee los documentos/secciones SOURCE.
 
 ## Ejecución
 
-Desde la raíz: `python scripts/build_layer2_contracts.py --check`.
+Desde la raíz: `uv run python scripts/build_layer2_contracts.py --check`.
 Sin --check regenera JSON; no publica datos.

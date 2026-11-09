@@ -1,0 +1,12 @@
+"""Console extensions; historical coordinator and run entry points stay frozen."""
+from importlib.util import find_spec
+
+# Direct administrative script invocation may not have added src to sys.path.
+# The run.py console and the normal test/runtime environment already do so.
+if find_spec('autonomous_execution') is not None:
+    from autonomous_execution.preparation_integrity import install as install_integrity
+    install_integrity()
+    from autonomous_execution.prepare_menu import install
+    install()
+    from autonomous_execution.resource_wait import install as install_resource_wait
+    install_resource_wait()

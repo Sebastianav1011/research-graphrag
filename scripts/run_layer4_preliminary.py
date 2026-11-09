@@ -6,7 +6,7 @@ import sys
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'src'))
-from layer4.indicators.preliminary import prepare,execute,verify,finalize
+from layer4_evaluation.indicators.preliminary import prepare,execute,verify,finalize
 
 parser=argparse.ArgumentParser()
 stages=parser.add_mutually_exclusive_group(required=True)

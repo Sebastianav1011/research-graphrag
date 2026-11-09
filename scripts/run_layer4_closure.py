@@ -7,20 +7,21 @@ import sys
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'src'))
 import yaml
-from layer4.indicators.experiment_inputs import read, safe_path, sha256
-from layer4.indicators import experiment
-from layer4.indicators.selection import canonical_hash
+from layer4_evaluation.indicators.experiment_inputs import read, safe_path, sha256
+from layer4_evaluation.indicators import experiment
+from layer4_evaluation.indicators.selection import canonical_hash
+from layer4_evaluation.paths import legacy
 
 
 def settings(path='config/layer4_closure.yaml'):
     value=yaml.safe_load(safe_path(ROOT,path).read_text(encoding='utf-8'))
     if set(value)!={'version','base_config','pilot_directory','closure_directory','fallback'} or value['version']!='LAYER4_CLOSURE_CONTROL_V1':
         raise ValueError('Unknown closure settings')
-    from layer4.indicators.semantic_fallback import options
+    from layer4_evaluation.indicators.semantic_fallback import options
     options(value['fallback'])
     for key in ('pilot_directory','closure_directory'):
         out=safe_path(ROOT,value[key])
-        if out.parent!=(ROOT/'outputs/layer4/pruebas').resolve():
+        if legacy(ROOT, out).parent!=(ROOT/'outputs/layer4/pruebas').resolve():
             raise ValueError('Active study directories must be direct children of pruebas')
     if value['pilot_directory']==value['closure_directory']:
         raise ValueError('Pilot control and closure execution must have distinct roles')
@@ -100,8 +101,8 @@ def main():
     final=commands.add_parser('finalize')
     final.add_argument('--approval',type=Path,required=True);final.add_argument('--review',type=Path,required=True)
     args=parser.parse_args();value=settings(args.settings)
-    from layer4.indicators import semantic_fallback as sf
-    from layer4.indicators.closure_runtime import verify_current
+    from layer4_evaluation.indicators import semantic_fallback as sf
+    from layer4_evaluation.indicators.closure_runtime import verify_current
     directory=safe_path(ROOT,value['closure_directory'])
     if args.command in ('verify','status'):
         checked=verify_current(ROOT,value['base_config'])
@@ -115,7 +116,7 @@ def main():
             bits=pair.split(':')
             if len(bits)!=2 or not all(bits):raise ValueError('Expected PROJECT:INDICATOR')
             pairs.append(tuple(bits))
-        from layer4.indicators.codex_cli import inspect_runtime
+        from layer4_evaluation.indicators.codex_cli import inspect_runtime
         result=sf.prepare(ROOT,value['base_config'],value['closure_directory'],
             options_value=value['fallback'],correction_pairs=pairs,include_remaining=True,
             runtime_value=inspect_runtime())
@@ -133,7 +134,7 @@ def main():
         control=safe_path(ROOT,value['pilot_directory'])
         if control.exists():experiment.write_json(control/'comparison.json',result)
     else:
-        from layer4.indicators import final_export
+        from layer4_evaluation.indicators import final_export
         result=(final_export.verify_final(ROOT,value['base_config']) if args.command=='verify-final' else
                 final_export.publish(ROOT,value['base_config'],args.approval,args.review))
     if args.output:

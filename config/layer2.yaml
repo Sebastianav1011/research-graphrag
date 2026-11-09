@@ -5,7 +5,7 @@ readiness:
   mappings_verified: true
   chunking_calibrated: true
 input:
-  canonical: data/canonical
+  canonical: outputs/layer2/canonical
   manifest_run_id_field: run_id
   manifest_files_field: canonical_files
   manifest_success_status: SUCCESS
@@ -96,7 +96,7 @@ quality:
   # Real snapshot: 3/11379 empty documents retained; require >=99.9% usable coverage.
   max_empty_document_ratio: 0.001
 outputs:
-  knowledge: data/knowledge
-  quality: outputs/layer2/quality
-  manifests: outputs/layer2/manifests
-  reports: outputs/layer2/reports
+  knowledge: outputs/layer2/knowledge
+  quality: outputs/layer2/knowledge_artifacts/quality
+  manifests: outputs/layer2/knowledge_artifacts/manifests
+  reports: outputs/layer2/knowledge_artifacts/reports

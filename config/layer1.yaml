@@ -24,7 +24,7 @@ errors:
   max_anomalies: null
   severity_overrides: {}
 directories:
-  staging: data/staging
-  canonical: data/canonical
-  outputs: outputs/layer1
+  staging: outputs/layer2/staging
+  canonical: outputs/layer2/canonical
+  outputs: outputs/layer2/preprocessing
 

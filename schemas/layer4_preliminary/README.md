@@ -32,6 +32,6 @@ técnica. No modifica SOURCE_INDICATOR_V1 ni implica evaluación final/calibraci
 
 ## Ejecución
 
-`python scripts/build_layer4_contracts.py --check` comprueba las formas generadas.
+`uv run python scripts/build_layer4_contracts.py --check` comprueba las formas generadas.
 El runner usa etapas separadas descritas en
 [indicadores](../../src/layer4/indicators/README.md).

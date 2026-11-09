@@ -1,0 +1,2 @@
+# Preserve the authorized shared contract byte-for-byte across computers.
+data/contratos/tesis_comparacion_30.v1.json -text whitespace=cr-at-eol

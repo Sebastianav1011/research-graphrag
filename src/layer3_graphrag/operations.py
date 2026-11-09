@@ -24,7 +24,9 @@ def verify(root,config_path='config/layer3.yaml'):
     candidates=pq.read_table(directory/'retrieval/source_indicator_candidates.parquet').to_pylist()
     packages=pq.read_table(directory/'retrieval/source_context_packages.parquet').to_pylist()
     graph=LocalGraphStore.load(directory/'graph')
-    result,issues,anomalies,privacy=validate_retrieval(snapshot,graph,candidates,packages,config)
+    queries=pq.read_table(directory/'retrieval/technical_comparison.parquet').to_pylist()
+    result,issues,anomalies,privacy=validate_retrieval(snapshot,graph,candidates,packages,config,
+        considered_indicators=[row['indicator_id'] for row in queries])
     embedding_checks={}
     for space in ('SOURCE','REFERENCE'):
         bundle=load_bundle(directory/'embeddings'/space.lower())
@@ -44,7 +46,8 @@ def verify(root,config_path='config/layer3.yaml'):
 
 def compare(root,config_path='config/layer3.yaml'):
     root=Path(root); config,_=load_config(root,config_path); directory=root/config['outputs']['publication']
-    latest=validate_publication(directory); previous=root/config['outputs']['base']/'runs'/latest['layer3_run_id']/'previous_graphrag'
+    from layer2_processing.checkpoints import run_directory
+    latest=validate_publication(directory); previous=run_directory(root,latest['layer3_run_id'])/'previous_graphrag'
     before=validate_publication(previous,latest['layer2_manifest_hash'])
     if before['layer3_config_hash']!=latest['layer3_config_hash'] or before['embedding_config_hash']!=latest['embedding_config_hash']: raise ValueError('Two builds must use the same config/model/snapshot')
     checks={}; operational={'layer3_run_id'}
@@ -71,13 +74,17 @@ def compare(root,config_path='config/layer3.yaml'):
 
 
 def regressions(root,real=False):
-    root=Path(root); reports=root/'outputs/layer3/reports'; reports.mkdir(parents=True,exist_ok=True)
+    from tempfile import TemporaryDirectory
+    root=Path(root)
     env=dict(os.environ,PYTHONDONTWRITEBYTECODE='1')
     if real: env.update(LAYER2_REAL_INTEGRATION='1',LAYER2_VERIFY_PUBLICATION='1',LAYER3_RUN_REAL_INTEGRATION='1')
-    for layer in ('layer1','layer2','layer3'):
-        args=[sys.executable,'-B','-m','pytest','tests/'+layer,'-q','-p','no:cacheprovider','--basetemp=outputs/layer3/'+layer+'-refactor-tests','--junitxml=outputs/layer3/reports/'+layer+'_source_regression.xml']
-        if not real and layer!='layer1': args+=['--ignore=tests/'+layer+('/test_integration_real.py' if layer=='layer2' else '/test_integration_pending.py')]
-        subprocess.run(args,cwd=root,env=env,check=True)
+    with TemporaryDirectory(prefix='graphrag-regression-') as temporary:
+        for layer in ('layer2_preprocessing','layer3_knowledge','layer4_graphrag'):
+            report=Path(temporary)/(layer+'.xml')
+            args=[sys.executable,'-B','-m','pytest','tests/'+layer,'-q','-p','no:cacheprovider','--junitxml='+str(report)]
+            if not real and layer!='layer2_preprocessing':
+                args+=['--ignore=tests/'+layer+('/test_integration_real.py' if layer=='layer3_knowledge' else '/test_integration_pending.py')]
+            subprocess.run(args,cwd=root,env=env,check=True)
     return {'status':'PASS','real_integration':real}
 
 
@@ -85,7 +92,7 @@ def approve(root,manifest_sha256,config_path='config/layer3.yaml'):
     import yaml
     from .configuration import inside
     root=Path(root); config,_=load_config(root,config_path)
-    if not manifest_sha256 or file_hash(root/'data/knowledge/_manifest.json')!=manifest_sha256:
+    if not manifest_sha256 or file_hash(root/'outputs/layer2/knowledge/_manifest.json')!=manifest_sha256:
         raise ValueError('Explicit current Layer 2 manifest SHA-256 required')
     config['readiness']={'layer2_status':'FINAL_PROJECT_LAYER_2_READY','approved_layer2_manifest_sha256':manifest_sha256}
     snapshot=validate_inputs(root,config)

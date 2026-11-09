@@ -4,7 +4,7 @@ from pathlib import Path
 import sys
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'src'))
-from layer4.indicators.preparation import prepare
+from layer4_evaluation.indicators.preparation import prepare
 if __name__=='__main__':
     try:
         report=prepare(ROOT)

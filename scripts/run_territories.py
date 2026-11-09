@@ -5,7 +5,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src'))
-from layer4.territories.pipeline import build
+from layer4_evaluation.territories.pipeline import build
 
 
 def main():

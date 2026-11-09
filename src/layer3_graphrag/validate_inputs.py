@@ -1,3 +1,4 @@
+from layer2_processing.checkpoints import resolve
 """Closed boundary: only the eight knowledge files and their approved manifest."""
 import json
 from pathlib import Path
@@ -32,7 +33,7 @@ def validate_physical_schema(table, kind):
 
 
 def assert_unchanged(snapshot):
-    folder = snapshot.root / 'data/knowledge'
+    folder = resolve(snapshot.root, 'outputs/layer2/knowledge')
     if folder.resolve() != folder or (folder / '_manifest.json').resolve().parent != folder or any((folder / (table + '.parquet')).resolve().parent != folder for table in snapshot.hashes):
         raise RuntimeError('Knowledge snapshot path changed or uses redirected files')
     if file_hash(folder / '_manifest.json') != snapshot.manifest_hash:
@@ -40,9 +41,9 @@ def assert_unchanged(snapshot):
     for table, sha in snapshot.hashes.items():
         if file_hash(folder / (table + '.parquet')) != sha:
             raise RuntimeError('Layer 2 dataset changed: ' + table)
-    if (folder / '.publish.lock').exists() or (snapshot.root / 'outputs/layer2/.publish.lock').exists():
+    if (folder / '.publish.lock').exists() or (snapshot.root / 'outputs/layer2/knowledge_artifacts/.publish.lock').exists():
         raise RuntimeError('Layer 2 publication is in progress')
-    if (snapshot.root / 'outputs/layer2/publication_pending.json').exists():
+    if (snapshot.root / 'outputs/layer2/knowledge_artifacts/publication_pending.json').exists():
         raise RuntimeError('Layer 2 publication recovery is pending')
 
 
@@ -115,11 +116,11 @@ def validate_inputs(root, config):
     # Approval before stat/open of any corpus file.
     require_approval(config)
     root = Path(root).resolve()
-    intended = root / 'data/knowledge'
+    intended = resolve(root, 'outputs/layer2/knowledge')
     folder = intended.resolve()
     if folder != intended:
         raise ValueError('Knowledge directory escapes project root')
-    if (folder / '.publish.lock').exists() or (root / 'outputs/layer2/.publish.lock').exists() or (root / 'outputs/layer2/publication_pending.json').exists():
+    if (folder / '.publish.lock').exists() or (root / 'outputs/layer2/knowledge_artifacts/.publish.lock').exists() or (root / 'outputs/layer2/knowledge_artifacts/publication_pending.json').exists():
         raise RuntimeError('Layer 2 publication/recovery is in progress')
     manifest_path = folder / '_manifest.json'
     if manifest_path.resolve().parent != folder:

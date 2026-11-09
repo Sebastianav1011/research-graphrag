@@ -17,6 +17,8 @@ def text_hash(value):
 
 
 def file_hash(path):
+    from layer2_processing.checkpoints import locate
+    path=locate(path)
     h = hashlib.sha256()
     with Path(path).open('rb') as stream:
         for block in iter(lambda: stream.read(1024 * 1024), b''):

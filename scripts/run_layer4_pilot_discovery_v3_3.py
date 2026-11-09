@@ -14,11 +14,11 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/'src'))
-from layer4.indicators import global_discovery_v3_3 as gd, assessment_v3 as v3
-from layer4.indicators.experiment_inputs import read, sha256, verify_hashes
-from layer4.indicators.performance import usage_metrics
-from layer4.indicators.selection import canonical_hash
-from layer4.paths import resolve, legacy
+from layer4_evaluation.indicators import global_discovery_v3_3 as gd, assessment_v3 as v3
+from layer4_evaluation.indicators.experiment_inputs import read, sha256, verify_hashes
+from layer4_evaluation.indicators.performance import usage_metrics
+from layer4_evaluation.indicators.selection import canonical_hash
+from layer4_evaluation.paths import resolve, legacy
 
 STUDY = ROOT/'outputs/layer4/pruebas/validacion_v3_3'
 ACTIVE = STUDY/'continuacion_prompt_v3_1'
@@ -122,7 +122,7 @@ def prepare(pid, out=None):
         STUDY/'pilot_five.assessment_results.jsonl',ROOT/'outputs/layer4/final/resultado_capa4.xlsx',
         ROOT/'outputs/layer4/auditoria/cierre_v2/final_manifest.json',Path(__file__).resolve(),
         ROOT/'scripts/run_layer4_coverage_v3.py']
-    source_paths += [ROOT/'src/layer4/indicators'/n for n in ('global_discovery_v3_3.py','global_discovery.py',
+    source_paths += [ROOT/'src/layer4_evaluation/indicators'/n for n in ('global_discovery_v3_3.py','global_discovery.py',
         'assessment_v3.py','assessment_v2.py','confidence.py','codex_cli.py','performance.py','prompt.py')]
     hashes = {p.relative_to(ROOT).as_posix():sha256(p) for p in source_paths}
     for name in records:

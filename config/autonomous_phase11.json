@@ -1,0 +1,24 @@
+{
+  "version": "AUTONOMOUS_POLICY_V3",
+  "workers": 1,
+  "tiers": [
+    {"num_ctx": 4096, "num_predict": 1024},
+    {"num_ctx": 6144, "num_predict": 1536},
+    {"num_ctx": 8192, "num_predict": 2048}
+  ],
+  "context_margin_tokens": 768,
+  "max_context": 8192,
+  "attempts_per_step": 2,
+  "metadata_attempts": 3,
+  "recovery_rounds": 1,
+  "criteria_per_shard": 3,
+  "criterion_explanation_characters": 200,
+  "assessment_explanation_characters": 400,
+  "min_free_ram_mb": 1536,
+  "min_free_disk_mb": 1024,
+  "cooldown_seconds": 5,
+  "keep_alive": "5m",
+  "timeout_seconds": 600,
+  "consecutive_service_failures": 3,
+  "parquet_batch_rows": 128
+}

@@ -9,9 +9,9 @@ import sys
 from openpyxl import load_workbook
 
 from export_layer4_pilot import ROOT, DEFAULT_CONFIG, FILENAMES, pilot_projects, indicator_projection
-from layer4.indicators import experiment
-from layer4.indicators.experiment_inputs import read, safe_path, sha256, selected_territories
-from layer4.indicators.powerbi import COLUMNS, TERRITORY_COLUMNS
+from layer4_evaluation.indicators import experiment
+from layer4_evaluation.indicators.experiment_inputs import read, safe_path, sha256, selected_territories
+from layer4_evaluation.indicators.powerbi import COLUMNS, TERRITORY_COLUMNS
 
 
 def verify(root=ROOT, config_path=DEFAULT_CONFIG):

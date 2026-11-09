@@ -23,7 +23,7 @@ from openpyxl import load_workbook
 
 ROOT = Path(__file__).resolve().parents[2]
 RUN = 'layer3_2026-10-14T094639_959121+0000_eca9000e'
-V2 = 'data/reference/indicadores/catalogo_indicadores_v2.xlsx'
+V2 = 'data/layer1_sources/reference/indicadores/catalogo_indicadores_v2.xlsx'
 V2_HASH = '1aeb1a376c24bca7bdd7acd228da527ef0043f0574541649589badb54e1cf88f'
 FIELDS = ('title', 'keywords', 'summary', 'methodology', 'objectives', 'expected_results')
 HUMAN = ('human_decision', 'human_support_strength', 'human_evidence_fields',
@@ -96,7 +96,7 @@ def split_display(text, limit=700):
 
 
 def prepare():
-    manifest_path = ROOT / 'data/graphrag/_manifest.json'
+    manifest_path = ROOT / 'outputs/layer3/publication/_manifest.json'
     manifest = read_json(manifest_path)
     require(manifest['layer3_run_id'] == RUN, 'Active publication is not approved R8')
     require(manifest['candidate_architecture'] == 'SOURCE_INDICATOR_V1', 'Wrong architecture')
@@ -106,26 +106,26 @@ def prepare():
     for basename, expected in manifest['code_hashes'].items():
         require(sha(ROOT / 'src/layer3_graphrag' / basename) == expected, f'Code changed: {basename}')
     require(sha(ROOT / V2) == V2_HASH, 'Approved v2 hash changed')
-    layer2_path = ROOT / 'data/knowledge/_manifest.json'
-    layer1_path = ROOT / 'data/canonical/_manifest.json'
+    layer2_path = ROOT / 'outputs/layer2/knowledge/_manifest.json'
+    layer1_path = ROOT / 'outputs/layer2/canonical/_manifest.json'
     require(sha(layer2_path) == manifest['layer2_manifest_hash'], 'Layer2 manifest changed')
     layer2 = read_json(layer2_path)
     require(sha(layer1_path) == layer2['layer1_manifest_hash'], 'Layer1 manifest changed')
     layer1 = read_json(layer1_path)
-    require(sha(ROOT / 'data/canonical/indicadores.parquet') == layer2['input_hashes']['indicadores'],
+    require(sha(ROOT / 'outputs/layer2/canonical/indicadores.parquet') == layer2['input_hashes']['indicadores'],
             'Canonical indicators differ from R8 upstream input')
     v1 = next(x for x in layer1['input_files'] if x['domain'] == 'indicadores')
-    v1_path = ROOT / 'data/reference/indicadores' / v1['name']
+    v1_path = ROOT / 'data/layer1_sources/reference/indicadores' / v1['name']
     require(sha(v1_path) == v1['sha256'], 'Historical indicator source changed')
     for rel in ('retrieval/source_indicator_candidates.parquet', 'retrieval/source_context_packages.parquet'):
-        require(sha(ROOT / 'data/graphrag' / rel) == manifest['output_hashes'][rel], f'Output changed: {rel}')
+        require(sha(ROOT / 'outputs/layer3/publication' / rel) == manifest['output_hashes'][rel], f'Output changed: {rel}')
     tables = {}
     for name in ('source_documents', 'source_sections', 'source_chunks', 'reference_documents'):
-        path = ROOT / 'data/knowledge' / f'{name}.parquet'
+        path = ROOT / 'outputs/layer2/knowledge' / f'{name}.parquet'
         require(sha(path) == manifest['input_hashes'][name], f'Layer2 table changed: {name}')
         tables[name] = pq.read_table(path).to_pylist()
-    candidates = pq.read_table(ROOT / 'data/graphrag/retrieval/source_indicator_candidates.parquet').to_pylist()
-    contexts = pq.read_table(ROOT / 'data/graphrag/retrieval/source_context_packages.parquet').to_pylist()
+    candidates = pq.read_table(ROOT / 'outputs/layer3/publication/retrieval/source_indicator_candidates.parquet').to_pylist()
+    contexts = pq.read_table(ROOT / 'outputs/layer3/publication/retrieval/source_context_packages.parquet').to_pylist()
     headers, indicators = catalog(ROOT / V2, 'Indicadores_enriquecidos')
     rule_headers, rules = catalog(ROOT / V2, 'Reglas_generales')
     require(len(indicators) == 48 and len({i['id_indicador'] for i in indicators}) == 48, 'Invalid v2 indicators')
@@ -208,15 +208,15 @@ def prepare():
         'candidate_count_read': len(candidates), 'project_candidate_count': len(project_candidates),
         'PROJECT_ASSESSMENT_READY': statuses.get('ASSESSMENT_READY', 0), 'PROJECT_DISCOVERY_ONLY': statuses.get('DISCOVERY_ONLY', 0),
         'selected_context_statuses': json.dumps(dict(Counter(c['context_status'] for c in chosen))),
-        'project_text_source': 'data/knowledge/source_sections.parquet / text_original; all six fields separately; empty values remain empty.',
+        'project_text_source': 'outputs/layer2/knowledge/source_sections.parquet / text_original; all six fields separately; empty values remain empty.',
         'discovery_unit': 'source_chunk', 'display_unit': 'PROJECT complete available content', 'human_assessment_unit': 'PROJECT + INDICATOR',
         'LLM_inference': False, 'automatic_decisions': 0, 'confidence': 'NOT_IMPLEMENTED; human_support_strength is a human label',
         'validation': 'PASS: unique cases/pairs; valid project/indicator/document/discovery IDs; section lineage; no ARTICLE; blank human labels; no confidence columns.',
         'reading_fragments': 'LECTURA_PROYECTOS splits text only for display; joining parts per project+field reproduces the original field exactly. These are not discovery chunks or review cases.',
     }
-    protected_paths = [p for base in ('src', 'config', 'data/canonical', 'data/knowledge') for p in (ROOT / base).rglob('*') if p.is_file() and '__pycache__' not in p.parts]
-    protected_paths += [manifest_path, ROOT / V2, v1_path, ROOT / 'templates/resultado_final_indicadores.xlsx']
-    protected_paths += [ROOT / 'data/graphrag' / rel for rel in manifest['output_hashes'] if not rel.endswith('.npy')]
+    protected_paths = [p for base in ('src', 'config', 'outputs/layer2/canonical', 'outputs/layer2/knowledge') for p in (ROOT / base).rglob('*') if p.is_file() and '__pycache__' not in p.parts]
+    protected_paths += [manifest_path, ROOT / V2, v1_path, ROOT / 'data/templates/plantilla_resultado_final_indicadores_territorios.xlsx']
+    protected_paths += [ROOT / 'outputs/layer3/publication' / rel for rel in manifest['output_hashes'] if not rel.endswith('.npy')]
     protected = {p: sha(p) for p in set(protected_paths)}
     return {'review_headers': review_headers, 'review': review, 'indicator_headers': indicator_headers + ['project_candidate_available', 'selected_case_id'],
             'indicators': indicator_rows, 'rules_headers': rule_headers, 'rules': [[r[h] for h in rule_headers] for r in rules],

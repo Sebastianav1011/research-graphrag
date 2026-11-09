@@ -1,4 +1,5 @@
 """Approved local builds and retrieval; plan mode never opens knowledge data."""
+from run_paths import file_path as run_file
 import json
 import logging
 import os
@@ -27,6 +28,7 @@ from .quality import evaluate, write_reports
 from .retrieval import QueryEngine
 from .validate_inputs import assert_unchanged, validate_inputs
 from .vector_index import NumpyVectorIndex, create_vector_index
+from layer4_evaluation.indicators.performance import span
 
 LOG = logging.getLogger(__name__)
 
@@ -63,24 +65,27 @@ def build_candidate(root, snapshot, config, config_hash, run_id, archive, provid
     if hasattr(provider, 'validate_model_files'):
         provider.validate_model_files()
     timer = time.perf_counter()
-    graph = build_graph(snapshot, config['quality'])
+    with span('grafo'):
+        graph = build_graph(snapshot, config['quality'])
     graph_seconds = time.perf_counter() - timer
     timer = time.perf_counter()
     cache = EmbeddingCache(inside(root, config['embeddings']['cache'], ('outputs/layer3',)))
-    publication=inside(root,config['outputs']['publication'],('data/graphrag',))
+    publication=inside(root,config['outputs']['publication'],('outputs/layer3/publication',))
     bundles={}
-    if (publication/'_manifest.json').exists():
-        validate_publication(publication,snapshot.manifest_hash)
+    with span('embeddings'):
+        if (publication/'_manifest.json').exists():
+            validate_publication(publication,snapshot.manifest_hash)
+            for space in ('SOURCE','REFERENCE'):
+                bundle=reuse_bundle(publication/'embeddings'/space.lower(),snapshot,space,provider,config['embeddings'],run_id)
+                if bundle is not None: bundles[space]=bundle
         for space in ('SOURCE','REFERENCE'):
-            bundle=reuse_bundle(publication/'embeddings'/space.lower(),snapshot,space,provider,config['embeddings'],run_id)
-            if bundle is not None: bundles[space]=bundle
-    for space in ('SOURCE','REFERENCE'):
-        if space not in bundles: bundles[space]=build_embeddings(snapshot,space,provider,config['embeddings'],run_id,cache)
+            if space not in bundles: bundles[space]=build_embeddings(snapshot,space,provider,config['embeddings'],run_id,cache)
     embedding_seconds = time.perf_counter() - timer
     timer = time.perf_counter()
     indexes = {space: create_vector_index(config['vector_index']['backend'], space) for space in bundles}
-    for space in indexes:
-        indexes[space].build(bundles[space])
+    with span('grafo'):
+        for space in indexes:
+            indexes[space].build(bundles[space])
     index_seconds = time.perf_counter() - timer
     summary, reports = evaluate(snapshot, bundles, indexes, graph, config)
     archive = Path(archive)
@@ -89,9 +94,11 @@ def build_candidate(root, snapshot, config, config_hash, run_id, archive, provid
     if config.get('retrieval', {}).get('enabled'):
         from .indicator_retrieval import IndicatorRetriever
         from .quality import validate_retrieval
-        candidates, packages, comparisons, metrics = IndicatorRetriever(snapshot, indexes['SOURCE'], provider,
-            graph, config, run_id).process()
-        result, issues, anomalies, privacy = validate_retrieval(snapshot, graph, candidates, packages, config)
+        with span('recuperacion'):
+            candidates, packages, comparisons, metrics = IndicatorRetriever(snapshot, indexes['SOURCE'], provider,
+                graph, config, run_id).process()
+        result, issues, anomalies, privacy = validate_retrieval(snapshot, graph, candidates, packages, config,
+            considered_indicators=[row['indicator_id'] for row in metrics])
         summary['retrieval'] = result
         reports['retrieval_provenance_issues'].extend(issues)
         reports['retrieval_anomalies'].extend(anomalies)
@@ -211,7 +218,9 @@ def publish_directory(candidate, destination, archive, finalize):
 
 
 def load_artifacts(root, snapshot, config, provider):
-    directory = inside(root, config['outputs']['publication'], ('data/graphrag',))
+    directory = inside(root, config['outputs']['publication'], ('outputs/layer3/publication',))
+    from layer2_processing.checkpoints import resolve
+    directory = resolve(root, directory)
     base = inside(root, config['outputs']['base'], ('outputs/layer3',))
     if (base / 'publication_pending.json').exists() or (base / '.publish.lock').exists():
         raise RuntimeError('Layer 3 publication/recovery in progress')
@@ -253,13 +262,14 @@ def run(root, config_path='config/layer3.yaml', mode='plan', provider=None, quer
             raise RuntimeError('Layer 3 recovery is required')
         lock = base / '.publish.lock'
         run_id = 'layer3_' + now().replace(':', '').replace('.', '_') + '_' + uuid4().hex[:8]
-        archive = base / 'runs' / run_id
+        from layer2_processing.checkpoints import run_directory
+        archive = run_directory(root,run_id)
         # The x mode acquires the lock; a failure must not unlink another writer's lock.
         with lock.open('x', encoding='utf-8') as stream:
             stream.write(run_id)
         try:
             artifacts = build_candidate(root, snapshot, config, config_hash, run_id, archive, provider)
-            destination = inside(root, config['outputs']['publication'], ('data/graphrag',))
+            destination = inside(root, config['outputs']['publication'], ('outputs/layer3/publication',))
             manifests = inside(root, config['outputs']['manifests'], ('outputs/layer3',))
             def finalize():
                 assert_unchanged(snapshot)
@@ -279,7 +289,7 @@ def run(root, config_path='config/layer3.yaml', mode='plan', provider=None, quer
             archive.mkdir(parents=True, exist_ok=True)
             failure = {'status': 'FAILED', 'layer3_run_id': run_id, 'layer2_manifest_hash': snapshot.manifest_hash,
                        'error_type': type(exc).__name__, 'reason': str(exc)}
-            (archive / 'failure.json').write_text(serialize(failure), encoding='utf-8')
+            (run_file(archive, 'failure.json')).write_text(serialize(failure), encoding='utf-8')
             raise
         finally:
             lock.unlink(missing_ok=True)
@@ -297,7 +307,7 @@ def run(root, config_path='config/layer3.yaml', mode='plan', provider=None, quer
     location = queries_path or config['evaluation'].get('queries')
     if not location:
         raise ValueError('An explicitly labeled evaluation set is required')
-    path = inside(root, location, ('data/knowledge', 'outputs/layer3',))
+    path = inside(root, location, ('outputs/layer2/knowledge', 'outputs/layer3',))
     queries = load_evaluation_queries(path)
     result = compare_engines({m: engine for m in config['evaluation']['compare_modes']}, queries, config['evaluation']['k_values'])
     assert_unchanged(snapshot)

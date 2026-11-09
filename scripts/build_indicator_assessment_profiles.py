@@ -4,7 +4,7 @@ from pathlib import Path
 import sys
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'src'))
-from layer4.indicators.profiles import build_profiles
+from layer4_evaluation.indicators.profiles import build_profiles
 
 if __name__=='__main__':
     _,manifest=build_profiles(ROOT)

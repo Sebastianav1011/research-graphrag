@@ -10,10 +10,10 @@ from openpyxl import load_workbook
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'src'))
-from layer4.indicators.powerbi import COLUMNS,consumption_rows,TERRITORY_COLUMNS,territory_rows,territorial_workbook_bytes
-from layer4.indicators.preliminary import verify,json_file
-from layer4.territories.inputs import sha256
-from layer4.history import verify_historical_files
+from layer4_evaluation.indicators.powerbi import COLUMNS,consumption_rows,TERRITORY_COLUMNS,territory_rows,territorial_workbook_bytes
+from layer4_evaluation.indicators.preliminary import verify,json_file
+from layer4_evaluation.territories.inputs import sha256
+from layer4_evaluation.history import verify_historical_files
 
 
 def export():
@@ -23,7 +23,7 @@ def export():
     if out.exists():raise FileExistsError('Preserve existing PowerBI publication')
     assessments=pq.read_table(source/'project_indicator_preliminary.parquet').to_pylist()
     ids={a['project_id'] for a in assessments}
-    docs=pq.read_table(ROOT/'data/knowledge/source_documents.parquet',
+    docs=pq.read_table(ROOT/'outputs/layer2/knowledge/source_documents.parquet',
                        columns=['source_id','source_type','metadata_json']).to_pylist()
     mapping={d['source_id']:json.loads(d['metadata_json'])['source_project_id'] for d in docs
              if d['source_type']=='PROJECT' and d['source_id'] in ids}
@@ -66,7 +66,7 @@ def export():
             'confidence_computed':sum(r['confianza'] is not None for r in rows),
             'confidence_null':sum(r['confianza'] is None for r in rows),'llm_calls':0,
             'source_sha256':sha256(source/'project_indicator_preliminary.parquet'),
-            'code_hashes':{name:sha256(ROOT/name) for name in ('src/layer4/indicators/powerbi.py',
+            'code_hashes':{name:sha256(ROOT/name) for name in ('src/layer4_evaluation/indicators/powerbi.py',
                           'scripts/export_layer4_powerbi.py','scripts/render_layer4_powerbi.mjs')},
             'outputs':{p.name:sha256(p) for p in out.iterdir() if p.is_file()}}
     json_file(out/'powerbi_manifest.json',report)
@@ -109,7 +109,7 @@ def repair_territories():
     if len(siap_set)!=20:raise ValueError('Expected20 institutional IDs')
     with (source/'selected_projects.csv').open(encoding='utf-8-sig',newline='') as stream:
         projects={r['project_id'] for r in csv.DictReader(stream)}
-    docs=pq.read_table(ROOT/'data/knowledge/source_documents.parquet',columns=['source_id','source_type','metadata_json']).to_pylist()
+    docs=pq.read_table(ROOT/'outputs/layer2/knowledge/source_documents.parquet',columns=['source_id','source_type','metadata_json']).to_pylist()
     mapping={d['source_id']:json.loads(d['metadata_json'])['source_project_id'] for d in docs
              if d['source_type']=='PROJECT' and d['source_id'] in projects}
     if set(mapping)!=projects or set(mapping.values())!=siap_set:raise ValueError('Institutional identity mapping mismatch')
@@ -117,7 +117,7 @@ def repair_territories():
     if json.loads((publication/'territory_manifest.json').read_text(encoding='utf-8'))['architecture']!='PROJECT_TERRITORY_V1':
         raise ValueError('Unexpected territorial publication')
     rows=territory_rows(pq.read_table(publication/'project_territories.parquet').to_pylist(),
-                        pq.read_table(ROOT/'data/reference/processed/dane_territories.parquet').to_pylist(),mapping)
+                        pq.read_table(ROOT/'outputs/layer2/reference/dane_territories.parquet').to_pylist(),mapping)
     # Compare against the original technical projection without changing it.
     technical_rows=[json.loads(line) for line in (source/'project_territories_selected.jsonl').read_text(encoding='utf-8').splitlines() if line]
     expected=[{k:mapping[r['project_id']] if k=='siap_id' else r[k] for k in TERRITORY_COLUMNS} for r in technical_rows]

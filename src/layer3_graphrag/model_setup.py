@@ -32,7 +32,7 @@ def main():
     REPORTS.mkdir(parents=True, exist_ok=True)
     approved = json.loads((REPORTS/'input_validation.json').read_text(encoding='utf-8'))
     original_manifest_hash = approved['layer2_manifest_hash']
-    if file_hash(ROOT/'data/knowledge/_manifest.json') != original_manifest_hash:
+    if file_hash(ROOT/'outputs/layer2/knowledge/_manifest.json') != original_manifest_hash:
         raise RuntimeError('Manifest changed since physical approval; aborting')
     # Honor Windows' trusted CA store (e.g. local HTTPS inspection), never disable TLS.
     import certifi
@@ -57,7 +57,7 @@ def main():
             '1_Pooling/config.json', 'sentence_bert_config.json',
             'sentencepiece.bpe.model', 'special_tokens_map.json', 'tokenizer.json', 'tokenizer_config.json'], max_workers=2)
     download_weights(model_dir)
-    if file_hash(ROOT/'data/knowledge/_manifest.json') != original_manifest_hash:
+    if file_hash(ROOT/'outputs/layer2/knowledge/_manifest.json') != original_manifest_hash:
         raise RuntimeError('Manifest changed while obtaining model; aborting')
     (REPORTS / 'model_files.json').write_text(json.dumps({p.relative_to(model_dir).as_posix(): file_hash(p)
         for p in model_dir.rglob('*') if p.is_file() and '.cache' not in p.parts and not any('download_parts' in x for x in p.parts)}, indent=2), encoding='utf-8')
@@ -74,12 +74,12 @@ def main():
     if next(model.parameters()).dtype != torch.float16:
         raise RuntimeError('Actual model dtype does not match calibrated float16 configuration')
     census, all_texts, all_lengths = {}, [], []
-    expected = json.loads((ROOT / 'data/knowledge/_manifest.json').read_text(encoding='utf-8'))
-    manifest_hash = file_hash(ROOT / 'data/knowledge/_manifest.json')
+    expected = json.loads((ROOT / 'outputs/layer2/knowledge/_manifest.json').read_text(encoding='utf-8'))
+    manifest_hash = file_hash(ROOT / 'outputs/layer2/knowledge/_manifest.json')
     if manifest_hash != original_manifest_hash:
         raise RuntimeError('Manifest changed during local model preparation; aborting')
     for space in ('SOURCE', 'REFERENCE'):
-        path = ROOT / ('data/knowledge/' + space.lower() + '_chunks.parquet')
+        path = ROOT / ('outputs/layer2/knowledge/' + space.lower() + '_chunks.parquet')
         if file_hash(path) != expected['output_hashes'][space.lower() + '_chunks']:
             raise RuntimeError('Approved chunks changed')
         texts = pq.read_table(path, columns=['text']).column('text').to_pylist()
@@ -133,7 +133,7 @@ def main():
     config['execution']['allow_real_build'] = True
     config['embeddings'].update(settings | {'provider': 'sentence_transformers', 'batch_size': selected,
         'local_model_path': model_dir.relative_to(ROOT).as_posix(), 'normalize_embeddings': True})
-    if file_hash(ROOT / 'data/knowledge/_manifest.json') != manifest_hash:
+    if file_hash(ROOT / 'outputs/layer2/knowledge/_manifest.json') != manifest_hash:
         raise RuntimeError('Layer2 manifest changed during preflight')
     config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding='utf-8')
     (REPORTS / 'model_preflight_result.json').write_text(json.dumps({'status': 'PASS',

@@ -1,11 +1,11 @@
-"""Thin CLI; all ETL orchestration lives in layer1_data.pipeline."""
+"""Thin CLI; all ETL orchestration lives in layer2_processing.preprocessing.pipeline."""
 import argparse
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-from layer1_data.pipeline import run
+from layer2_processing.preprocessing.pipeline import run
 
 
 def main():

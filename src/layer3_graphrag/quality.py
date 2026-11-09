@@ -84,7 +84,7 @@ def write_reports(directory, summary, reports):
     (directory / 'summary.json').write_text(serialize(summary), encoding='utf-8')
 
 # Validate SOURCE+INDICATOR outputs, section reconstruction and discovery lineage.
-def validate_retrieval(snapshot, graph, candidates, packages, config):
+def validate_retrieval(snapshot, graph, candidates, packages, config, *, considered_indicators=None):
     resolver = SourceContextResolver(snapshot)
     chunks = resolver.chunks
     refs = {r['chunk_id']:r for r in snapshot.tables['reference_chunks']}
@@ -136,7 +136,17 @@ def validate_retrieval(snapshot, graph, candidates, packages, config):
         if len(rows)>config['retrieval']['final_candidates_per_indicator'] or [r['source_rank'] for r in rows]!=list(range(1,len(rows)+1)):
             anomalies.append({'id':indicator,'reason':'SOURCE count/rank error'})
     expected_indicators={r['source_id'] for r in snapshot.tables['reference_documents']}
-    if set(by_indicator)!=expected_indicators: anomalies.append({'id':'source_indicator_candidates','reason':'Indicator coverage mismatch'})
+    # Examining the catalogue does not require finding a candidate for each ID.
+    # New callers supply the complete query ledger; historical callers retain
+    # their original coverage check when that ledger is unavailable.
+    if considered_indicators is None:
+        if set(by_indicator)!=expected_indicators: anomalies.append({'id':'source_indicator_candidates','reason':'Indicator coverage mismatch'})
+    else:
+        considered=list(considered_indicators)
+        if len(considered)!=len(set(considered)) or set(considered)!=expected_indicators:
+            anomalies.append({'id':'source_indicator_candidates','reason':'Indicator query coverage mismatch'})
+        if not set(by_indicator)<=expected_indicators:
+            anomalies.append({'id':'source_indicator_candidates','reason':'Candidate indicator outside catalogue'})
     if set(contexts)!={r['context_package_id'] for r in candidates}: anomalies.append({'id':'source_context_packages','reason':'Context/candidate coverage mismatch'})
     privacy=privacy_issues(candidates)+privacy_issues(packages)
     return {'status':'PASS' if not issues and not anomalies and not privacy else 'FAIL','candidate_count':len(candidates),

@@ -11,10 +11,10 @@ import yaml
 ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT/'src'))
 sys.path.insert(0,str(ROOT/'scripts'))
-from layer4.indicators.contracts import check_contracts
-from layer4.indicators.profiles import load_profiles
-from layer4.indicators.profiles import inspect_catalog
-from layer4.history import verify_historical_files
+from layer4_evaluation.indicators.contracts import check_contracts
+from layer4_evaluation.indicators.profiles import load_profiles
+from layer4_evaluation.indicators.profiles import inspect_catalog
+from layer4_evaluation.history import verify_historical_files
 from territory_integrity import fingerprint
 
 
@@ -47,8 +47,8 @@ def verify(root=ROOT):
             or metadata['assessment_engine_status']!='NOT_EXECUTED' or metadata['assessment_engine']!='UNCONFIGURED'
             or prepared['selected_project_ids'] or prepared['assessment_rows_created'] or prepared['real_workbooks_created']
             or prepared['provider_implementations']):raise ValueError('Unexpected selection/assessment/export during preparation')
-    layer3=read(root/'data/graphrag/_manifest.json')
-    if (prepared['layer3_manifest_sha256']!=digest(root/'data/graphrag/_manifest.json')
+    layer3=read(root/'outputs/layer3/publication/_manifest.json')
+    if (prepared['layer3_manifest_sha256']!=digest(root/'outputs/layer3/publication/_manifest.json')
             or metadata['layer3_run']!=layer3['layer3_run_id']
             or metadata['retrieval_indicator_version']!='catalogo_indicadores.xlsx@L2_'+layer3['layer2_run_id']
             or metadata['assessment_indicator_version']!='catalogo_indicadores_v2.xlsx'

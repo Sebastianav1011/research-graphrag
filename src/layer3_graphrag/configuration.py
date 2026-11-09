@@ -6,6 +6,7 @@ from pathlib import Path
 import yaml
 from .contracts import ENTITY_TYPES, RELATION_ENDPOINTS
 from .provenance import digest
+from layer2_processing.checkpoints import resolve, destination
 
 
 def inside(root, relative, allowed):
@@ -13,7 +14,8 @@ def inside(root, relative, allowed):
     raw = Path(relative)
     if raw.is_absolute():
         raise ValueError('Layer 3 paths must be project-relative')
-    path = (root / raw).resolve()
+    path = destination(root, raw).resolve()
+    allowed = tuple(destination(root, base).relative_to(root).as_posix() for base in allowed)
     if not any(path == root / base or path.is_relative_to(root / base) for base in allowed):
         raise ValueError('Path outside Layer 3 boundary')
     return path
@@ -24,7 +26,7 @@ def validate_config(config):
     for section in ('readiness', 'execution', 'input', 'embeddings', 'vector_index', 'graph', 'hybrid', 'context', 'evaluation', 'quality', 'outputs'):
         if not isinstance(config.get(section), dict):
             raise ValueError('Missing configuration section: ' + section)
-    if config['input']['knowledge_manifest'].replace('\\', '/') != 'data/knowledge/_manifest.json':
+    if config['input']['knowledge_manifest'].replace('\\', '/') != 'outputs/layer2/knowledge/_manifest.json':
         raise ValueError('Only the official knowledge manifest may be configured')
     if config['vector_index']['backend'] != 'numpy_exact' or config['graph']['backend'] != 'local_json':
         raise ValueError('Unsupported local backend')
@@ -81,8 +83,8 @@ def load_config(root, path='config/layer3.yaml'):
     inside(root, config['embeddings']['cache'], ('outputs/layer3',))
     if config['embeddings'].get('local_model_path'):
         inside(root, config['embeddings']['local_model_path'], ('outputs/layer3/models',))
-    if config['outputs']['publication'].replace('\\', '/') != 'data/graphrag':
-        raise ValueError('Official Layer 3 destination must be data/graphrag')
+    if config['outputs']['publication'].replace('\\', '/') != 'outputs/layer3/publication':
+        raise ValueError('Official Layer 3 destination must be outputs/layer3/publication')
     for key in ('base', 'quality', 'manifests', 'reports'):
         inside(root, config['outputs'][key], ('outputs/layer3',))
     return config, digest(config)

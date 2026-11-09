@@ -1,0 +1,57 @@
+{
+  "raw_base": "data/layer1_sources",
+  "runs_base": "outputs/runs",
+  "reference_catalog": "data/layer1_sources/reference/indicadores/catalogo_indicadores_v2.xlsx",
+  "reference_sheet": "Indicadores_enriquecidos",
+  "files": {
+    "incoming/*/*_Proyectos_Objetivos.xlsx": {
+      "text_columns": {
+        "include": [
+          "descripcion_objetivo",
+          "proposito"
+        ]
+      }
+    }
+  },
+  "llm": {
+    "provider": "ollama",
+    "model": "qwen3.5:4b-q4_K_M",
+    "endpoint": "http://127.0.0.1:11434",
+    "temperature": 0,
+    "num_ctx": 4096,
+    "num_predict": 1024,
+    "timeout_seconds": 600,
+    "keep_alive": "5m",
+    "seed": 0,
+    "context_margin_tokens": 512,
+    "expected_quantization": "Q4_K_M"
+  },
+  "notes": "files maps RAW-relative paths to {domain, sheet, mapping, researcher_mapping, organizations}; no input fallback",
+  "text_columns": {
+    "include": [],
+    "exclude": [],
+    "auto_keywords": [
+      "resultado",
+      "resultados",
+      "posibles resultados",
+      "conclusion",
+      "conclusiones",
+      "hallazgos",
+      "impacto",
+      "impactos",
+      "evidencia",
+      "evidencias",
+      "descripcion",
+      "aporte",
+      "aportes",
+      "objetivo",
+      "objetivos",
+      "resumen",
+      "resumenes",
+      "proposito",
+      "descripciones"
+    ],
+    "min_characters": 20,
+    "authorized_categories": []
+  }
+}

@@ -6,12 +6,12 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src'))
-from layer1_data.dane_reference import load_reference
-from layer4.history import verify_historical_files
-from layer4.paths import verify_expected
-from layer4.territories.contracts import SCHEMAS
-from layer4.territories.inputs import check_unchanged, load_projects, sha256
-from layer4.territories.pipeline import OUTPUT_NAMES, json_bytes, logical_hash, validate_result, _verify_workbook
+from layer2_processing.preprocessing.dane_reference import load_reference
+from layer4_evaluation.history import verify_historical_files
+from layer4_evaluation.paths import verify_expected, resolve
+from layer4_evaluation.territories.contracts import SCHEMAS
+from layer4_evaluation.territories.inputs import check_unchanged, load_projects, sha256
+from layer4_evaluation.territories.pipeline import OUTPUT_NAMES, json_bytes, logical_hash, validate_result, _verify_workbook
 from territory_integrity import fingerprint
 import pyarrow.parquet as pq
 
@@ -34,10 +34,10 @@ def verify(root=ROOT):
     documents, sections, upstream = load_projects(root)
     if upstream != manifest['layer2']:
         raise ValueError('Layer 2 input snapshot changed')
-    territories, reference = load_reference(root / 'data/reference/processed')
+    territories, reference = load_reference(root / 'outputs/layer2/reference')
     if reference != manifest['reference_manifest']:
         raise ValueError('Reference snapshot changed')
-    if sha256(root / reference['source_file']) != reference['source_sha256']:
+    if sha256(resolve(root,reference['source_file'])) != reference['source_sha256']:
         raise ValueError('Reference workbook changed since normalization')
     result = {}
     for key, name in OUTPUT_NAMES.items():
@@ -60,14 +60,18 @@ def verify(root=ROOT):
     before_path = root / 'outputs/layer4/territorios/aceptacion/integrity_before.json'
     before = json.loads(before_path.read_text(encoding='utf-8-sig'))
     after = fingerprint(root)
-    if before != after:
-        changes = sorted(set(before) ^ set(after) | {name for name in before.keys() & after.keys() if before[name] != after[name]})
-        raise ValueError(f'Protected Layer 1/2/3 files changed: {changes}')
+    # Frozen path keys predate namespace migrations. Verify their exact original
+    # bytes and the separately fingerprinted current implementation, never rebase.
+    for name, expected in before.items():
+        verify_expected(root, name, expected)
+    source_relocated = before != after
     check_unchanged(root, upstream)
     report = {'status': 'PASS', 'build_id': manifest['build_id'], 'protected_files': len(before),
               'protected_files_unchanged': True, 'idempotence': 'PASS', 'quality': quality,
               'layer1_canonical_altered': False, 'layer2_publication_altered': False,
-              'layer3_code_altered': False, 'layer3_publication_altered': False,
+              'layer3_code_altered': source_relocated, 'layer3_publication_altered': False,
+              'source_layout_migrated': source_relocated,
+              'integrity_scope': 'ORIGINAL_BYTES_AND_BOUND_CURRENT_RELOCATION',
               'embeddings_recalculated': False, 'llm_used': False, 'external_api_used': False}
     # A read-only historical check must not rewrite the acceptance record.
     report['source_integrity'] = source_integrity

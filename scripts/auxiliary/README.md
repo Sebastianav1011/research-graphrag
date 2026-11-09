@@ -41,11 +41,11 @@ retrieval, assessment, benchmark final ni pipeline territorial.
 Verificación histórica, sin llamar a un proveedor:
 
 ```powershell
-python scripts/auxiliary/verify_layer4_preparation.py
+uv run python scripts/auxiliary/verify_layer4_preparation.py
 ```
 
 Para el workbook, inspeccionar primero
-`python scripts/auxiliary/create_source_level_review_workbook.py --help`.
+`uv run python scripts/auxiliary/create_source_level_review_workbook.py --help`.
 Admite --output, --preview-dir y --replace-unreviewed; este último solo reemplaza
 un generado sin decisiones humanas. Puede necesitar Node y Artifact Tool externo;
 ARTIFACT_TOOL_NODE_MODULES configura los módulos y REVIEW_WORKBOOK_NODE el ejecutable.

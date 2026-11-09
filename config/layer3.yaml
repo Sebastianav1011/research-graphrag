@@ -5,7 +5,7 @@ readiness:
 execution:
   allow_real_build: true
 input:
-  knowledge_manifest: data/knowledge/_manifest.json
+  knowledge_manifest: outputs/layer2/knowledge/_manifest.json
 embeddings:
   provider: sentence_transformers
   model: BAAI/bge-m3
@@ -59,6 +59,11 @@ retrieval:
   max_chunks_per_source: 3
   final_candidates_per_indicator: 50
   graph_candidate_min_cosine: 0.0
+  candidate_admission:
+    calibration_status: PROVISIONAL_PENDING_HUMAN_REVIEW
+    min_profile_cosine: 0.42
+    min_criterion_cosine: 0.42
+    min_focused_cosine: 0.42
 context:
   max_chunks: 50
   max_documents: 50
@@ -81,7 +86,7 @@ quality:
   fail_on_orphan_relation: true
   fail_on_missing_provenance: true
 outputs:
-  publication: data/graphrag
+  publication: outputs/layer3/publication
   base: outputs/layer3
   quality: outputs/layer3/quality
   manifests: outputs/layer3/manifests

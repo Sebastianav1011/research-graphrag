@@ -81,9 +81,9 @@ en el fingerprint territorial protegido.
 Solo comparar contratos exportables:
 
 ```powershell
-python scripts/build_layer2_contracts.py --check
-python scripts/build_layer3_contracts.py --check
-python scripts/build_layer4_contracts.py --check
+uv run python scripts/build_layer2_contracts.py --check
+uv run python scripts/build_layer3_contracts.py --check
+uv run python scripts/build_layer4_contracts.py --check
 ```
 
 Sin --check esos scripts escriben JSON. build_contracts.py también puede

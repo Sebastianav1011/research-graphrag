@@ -1,11 +1,12 @@
-# Copy to config/sources.yaml and configure authorized local files.
+# Versioned institutional aliases. The RAW coordinator discovers files and ignores
+# these example paths. Low-level historical ETL tools may copy this to sources.yaml.
 proyectos:
   enabled: true
-  path: data/raw/proyectos/descriptores-limpio.csv
+  path: data/layer1_sources/base/descriptores-limpio.csv
   type: csv
   delimiter: ','
   mapping:
-    source_project_id: id_actividad
+    source_project_id: [id_actividad, id_proyecto, project_id_institucional]
     summary: resumen
     methodology: metodologia
     objectives: objetivos
@@ -16,10 +17,11 @@ proyectos:
     knowledge_subarea: area_conocimiento
 articulos:
   enabled: true
-  path: data/raw/articulos/produccion-limpio.csv
+  path: data/layer1_sources/base/produccion-limpio.csv
   type: csv
   delimiter: ','
   mapping:
+    source_article_id: [source_article_id, id_articulo, id_publicacion]
     title: nombre_producto
     abstract: resumen
     keywords: palabras_clave
@@ -43,7 +45,7 @@ investigadores:
   - document_type
   - full_name
   paths:
-  - data/raw/investigadores/miembros-doc-limpio.csv
+  - data/layer1_sources/base/miembros-doc-limpio.csv
   type: csv
   delimiter: ','
   mapping:
@@ -65,7 +67,7 @@ investigadores:
     parent_column: facultad
 indicadores:
   enabled: true
-  path: data/reference/indicadores/catalogo_indicadores.xlsx
+  path: data/layer1_sources/reference/indicadores/catalogo_indicadores.xlsx
   type: xlsx
   sheet: Catalogo_Indicadores
   mapping:
@@ -74,3 +76,35 @@ indicadores:
     dimension: ambito
     indicator_name: indicador
     indicator_type: tipo
+
+# Whole-token phrases. Detection alone never authorizes a column for the corpus.
+knowledge_detection:
+  mapping_aliases:
+    proyectos:
+      source_project_id: [id_proyecto, project_id_institucional]
+    articulos:
+      source_article_id: [id_articulo, id_publicacion]
+  canonical_text_fields: [summary, abstract, methodology, objectives, expected_results]
+  fallback_categories: [description]
+  complementary_identifier_aliases: [id_proyecto, id_articulo, id_publicacion]
+  column_overrides: {}
+  prospective_aliases: [esperado, esperados, prevista, previstos, posible, posibles, potencial, futuros, expected]
+  identifier_namespaces:
+    project: [source_project_id, siap_id, id_siap, id_actividad, id_proyecto, project_id_institucional]
+    proposal: [id_propuesta, codigo_propuesta, proposal_id]
+    article: [source_article_id, id_articulo, id_publicacion, doi, eid]
+    researcher: [institutional_id, id_empleado, id_investigador, document_number, documento, cedula]
+  metadata_aliases: [codigo, tipo, fecha, fechas, facultad, departamento, estado, convocatoria, financiador, especialidad, grupo, linea, anio, ano, year, date, cantidad, numero, porcentaje]
+  sensitive_aliases: [nombre investigador, nombre completo, cedula, documento personal, correo, email, telefono, direccion, nacimiento, salario, confidencial, clinico, clinica, salud, personal, password, token]
+  categories:
+    objectives: [objetivo, objetivos, finalidad, finalidades, proposito, propositos, meta, metas, objective, objectives, aim, aims, goal, goals, purpose]
+    summaries: [resumen, resumenes, abstract, sintesis, summary, summaries]
+    results: [resultado, resultados, avance, avances, logro, logros, result, results, outcome, outcomes, achievement]
+    impacts: [impacto, impactos, efecto, efectos, impact, impacts]
+    findings: [hallazgo, hallazgos, descubrimiento, descubrimientos, finding, findings]
+    conclusions: [conclusion, conclusiones, consideraciones finales, conclusion, conclusions]
+    methodology: [metodo, metodos, metodologia, procedimiento, procedimientos, enfoque metodologico, method, methods, methodology]
+    products: [producto, productos, entregable, entregables, produccion, output, outputs, deliverable, deliverables]
+    beneficiaries: [beneficiario, beneficiarios, beneficiaria, beneficiarias, comunidades, destinatario, destinatarios, beneficiary, beneficiaries]
+    description: [descripcion, descripciones, informacion general, alcance, description, scope]
+    applications: [aplicacion, aplicaciones, transferencia, implementacion, application, applications, transfer, implementation]

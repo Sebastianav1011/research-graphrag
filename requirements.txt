@@ -4,3 +4,12 @@ pyarrow==23.0.1
 openpyxl==3.1.5
 PyYAML==6.0.3
 jsonschema==4.26.0
+# Full Python runtime; external Ollama and model weights are installed separately.
+-c requirements/runtime-constraints.txt
+sentence-transformers==5.2.3
+transformers==4.57.6
+huggingface_hub==0.36.2
+torch==2.11.0
+# API transport and OS credential vault; lazy imports keep Ollama independent of keys.
+openai>=2.0.0,<3
+keyring>=25.0.0,<26

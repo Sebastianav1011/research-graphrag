@@ -9,11 +9,11 @@ import pyarrow.parquet as pq
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'src'))
-from layer1_data.runtime import read_config
-from layer1_data.identity import STRONG, evidence_values, resolve
-from layer1_data.normalize import header, identifier, normalize_record, text
-from layer1_data.provenance import file_hash
-from layer1_data.ingestion import map_rows
+from layer2_processing.preprocessing.runtime import read_config
+from layer2_processing.preprocessing.identity import STRONG, evidence_values, resolve
+from layer2_processing.preprocessing.normalize import header, identifier, normalize_record, text
+from layer2_processing.preprocessing.provenance import file_hash
+from layer2_processing.preprocessing.ingestion import map_rows
 
 
 def clean(value):
@@ -58,9 +58,9 @@ def component_stats(rows):
 
 
 def main():
-    manifest_path = ROOT / 'data/canonical/_manifest.json'
+    manifest_path = ROOT / 'outputs/layer2/canonical/_manifest.json'
     manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
-    canonical = ROOT / 'data/canonical'
+    canonical = ROOT / 'outputs/layer2/canonical'
     protected = {str(p): file_hash(p) for p in canonical.iterdir() if p.is_file()}
     protected.update({meta['path']: file_hash(Path(meta['path'])) for meta in manifest['input_files']})
     settings = read_config(ROOT / 'config/layer1.yaml')
@@ -123,7 +123,7 @@ def main():
               'primary_only_counterfactual_status': dict(Counter(e['identity_status'] for e in primary_entities)),
               'counterfactual_note': 'Diagnostic only; drops researcher alias evidence and is not a valid correction or publication.',
               'canonical_and_raw_unchanged': True, 'identity_code_modified': False}
-    destination = ROOT / 'outputs/layer1/reports/identity_alias_audit.json'
+    destination = ROOT / 'outputs/layer2/preprocessing/reports/identity_alias_audit.json'
     destination.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
     print(json.dumps(report, ensure_ascii=True))
 

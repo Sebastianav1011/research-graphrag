@@ -5,8 +5,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PROTECTED = (
-    'data/canonical', 'data/knowledge', 'data/graphrag',
-    'src/layer3_graphrag', 'schemas/layer3', 'tests/layer3',
+    'outputs/layer2/canonical', 'outputs/layer2/knowledge', 'outputs/layer3/publication',
+    'src/layer3_graphrag', 'schemas/layer3', 'tests/layer4_graphrag',
     'config/layer3.yaml', 'scripts/run_layer3.py', 'docs/architecture/layer3.md',
     'docs/architecture/layer3_source_level_acceptance.md',
 )

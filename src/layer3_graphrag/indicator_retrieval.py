@@ -43,16 +43,22 @@ class IndicatorRetriever:
         self.context_resolver = SourceContextResolver(snapshot)
 
     def query_vectors(self, texts):
-        vectors = []
+        vectors = [];missing={}
         for text in texts:
             key = digest({'text': text, 'encoding': 'query', 'fingerprint': self.fingerprint})
             value = self._query_vectors.get(key)
             if value is None:
                 value = self.query_cache.get(key, self.provider.dimensions)
             if value is None:
-                value = validate_vectors(self.provider.embed_queries([text]), 1, self.provider.dimensions, True)[0]
-                self.query_cache.put(key, value)
-            self._query_vectors[key] = value
+                missing[key]=text
+            else:self._query_vectors[key]=value
+        if missing:
+            encoded=validate_vectors(self.provider.embed_queries(list(missing.values())),len(missing),self.provider.dimensions,True)
+            for key,value in zip(missing,encoded):
+                self.query_cache.put(key,value);self._query_vectors[key]=value
+        for text in texts:
+            key=digest({'text':text,'encoding':'query','fingerprint':self.fingerprint})
+            value=self._query_vectors[key]
             vectors.append(value / np.linalg.norm(value.astype(np.float64)))
         return np.asarray(vectors, dtype=np.float64)
 

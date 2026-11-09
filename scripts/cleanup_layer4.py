@@ -6,7 +6,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src'))
-from layer4.indicators import cleanup
+from layer4_evaluation.indicators import cleanup
 
 
 def main():

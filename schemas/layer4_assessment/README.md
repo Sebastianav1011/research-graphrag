@@ -37,5 +37,5 @@ contrato [preliminar](../layer4_preliminary/README.md), no a filas finales váli
 
 ## Ejecución
 
-Desde la raíz: `python scripts/build_layer4_contracts.py --check`.
+Desde la raíz: `uv run python scripts/build_layer4_contracts.py --check`.
 Sin --check escribe las definiciones exportables; no realiza assessment.

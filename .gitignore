@@ -1,11 +1,21 @@
 # Local environment and recreatable tooling caches
 .venv/
+.venv-*/
+venv/
+.aws/
+.ssh/
+credentials*.json
+*.key
+*.p12
+*.pfx
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 .cache/
+.uv-cache/
+uv.toml
 node_modules/
 .tmp/
 *.tmp
@@ -27,15 +37,33 @@ Thumbs.db
 !.env.example
 config/sources.yaml
 config/*.local.yaml
+config/*.local.json
+/resultados/
 
 # Institutional data; only documented static synthetic test fixtures are shared
 data/**
-!data/raw/
-!data/raw/README.md
-!data/samples/
-!data/samples/synthetic/
-!data/samples/synthetic/*.csv
-!data/samples/synthetic/README.md
+# El usuario autorizo compartir exclusivamente este contrato de tesis.
+!data/contratos/
+!data/contratos/tesis_comparacion_30.v1.json
+!data/layer1_sources/
+!data/templates/
+!data/templates/plantilla_entrada_proyectos.xlsx
+!data/templates/plantilla_resultado_final_indicadores_territorios.xlsx
+!data/templates/resultado_final_indicadores.xlsx
+!data/layer1_sources/README.md
+!data/layer1_sources/base/
+!data/layer1_sources/incoming/
+!data/layer1_sources/reference/
+!data/layer1_sources/*/.gitkeep
+# Only the known public synthetic fixtures are shareable; deliveries stay private.
+tests/fixtures/**
+!tests/fixtures/synthetic/
+!tests/fixtures/synthetic/*.csv
+!tests/fixtures/synthetic/README.md
+!tests/fixtures/prueba_controlada/
+!tests/fixtures/prueba_controlada/README.md
+!tests/fixtures/prueba_en_vivo/
+!tests/fixtures/prueba_en_vivo/README.md
 # Results stay local; only the curated Layer 4 navigation is shared.
 /outputs/*
 !/outputs/layer4/
@@ -70,7 +98,25 @@ data/**
 *.parquet
 *.bin
 *.safetensors
+*.gguf
+*.pt
+*.pth
+.huggingface/
+.ollama/
 *.part
 *.candidate
 ~$*.xlsx
+
+# Todo almacenamiento de ejecuciones y resultados es privado, tambien su historico.
+/outputs/
+
+# Local historical audit evidence is not part of the reviewed publication.
+/docs/migration_*/
+/docs/architecture/auditoria_consolidacion/
+/docs/architecture/AUDITORIA_*.md
+/docs/status/*
+!/docs/status/auditoria_final_repositorio.md
+!/docs/status/auditoria_archivos_publicacion.json
+!/docs/status/validacion_contrato_tesis30.md
+!/docs/status/almacenamiento_final.md
 

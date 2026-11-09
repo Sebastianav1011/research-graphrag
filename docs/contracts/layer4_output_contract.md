@@ -1,3 +1,8 @@
+# Salida vigente del flujo autónomo
+
+La plantilla y proyección vigentes están en [final_output_contract.md](final_output_contract.md).
+Los contratos siguientes describen cierres históricos y no controlan la salida autónoma actual.
+
 # Contrato de salida Capa 4
 
 ## Preparado: LAYER4_CONSUMER_V3_3_V1 (todavía no publicado)
@@ -91,7 +96,7 @@ el [procedimiento único](../methodology/layer4_closure_v2.md) y el
 
 Los schemas nuevos están en `schemas/layer4_assessment/`. Este contrato técnico
 prepara el preliminar; no genera filas reales ni reescribe la plantilla histórica
-`templates/resultado_final_indicadores.xlsx` o su aceptación anterior.
+`data/templates/resultado_final_indicadores.xlsx` o su aceptación anterior (plantilla histórica).
 
 ## PROJECT_INDICATOR_V1
 

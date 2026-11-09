@@ -6,8 +6,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src'))
-from layer2_knowledge.pipeline import run
-from layer2_knowledge.validate_inputs import WaitingForLayer1, ConfigurationPending
+from layer2_processing.knowledge.pipeline import run
+from layer2_processing.knowledge.validate_inputs import WaitingForLayer1, ConfigurationPending
 
 
 def main():

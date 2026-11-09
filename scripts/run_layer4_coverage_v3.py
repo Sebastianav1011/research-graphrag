@@ -9,13 +9,13 @@ import uuid
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'src'))
-from layer4.indicators import global_discovery as gd,assessment_v3 as v3
-from layer4.indicators import semantic_fallback as baseline
-from layer4.indicators.codex_cli import CodexCliAssessmentProvider,inspect_runtime
-from layer4.indicators.experiment_inputs import read,sha256,verify_hashes
-from layer4.indicators.experiment import write_json as _write_json
-from layer4.indicators.performance import Measurement,usage_metrics,interval_union
-from layer4.indicators.selection import FIELDS,canonical_hash
+from layer4_evaluation.indicators import global_discovery as gd,assessment_v3 as v3
+from layer4_evaluation.indicators import semantic_fallback as baseline
+from layer4_evaluation.indicators.codex_cli import CodexCliAssessmentProvider,inspect_runtime
+from layer4_evaluation.indicators.experiment_inputs import read,sha256,verify_hashes
+from layer4_evaluation.indicators.experiment import write_json as _write_json
+from layer4_evaluation.indicators.performance import Measurement,usage_metrics,interval_union
+from layer4_evaluation.indicators.selection import FIELDS,canonical_hash
 
 OUT=ROOT/'outputs/layer4/pruebas/validacion_v3_3'
 IDS=['PROJ_20022','PROJ_20456','PROJ_21299','PROJ_22027','PROJ_20899']
@@ -29,7 +29,7 @@ def write_json(path,value):
 
 def prepare():
     if (OUT/'plan.json').exists():return verify()
-    from layer4.indicators.final_export import verify_final
+    from layer4_evaluation.indicators.final_export import verify_final
     assert verify_final(ROOT,'config/layer4_final.yaml')['status']=='PASS'
     source=ROOT/'outputs/layer4/pruebas/piloto_v2/cierre_20'
     old=read(source/'plan.json')
@@ -39,10 +39,10 @@ def prepare():
     oldrows=baseline.effective_rows(ROOT,source)
     OUT.mkdir(parents=True,exist_ok=True)
     runtime=inspect_runtime()
-    code=['scripts/run_layer4_coverage_v3.py','src/layer4/indicators/global_discovery.py',
-          'src/layer4/indicators/assessment_v3.py','src/layer4/indicators/codex_cli.py',
-          'src/layer4/indicators/assessment_v2.py','src/layer4/indicators/confidence.py',
-          'src/layer4/indicators/performance.py','src/layer4/indicators/prompt.py']
+    code=['scripts/run_layer4_coverage_v3.py','src/layer4_evaluation/indicators/global_discovery.py',
+          'src/layer4_evaluation/indicators/assessment_v3.py','src/layer4_evaluation/indicators/codex_cli.py',
+          'src/layer4_evaluation/indicators/assessment_v2.py','src/layer4_evaluation/indicators/confidence.py',
+          'src/layer4_evaluation/indicators/performance.py','src/layer4_evaluation/indicators/prompt.py']
     inputs=dict(old['source_hashes'])
     for name in ('plan.json','manifest.json'):
         inputs[(source/name).relative_to(ROOT).as_posix()]=sha256(source/name)

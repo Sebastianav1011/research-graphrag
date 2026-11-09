@@ -1,3 +1,4 @@
 # Unit/integration test runner; runtime requirements are included.
 -r requirements.txt
+-c requirements/dev-constraints.txt
 pytest==9.1.1

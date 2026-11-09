@@ -11,16 +11,17 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src'))
+from run_paths import file_path as run_file
 
 import pyarrow.parquet as pq
 
-from layer4.indicators import experiment as experiment
-from layer4.indicators.experiment_export import preserve_strings, sheet
-from layer4.indicators.preliminary_output import verify_workbook
-from layer4.indicators.experiment_inputs import read, safe_path, sha256, selected_territories
-from layer4.indicators.powerbi import COLUMNS, TERRITORY_COLUMNS, FIELD_NAMES, consumption_rows
-from layer4.indicators.review import evidence_locations, component_summary
-from layer4.indicators.selection import canonical_hash
+from layer4_evaluation.indicators import experiment as experiment
+from layer4_evaluation.indicators.experiment_export import preserve_strings, sheet
+from layer4_evaluation.indicators.preliminary_output import verify_workbook
+from layer4_evaluation.indicators.experiment_inputs import read, safe_path, sha256, selected_territories
+from layer4_evaluation.indicators.powerbi import COLUMNS, TERRITORY_COLUMNS, FIELD_NAMES, consumption_rows
+from layer4_evaluation.indicators.review import evidence_locations, component_summary
+from layer4_evaluation.indicators.selection import canonical_hash
 
 VERSION = 'LAYER4_PILOT_INTEGRATED_DELIVERY_V1'
 EXPECTED_IDS = ('PROJ_20022', 'PROJ_22027', 'PROJ_21410', 'PROJ_22037', 'PROJ_21457')
@@ -260,7 +261,7 @@ def build(root=ROOT, delivery_name=DEFAULT_DELIVERY, config_path=DEFAULT_CONFIG)
     auth=experiment.validate_authorization(auth_path,manifest,'pilot') if auth_path.exists() else None
     if stats['assessments_valid']==8:
         status='Piloto con ocho respuestas válidas; revisión humana pendiente'
-    elif (out/'.execution.lock').exists():
+    elif (run_file(out, '.execution.lock')).exists():
         status='Piloto en ejecución; resultados parciales'
     elif not calls and auth:
         status='Piloto pendiente de ejecución; autorización registrada por declaración del usuario'
