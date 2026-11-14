@@ -121,6 +121,52 @@ def test_valid_general_export_keeps_partial_zero_and_audits_blocked_and_pending(
         [(2,1,45)],1,contract='THESIS_VALID_ASSESSMENTS_V2')
 
 
+def test_export_audit_keeps_context_state_evidence_limited_and_truncation(sandbox,monkeypatch,sk_case):
+    """C2: limits stay visible in the audit; truncated contexts never become VALID rows."""
+    from types import SimpleNamespace
+    from layer4_evaluation import live_execution as live
+    from layer4_evaluation.indicators import assessment_v3 as v3
+    from layer4_evaluation.indicators.selection import canonical_hash
+    from layer4_evaluation.indicators.review import evidence_locations
+    from layer4_evaluation.thesis_output import TEMPLATE
+    root,raw,config=sandbox
+    (raw/'projects.json').write_text(json.dumps([project('000001')]),encoding='utf-8')
+    run=root/'outputs/runs/context_audit';export_fixture(run,['000001'],monkeypatch)
+    profiles,rubrics={},{}
+    for iid in ('I00','I01','I02'):
+        profile=deepcopy(sk_case['profile']);profile['indicator_id']=iid
+        rubric=deepcopy(sk_case['rubric']);rubric.update(indicator_id=iid,profile_sha256=canonical_hash(profile))
+        rubric.pop('rubric_sha256');rubric['rubric_sha256']=canonical_hash(rubric)
+        profiles[iid],rubrics[iid]=profile,rubric
+    p=dict(project_id='PROJ_000001',siap_id='000001',fields=sk_case['fields'],field_provenance={
+        'methodology':dict(section_id='SECTION_1',raw_sources=[dict(record_source=str(raw/'projects.json'),
+            source_row=1,field_mapping={'methodology':'metodologia'},original_values={})])})
+    truncation=lambda reason,material:dict(policy='TOP_RANKED_UNIT_INTACT_V1',material=material,reason=reason)
+    contexts={'I00':dict(status='READY',evidence_limited=True,truncation=truncation('LOWER_RANKED_UNITS_OMITTED_BY_BUDGET',False)),
+              'I01':dict(status='EVIDENCE_TRUNCATED',evidence_limited=True,truncation=truncation('TOP_RANKED_UNIT_NOT_INTACT',True)),
+              'I02':dict(status='STATIC_CONTEXT_TOO_LONG',evidence_limited=False,truncation=truncation('TEMPLATE_EXCEEDS_EVIDENCE_THRESHOLD',False))}
+    plan=dict(projects=[p],profiles=profiles,rubrics=rubrics,
+        context_requests={'PROJ_000001':{iid:dict(context_selection=c) for iid,c in contexts.items()}})
+    a=deepcopy(sk_case['assessment']);assert not v3.validate(p['fields'],profiles['I00'],a,rubrics['I00'])
+    state=dict(project_id='PROJ_000001',selected=list(profiles),rows=[v3.indicator_row(p,profiles['I00'],a,rubrics['I00'])],
+        complete=False,blocked_indicators={},context_limits={'I01':'EVIDENCE_TRUNCATED','I02':'STATIC_CONTEXT_TOO_LONG'})
+    directory=run/'layer5_results/batch_fixture';directory.mkdir(parents=True)
+    module=SimpleNamespace(BASE=directory.parent,check=lambda _:plan,verify_run=lambda _:dict(projects=[state],errors=[]),
+        v3=v3,assessment_from_row=live.assessment_from_row,evidence_locations=evidence_locations)
+    monkeypatch.setattr(runner,'engine',lambda *a:module)
+    monkeypatch.setattr(runner,'validated_graph',lambda *a:{})
+    result=runner.export(root,run,output_contract='THESIS_VALID_ASSESSMENTS_V2')
+    coverage={c['indicator_id']:c for c in read(Path(result['indicator_statuses']))['indicators']}
+    assert {k:c['status'] for k,c in coverage.items()}=={'I00':'VALID','I01':'EVIDENCE_TRUNCATED','I02':'STATIC_CONTEXT_TOO_LONG'}
+    for iid,c in contexts.items():
+        assert (coverage[iid]['context_status'],coverage[iid]['evidence_limited'],coverage[iid]['truncation'])==(
+            c['status'],c['evidence_limited'],c['truncation'])
+    assert coverage['I01']['decision'] is None and result['valid_assessments']==1 and result['exported_rows']==1
+    lineage=read(runner.run_file(run,'evidence_lineage.json'))
+    assert [(l['indicator_id'],l['evidence_limited'],l['truncation']['reason']) for l in lineage]==[
+        ('I00',True,'LOWER_RANKED_UNITS_OMITTED_BY_BUDGET')]
+
+
 @pytest.fixture
 def sandbox(tmp_path):
     root = tmp_path / 'isolated repo with spaces'

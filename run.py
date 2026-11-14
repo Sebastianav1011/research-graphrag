@@ -193,6 +193,15 @@ def dispatch(args):
             print(json.dumps(rows,ensure_ascii=False,indent=2))
             return input('Escribir ELIMINAR para borrar solo estos runs cerrados y archivados: ').strip()=='ELIMINAR'
         return cleanup(ROOT,apply=args.apply,confirm=confirm_cleanup)
+    if args.command in ('knowledge-status','knowledge-register'):
+        import knowledge_store
+        if args.command=='knowledge-status':return dict(status='COMPLETE',**knowledge_store.status(ROOT),inference_calls=0)
+        if not args.run_id:raise ValueError('knowledge-register requiere --run-id del checkpoint BASE que construyo el conocimiento')
+        engine=coordinator();_,_,runs=engine.configuration(ROOT,args.config)
+        # Registers in place after deep verification; never copies, moves or edits the checkpoint.
+        manifest=knowledge_store.register(ROOT,engine.find_run(ROOT,runs,args.run_id),activate=args.activate)
+        return dict(status='COMPLETE',version_id=manifest['version_id'],location=manifest['location'],
+            activated=args.activate,inference_calls=0,embeddings_created=0)
     if args.command in ('migrate-runs','restore-run'):
         from run_storage import migrate,restore
         if args.command=='migrate-runs':return migrate(ROOT)
@@ -341,7 +350,9 @@ def parser():
     result = argparse.ArgumentParser(prog='uv run python run.py', description='GraphRag: ejecucion por capas SAD. Sin comando abre el menu.')
     result.add_argument('--knowledge-action',choices=('reuse','rebuild'),help='BASE: reutilizar conocimiento compatible (predeterminado) o reconstruir; resume conserva la opcion original')
     result.add_argument('command', nargs='?', choices=('run', 'stage', 'resume', 'verify', 'status',
-        'prepare','authorize','start','export','retry-pending','stop','model','contracts','contract-create','cleanup','migrate-runs','restore-run'))
+        'prepare','authorize','start','export','retry-pending','stop','model','contracts','contract-create','cleanup','migrate-runs','restore-run',
+        'knowledge-status','knowledge-register'))
+    result.add_argument('--activate',action='store_true',help='knowledge-register: activar la version verificada (puntero atomico)')
     result.add_argument('--apply',action='store_true',help='cleanup: confirmar y aplicar solo eliminaciones verificadas')
     result.add_argument('--confirm-all',action='store_true',help='Confirmacion explicita previa para --all; mantiene las demas autorizaciones')
     result.add_argument('stage', nargs='?', choices=STAGES)

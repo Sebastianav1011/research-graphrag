@@ -76,6 +76,9 @@ def system(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, 'knowledge', knowledge)
     monkeypatch.setattr(runner, 'graph', graph)
     monkeypatch.setattr(runner, 'validated_graph', lambda *a:{})
+    registrations=[]
+    # Mocked builds have no sealed artifacts; shared registration is tested in test_knowledge_store.
+    monkeypatch.setattr(runner, 'register_built_knowledge', lambda root,run,request:registrations.append(run.name))
     completed=set()
     def engine(root,run):
         folder=run/'workspace/outputs/layer4'

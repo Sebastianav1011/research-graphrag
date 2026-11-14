@@ -266,12 +266,17 @@ class MinimalWorker(Worker):
 
 
 def prepare(root,name,*,case_ids=None):
-    from .comparison import location
+    from .comparison import location,historical_run
     from .preparation_integrity import runtime_files
     selected=list(IDS if case_ids is None else case_ids)
     if not selected or len(set(selected))!=len(selected) or any(cid not in IDS for cid in selected):
         raise ValueError('Seleccion de controles minimal incompatible')
-    root=Path(root).resolve();directory=location(root,name);previous=root/PREVIOUS;old=s.read(previous/'manifest.json')
+    root=Path(root).resolve();directory=location(root,name)
+    # Resolve every historical run before writing anything. Case/receipt keys use the resolved
+    # path, as locate() already did for sources; metric keys keep their historical locators.
+    previous=historical_run(root,PREVIOUS)
+    experiments={experiment:historical_run(root,'outputs/runs/'+experiment) for experiment in ('phase1_20_v1','phase11_8_v2','phase12_6_v1')}
+    old=s.read(previous/'manifest.json')
     if any((directory/n).exists() for n in ('manifest.json','corrected','offline.json')):raise ValueError('El experimento ya existe; no se sobrescribe')
     sources={}
     for base,receipts in ((root,old['sources']),(previous,old['files'])):
@@ -292,13 +297,15 @@ def prepare(root,name,*,case_ids=None):
         db.execute('INSERT INTO jobs(pid,iid,status,updated) VALUES(?,?,?,?)',(pid,iid,'PENDING',s.now()))
     db.close();historical={}
     for version,experiment in [('V2','phase1_20_v1'),('V3','phase11_8_v2'),('V4','phase12_6_v1')]:
-        path=root/'outputs/runs'/experiment/'metrics.csv';sources[path.relative_to(root).as_posix()]=s.sha(path)
-        historical[version]={r['case_id']:r for r in csv.DictReader(path.open(encoding='utf-8-sig')) if r['case_id'] in selected and r['arm']=='corrected'}
+        run=experiments[experiment];key=lambda path:('outputs/runs/'+experiment+'/'+path.relative_to(run).as_posix())
+        path=run/'metrics.csv';sources[key(path)]=s.sha(path)
+        with path.open(encoding='utf-8-sig') as stream:
+            historical[version]={r['case_id']:r for r in csv.DictReader(stream) if r['case_id'] in selected and r['arm']=='corrected'}
         for cid,row in historical[version].items():
             if 'confidence' not in row:
-                pid,iid=cid.split('__');result=path.parent/'corrected/results'/pid/(iid+'.json')
+                pid,iid=cid.split('__');result=run/'corrected/results'/pid/(iid+'.json')
                 row['confidence']=s.read(result)['row']['confidence_raw_score'] if row['status']=='PASS' else None
-                if result.is_file():sources[result.relative_to(root).as_posix()]=s.sha(result)
+                if result.is_file():sources[key(result)]=s.sha(result)
     code=runtime_files(root);code['scripts/compare_evaluation.py']=s.sha(root/'scripts/compare_evaluation.py')
     code['config/autonomous_phase12.json']=s.sha(root/'config/autonomous_phase12.json')
     s.write(directory/'manifest.json',dict(version=VERSION,created_at=s.now(),cases=len(selected),case_ids=selected,arms=['corrected'],local_only=True,

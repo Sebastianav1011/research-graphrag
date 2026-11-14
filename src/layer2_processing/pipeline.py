@@ -44,6 +44,11 @@ def check(root, run, *, knowledge_only=False):
     scope_validation=run/'preprocess/scope_validation.json'
     if scope_validation.is_file() and state.get('scope_quarantine')!=read(scope_validation):
         raise ValueError('Estado de cuarentena distinto del informe sellado')
+    if state.get('knowledge_ref'):
+        # Shared knowledge is verified where it lives: exact version pin plus
+        # its sealed checkpoint (RAW, knowledge code and every sealed file).
+        from knowledge_store import resolve_reference
+        resolve_reference(root,state['knowledge_ref'])
     return state
 
 
@@ -129,8 +134,54 @@ def layer_config(root, number):
 
 
 def reuse_global_base(root,run,raw,config,dataset,*,probe=False,require_graph=False):
-    """Reuse an immutable compatible checkpoint; never reuse evaluations/selection."""
+    """Reuse verified shared BASE knowledge by reference; never reuse evaluations/selection.
+
+    The shared registry (knowledge_store) is the ordinary mechanism: the run
+    stores a stable version reference and reads the artifacts in place, without
+    copying them. Only an explicit historical source (a run locator recorded by
+    an earlier version of this code) still uses the legacy copy, for resume.
+    """
     if config.get('knowledge_scope')!='BASE_GLOBAL_V1':return False
+    import knowledge_store as store
+    source=config.get('base_knowledge_source')
+    if source and not source.startswith(store.REFERENCE_PREFIX):
+        return _legacy_copy_reuse(root,run,raw,config,dataset,probe=probe,require_graph=require_graph)
+    from jsonschema.exceptions import ValidationError
+    reuse_global_base.last_reason=None
+    try:
+        manifest,manifest_sha=store.compatible(root,raw,config,dataset,
+            version_id=source[len(store.REFERENCE_PREFIX):] if source else None)
+    except (store.KnowledgeUnavailable,OSError,ValueError,KeyError,RuntimeError,ValidationError) as exc:
+        reuse_global_base.last_reason=str(exc)  # Reported to the user; never a silent rebuild.
+        return False
+    if probe:return store.REFERENCE_PREFIX+manifest['version_id']
+    if config.get('project_selection'):
+        # Sampling/contract selections are validated by project_selection against a
+        # run-local canonical copy; that module is sealed knowledge code and is not
+        # changed here. Keep the historical copy, taken from the verified version.
+        return _legacy_copy_reuse(root,run,raw,dict(config,base_knowledge_source=manifest['location']),dataset,
+            require_graph=require_graph)
+    if (run/'workspace').exists() or run_file(run,'prepared_hashes.json').exists():
+        raise ValueError('No sobrescribir un checkpoint existente para referenciar BASE')
+    import shutil
+    builder=store.location(root,manifest)
+    builder_state=read(run_file(builder,'run.json'))
+    run_file(run,'raw_manifest.json').parent.mkdir(parents=True,exist_ok=True)
+    # Small run-local RAW receipt so check() verifies the sources of this run.
+    shutil.copyfile(run_file(builder,'raw_manifest.json'),run_file(run,'raw_manifest.json'))
+    state=dict(run_id=run.name,dataset=dataset,raw_path=raw.relative_to(root).as_posix(),status='PREPARED',
+        started_at=datetime.now(timezone.utc).isoformat(),configuration=config,code_hashes=code_hashes(root),
+        global_catalog_sha256=builder_state.get('global_catalog_sha256'),counts=builder_state.get('counts'),
+        knowledge_counts=builder_state.get('knowledge_counts'),storage_layout=store.RUN_LAYOUT,
+        knowledge_ref=store.reference(manifest,manifest_sha))
+    if 'scope_quarantine' in builder_state:state['scope_quarantine']=builder_state['scope_quarantine']
+    write(run_file(run,'run.json'),state)
+    seal(run)
+    return True
+
+
+def _legacy_copy_reuse(root,run,raw,config,dataset,*,probe=False,require_graph=False):
+    """Historical behaviour, kept only for an explicitly recorded run locator."""
     from .checkpoints import resolve
     from jsonschema.exceptions import ValidationError
     catalog_hash=sha(resolve(root,config['reference_catalog']))
@@ -210,7 +261,8 @@ def prepare(root, run, raw, dataset, config, through='knowledge'):
     action=config.get('base_knowledge_action','auto')
     if action!='rebuild' and reuse_global_base(root,run,raw,config,dataset,require_graph=action=='reuse'):
         return dict(status='REUSED_GLOBAL_BASE',run=str(run),inference_calls=0,embeddings_created=0)
-    if action=='reuse':raise ValueError('No existe conocimiento global BASE compatible; elegir reconstruir o --knowledge-action rebuild')
+    if action=='reuse':raise ValueError('No existe conocimiento global BASE compatible; elegir reconstruir o --knowledge-action rebuild'
+        +(f' ({reuse_global_base.last_reason})' if getattr(reuse_global_base,'last_reason',None) else ''))
     state = dict(run_id=run.name, dataset=dataset, raw_path=raw.relative_to(root).as_posix(),
         status='PREPARING', started_at=datetime.now(timezone.utc).isoformat(), configuration=config, code_hashes=code_hashes(root))
     if config.get('knowledge_scope')=='BASE_GLOBAL_V1':

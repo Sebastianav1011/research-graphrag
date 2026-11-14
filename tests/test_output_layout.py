@@ -9,8 +9,25 @@ from autonomous_execution import store
 ROOT=Path(__file__).resolve().parents[1]
 
 
-def test_only_four_global_output_directories():
-    assert {p.name for p in (ROOT/'outputs').iterdir()}=={'layer2','layer3','layer4','runs'}
+# Every top-level output directory has a documented owner; anything else is misplaced.
+OUTPUT_DIRECTORIES={
+    'layer2':'preprocessing/Knowledge oficiales y referencias (capa 2)',
+    'layer3':'GraphRAG publicado, tokenizador y caches oficiales (capa 3)',
+    'layer4':'evaluacion, auditoria y territorios oficiales (capa 4)',
+    'runs':'ejecuciones por proveedor: runs/local|api|anteriores/<run_id>',
+    'shared':'registro de conocimiento BASE compartido (knowledge_store)',
+    'historico':'copias de exportacion por run y evidencias compactadas (run_storage/run_retention)',
+    'reviews':'revisiones humanas manuales; no las escribe el pipeline',
+}
+REQUIRED_OUTPUT_DIRECTORIES={'layer2','layer3','layer4','runs'}
+
+
+def test_global_output_directories_are_known_and_core_layers_exist():
+    present={p.name for p in (ROOT/'outputs').iterdir()}  # Loose files at the top level also fail.
+    assert REQUIRED_OUTPUT_DIRECTORIES<=present
+    assert present<=set(OUTPUT_DIRECTORIES), sorted(present-set(OUTPUT_DIRECTORIES))
+    # Historical layer names were relocated and must never reappear at the top level.
+    assert not present&{'layer2_processing','layer3_graphrag','layer4_evaluation','experiments','pipeline_manual'}
 
 
 def test_canonical_destinations_never_redirect_back_to_old_names():

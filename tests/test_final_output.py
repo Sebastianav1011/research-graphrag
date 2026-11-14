@@ -24,8 +24,8 @@ def test_official_template_loads_from_foreign_working_directory(tmp_path,monkeyp
 
 @pytest.mark.parametrize('name,n',[('run_institutional_resultados_20261102',9),('run_manual_5501_tec04',1)])
 def test_persisted_results_project_without_inference_or_semantic_changes(name,n,tmp_path,monkeypatch):
-    run=ROOT/'outputs/runs'/name
-    if not run.exists():pytest.skip('Local institutional run not installed')
+    from tests import historical
+    run=historical.require('outputs/runs/'+name)  # Resolves outputs/runs/<bucket>/<name>; explicit skip if absent.
     records,audit=final.project_records(ROOT,run)
     assert len({(r['siap_id'],r['indicador_id']) for r in records})==n
     assert len(audit['evaluations'])==n
@@ -98,8 +98,8 @@ def test_institutional_researcher_relation_preserves_multiple_ids_without_hash_f
 
 
 def test_scoped_territories_and_template_are_sealed_before_inference(tmp_path):
-    history=ROOT/'outputs/runs/run_institutional_resultados_20261102/autonomous/main'
-    if not history.exists():pytest.skip('Local institutional sources not installed')
+    from tests import historical
+    history=historical.require('outputs/runs/run_institutional_resultados_20261102',compacted=True)/'autonomous/main'
     manifest=final.s.read(history/'manifest.json')
     run=tmp_path/'outputs/runs/scoped';directory=run/'autonomous/main'
     for pid,receipt in manifest['projects'].items():

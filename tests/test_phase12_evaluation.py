@@ -13,10 +13,13 @@ from tests.test_autonomous_execution import environment, ClientFactory, authoriz
 from tests.test_ollama_provider import sample
 from tests.test_context_budget import corpus
 
+from tests import historical as hist_runs
+
 ROOT=Path(__file__).resolve().parents[1]
-V3=ROOT/followup.PHASE12_PREVIOUS
-CASES=s.read(V3/'assets/cases.json')
-MANIFEST=s.read(V3/'corrected/manifest.json')
+# Resolved location (outputs/runs/<bucket>/...); only a path check at import, no reads.
+V3=hist_runs.locate(followup.PHASE12_PREVIOUS) or ROOT/followup.PHASE12_PREVIOUS
+CASES=hist_runs.Lazy(lambda:s.read(hist_runs.require(followup.PHASE12_PREVIOUS)/'assets/cases.json'))
+MANIFEST=hist_runs.Lazy(lambda:s.read(hist_runs.require(followup.PHASE12_PREVIOUS)/'corrected/manifest.json'))
 
 
 def historical(cid,attempt=1):
@@ -172,7 +175,7 @@ def test_orientation_quote_can_coexist_with_compatible_substantive_quote():
 def test_asc01_comparison_does_not_turn_python_into_semantic_classifier():
     case,desc,negative=historical('SYNTH_DIALOGUE_POSITIVE__ASC-01')
     pid=case['data']['project']['project_id'];profile=MANIFEST['profiles']['ASC-01'];rubric=MANIFEST['rubrics']['ASC-01']
-    positive=s.read(ROOT/followup.PREVIOUS/'corrected/results'/pid/'ASC-01.json')['wrapper']
+    positive=s.read(hist_runs.require(followup.PREVIOUS)/'corrected/results'/pid/'ASC-01.json')['wrapper']
     request=deepcopy(desc['request']);phase12.catalog_prompt(request,rubric)
     # Both outputs meet deterministic contracts. The real semantic contrast must be measured by Qwen/humans.
     assert phase12.diagnose(case['data']['project'],profile,rubric,request,positive)==[]
@@ -183,7 +186,8 @@ def test_asc01_comparison_does_not_turn_python_into_semantic_classifier():
     assert v3.confidence(case['data']['project']['fields'],profile,{k:v for k,v in positive['assessments'][0].items() if k!='indicator_id'},rubric)['confidence_raw_score']==86.25
 
 
-@pytest.mark.parametrize('cid',[c['case_id'] for c in CASES if (V3/'corrected/results'/c['data']['project']['project_id']/(c['indicator_id']+'.json')).exists()])
+@pytest.mark.parametrize('cid',hist_runs.params(followup.PHASE12_PREVIOUS,lambda v3:[c['case_id'] for c in s.read(v3/'assets/cases.json')
+    if (v3/'corrected/results'/c['data']['project']['project_id']/(c['indicator_id']+'.json')).exists()],label='v3_passes'))
 def test_all_five_v3_passes_remain_structurally_acceptable(cid):
     case,desc,raw=historical(cid);iid=case['indicator_id'];project=case['data']['project']
     profile=MANIFEST['profiles'][iid];rubric=MANIFEST['rubrics'][iid]

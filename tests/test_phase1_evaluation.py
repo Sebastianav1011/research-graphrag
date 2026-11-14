@@ -14,11 +14,17 @@ from tests.test_autonomous_execution import environment, ClientFactory, authoriz
 from tests.test_ollama_provider import sample
 from tests.test_context_budget import corpus
 
+from tests import historical
+
 ROOT=Path(__file__).resolve().parents[1]
-HIST=ROOT/'outputs/runs'/comparison.HISTORY/'autonomous/main'
+HISTORY_RUN='outputs/runs/'+comparison.HISTORY
+# Resolved location (outputs/runs/<bucket>/...): a wrong path would make the globs
+# below silently empty. Each use calls historical.require first (explicit skip).
+HIST=(historical.locate(HISTORY_RUN) or ROOT/HISTORY_RUN)/'autonomous/main'
 
 
 def history_shards(pid,iid):
+    historical.require(HISTORY_RUN)
     m=s.read(HIST/'manifest.json');data=s.read(HIST/m['projects'][pid]['path'])
     judgments=[];evidence=[];requests=[]
     for offset in range(0,len(m['rubrics'][iid]['criteria']),3):
@@ -169,13 +175,14 @@ def test_irreducible_synthesis_budget_fails_closed_with_receipt(environment):
 
 def test_historical_pass_scores_and_all_original_run_bytes_are_preserved():
     from autonomous_execution.engine import result_row
+    historical.require(HISTORY_RUN)
     m=s.read(HIST/'manifest.json');count=0
     for path in (HIST/'results').glob('*/*.json'):
         pid=path.parent.name;iid=path.stem;bundle=s.read(path);project=s.read(HIST/m['projects'][pid]['path'])['project']
         assert result_row(project,m['profiles'][iid],m['rubrics'][iid],bundle['wrapper'])==bundle['row']
         count+=1
     assert count==136
-    protected=s.read(ROOT/'outputs/runs'/comparison.HISTORY/'protected_before.json')
+    protected=s.read(historical.require(HISTORY_RUN)/'protected_before.json')
     assert all(s.sha(ROOT/name)==digest for name,digest in protected.items())
 
 

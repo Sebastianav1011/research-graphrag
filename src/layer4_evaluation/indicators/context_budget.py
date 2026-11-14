@@ -16,6 +16,12 @@ from .selection import FIELDS, substantive_fields, canonical_hash
 
 VERSION = 'GRAPH_CONTEXT_PER_INDICATOR_V1'
 ESTIMATOR = 'UTF8_BYTES_DIV_3_APPROX_V1'
+RETRIEVED_INPUT_CAP = 8000  # Unchanged input ceiling for BASE_RETRIEVED_GRAPH_V1.
+RELATIONAL_RESERVE = 1200   # Kept free for verified relational paths packed after evidence.
+# Material truncation: the highest-ranked retrieved unit could not be sent intact,
+# so the request no longer represents the retrieval ranking. Not dispatched.
+EVIDENCE_TRUNCATED = 'EVIDENCE_TRUNCATED'
+TRUNCATION_POLICY = 'TOP_RANKED_UNIT_INTACT_V1'
 CRITERION_INSTRUCTIONS = '''ORDEN DE EVALUACION EN ESTA UNICA RESPUESTA:
 1. Delimita lo que pide cada criterion segun rationale y temporal_requirement.
 2. Busca primero fragmentos que respalden esas condiciones y su vinculo con el proyecto, no solo palabras afines.
@@ -44,8 +50,11 @@ del descriptor ni sustituyen condiciones institucionales. El ranking no es evide
 '''
 
 
-def with_relations(request,package,schema,settings,reserve):
-    """Budget whole verified paths after the complete primary descriptor."""
+def with_relations(request,package,schema,settings,reserve,*,tokenizer=None,cap=None):
+    """Budget whole verified paths after the complete primary descriptor.
+
+    With a pinned tokenizer the same calibrated count used for evidence applies;
+    without it the historical estimator is kept for reproducibility."""
     if package['project_id']!=request['project_id']:raise ValueError('Contexto relacional de otro proyecto')
     relations={r['relation_id']:r for r in package['relations']}
     nodes={n['entity_id']:n for n in package['entities']}
@@ -73,7 +82,8 @@ def with_relations(request,package,schema,settings,reserve):
             current=next(e for e in ends if e!=current);visited|=ends
         if current!=target:raise ValueError('Destino relacional incompatible')
         trial=build(chosen|set(path),paths|{target:path},selected_nodes|visited)
-        budget=estimate(trial['prompt'],schema,settings,conservative=request.get('context_mode')==v3.RETRIEVED_CONTEXT)
+        budget=estimate(trial['prompt'],schema,settings,tokenizer=tokenizer,cap=cap,
+            conservative=tokenizer is None and request.get('context_mode')==v3.RETRIEVED_CONTEXT)
         if budget['estimated_input_tokens']+reserve<=budget['input_budget']:
             chosen|=set(path);paths[target]=path;selected_nodes|=visited;result=trial
         else:omitted.append(dict(entity_id=target,relation_ids=path,reason='RELATIONAL_CONTEXT_BUDGET_EXCEEDED'))
@@ -89,13 +99,14 @@ def compact(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
 
 
-def estimate(prompt, schema, settings, *, tokenizer=None,conservative=False):
+def estimate(prompt, schema, settings, *, tokenizer=None,conservative=False,cap=None):
     if conservative:
         # Local decoding grammar is NOT appended to the chat prompt. Use a
         # conservative byte allowance and independent template reserve, rather
-        # than equating UTF8/3 with real Qwen tokens.
+        # than equating UTF8/3 with real Qwen tokens. Historical plans only:
+        # new retrieved contexts are budgeted with the pinned tokenizer.
         tokens=math.ceil(len(prompt.encode('utf-8'))/2)+256
-        available=min(8000,settings['num_ctx']-settings['num_predict']-settings['context_margin_tokens'])
+        available=min(RETRIEVED_INPUT_CAP,settings['num_ctx']-settings['num_predict']-settings['context_margin_tokens'])
         return dict(version=VERSION,estimator='UTF8_DIV_2_PLUS_TEMPLATE_256_APPROX_V1',approximate=True,
             conservative=True,estimated_input_tokens=tokens,input_budget=available,
             num_ctx=settings['num_ctx'],num_predict=settings['num_predict'],margin_tokens=settings['context_margin_tokens'],
@@ -105,11 +116,15 @@ def estimate(prompt, schema, settings, *, tokenizer=None,conservative=False):
         prompt_tokens=count(prompt,tokenizer)
         total=prompt_tokens+tokenizer['template_tokens']
         available=settings['num_ctx']-settings['num_predict']-settings['context_margin_tokens']
-        return dict(version=VERSION,estimator='PINNED_QWEN_TOKENIZER_AND_CALIBRATED_TEMPLATE_V1',approximate=False,
+        if cap is not None:available=min(cap,available)
+        result=dict(version=VERSION,estimator='PINNED_QWEN_TOKENIZER_AND_CALIBRATED_TEMPLATE_V1',approximate=False,
             prompt_tokens=prompt_tokens,template_tokens=tokenizer['template_tokens'],schema_tokens=0,
             schema_bytes=len(compact(schema).encode('utf-8')),schema_scope='EXTERNAL_DECODING_GRAMMAR_NOT_APPENDED_TO_PROMPT',
             estimated_input_tokens=total,input_budget=available,num_ctx=settings['num_ctx'],num_predict=settings['num_predict'],
             margin_tokens=settings['context_margin_tokens'],fits=total<=available,tokenizer=tokenizer)
+        # Historical tokenizer budgets carry no cap and must reproduce byte for byte.
+        if cap is not None:result['input_cap']=cap
+        return result
     prompt_tokens = math.ceil(len(prompt.encode('utf-8')) / 3)
     schema_tokens = math.ceil(len(compact(schema).encode('utf-8')) / 3)
     available = settings['num_ctx'] - settings['num_predict'] - settings['context_margin_tokens']
@@ -118,6 +133,13 @@ def estimate(prompt, schema, settings, *, tokenizer=None,conservative=False):
         estimated_input_tokens=prompt_tokens + schema_tokens,
         input_budget=available, num_ctx=settings['num_ctx'], num_predict=settings['num_predict'],
         margin_tokens=settings['context_margin_tokens'], fits=prompt_tokens + schema_tokens <= available)
+
+
+def rebudget(prompt, schema, settings, budget):
+    """Recompute a stored budget with its own estimator, tokenizer and cap."""
+    budget=budget or {}
+    return estimate(prompt,schema,settings,tokenizer=budget.get('tokenizer'),
+        conservative=budget.get('conservative',False),cap=budget.get('input_cap'))
 
 
 def make_request(project, profile, rubric, fields, *, evidence_references=False, evidence_units=None,
@@ -237,8 +259,17 @@ def original_chunk(chunk, section, offsets):
 
 @timed('recuperacion')
 def prepare_contexts(projects, profiles, rubrics, settings, candidates, chunks, sections, *, evidence_references=False,
-                     assessment_version=v3.VERSION, evaluation_mode=None, context_mode=None,relational_contexts=None):
-    """Select only published GraphRAG hits, preserving original chunk boundaries."""
+                     assessment_version=v3.VERSION, evaluation_mode=None, context_mode=None,relational_contexts=None,
+                     tokenizer=None):
+    """Select only published GraphRAG hits, preserving original chunk boundaries.
+
+    ``tokenizer`` is the pinned, hash-verified Qwen tokenizer descriptor. When
+    given, budgets use exact calibrated counts (retrieved mode keeps its 8000
+    cap); without it the historical estimator is reproduced unchanged.
+    """
+    retrieved = context_mode==v3.RETRIEVED_CONTEXT
+    cap = RETRIEVED_INPUT_CAP if retrieved and tokenizer is not None else None
+    relational_reserve = RELATIONAL_RESERVE if retrieved else 0
     chunk_index = {c['chunk_id']: c for c in chunks}
     section_index = {s['section_id']: s for s in sections}
     if context_mode not in (None,v3.GRAPHRAG_CONTEXT,v3.FULL_CONTEXT,v3.BASE_CONTEXT,v3.RETRIEVED_CONTEXT):raise ValueError('Modo de contexto desconocido')
@@ -269,12 +300,12 @@ def prepare_contexts(projects, profiles, rubrics, settings, candidates, chunks, 
             def budget_for(request):
                 from .evidence_references import response_schema
                 return estimate(request['prompt'], response_schema(request, project['fields']), settings,
-                    conservative=context_mode==v3.RETRIEVED_CONTEXT)
+                    tokenizer=tokenizer, cap=cap, conservative=tokenizer is None and retrieved)
             from .evidence_references import CORRECTIVE_INPUT_RESERVE
             reserve = CORRECTIVE_INPUT_RESERVE if evidence_references else 0
             def fits_request(request):
                 budget = budget_for(request)
-                return budget['estimated_input_tokens'] + reserve <= budget['input_budget']-(1200 if context_mode==v3.RETRIEVED_CONTEXT else 0)
+                return budget['estimated_input_tokens'] + reserve <= budget['input_budget']-relational_reserve
             candidate = None if full_descriptor else ranked.get((pid, iid))
             fields = {f: '' for f in project['fields']}
             request = build(fields)
@@ -361,15 +392,23 @@ def prepare_contexts(projects, profiles, rubrics, settings, candidates, chunks, 
             if context_mode==v3.BASE_CONTEXT and not descriptor_too_long:
                 if pid not in relational_contexts:raise ValueError('Proyecto sin contexto relacional verificado')
                 from .evidence_references import response_schema
-                request=with_relations(request,relational_contexts[pid],response_schema(request,project['fields']),settings,reserve)
+                request=with_relations(request,relational_contexts[pid],response_schema(request,project['fields']),settings,reserve,
+                    tokenizer=tokenizer,cap=cap)
             if context_mode==v3.RETRIEVED_CONTEXT and candidate and candidate.get('relational_context'):
                 from .evidence_references import response_schema
-                request=with_relations(request,candidate['relational_context'],response_schema(request,project['fields']),settings,reserve)
+                request=with_relations(request,candidate['relational_context'],response_schema(request,project['fields']),settings,reserve,
+                    tokenizer=tokenizer,cap=cap)
             budget = budget_for(request)
-            status = ('STATIC_CONTEXT_TOO_LONG' if base_budget['estimated_input_tokens'] + reserve > base_budget['input_budget'] else
+            # The static check uses the same effective evidence threshold as
+            # fits_request: a template that leaves no room is not "no evidence".
+            substantive_hits=[(h,c) for h,c in hits if c['field_name'] in substantive_fields(fields)]
+            top=substantive_hits[0][1]['chunk_id'] if substantive_hits else None
+            top_intact=any(s.get('chunk_id')==top and s.get('unit')!='ORIGINAL_SENTENCE_SPAN' for s in selected)
+            has_evidence=any(fields[f].strip() for f in substantive_fields(fields))
+            status = ('STATIC_CONTEXT_TOO_LONG' if base_budget['estimated_input_tokens'] + reserve > base_budget['input_budget']-relational_reserve else
                       'FULL_DESCRIPTOR_TOO_LONG' if descriptor_too_long else
-                      'READY' if any(fields[f].strip() for f in substantive_fields(fields)) else
-                      ('NO_EVIDENCE_FITS' if any(c['field_name'] in substantive_fields(fields) for _,c in hits)
+                      (EVIDENCE_TRUNCATED if retrieved and not top_intact else 'READY') if has_evidence else
+                      ('NO_EVIDENCE_FITS' if substantive_hits
                        else 'NO_SUBSTANTIVE_CONTEXT') if hits else 'NO_RETRIEVED_EVIDENCE')
             # Metadata are reviewed and hashed, but never serialized into the prompt.
             request['context_budget'] = budget
@@ -380,6 +419,16 @@ def prepare_contexts(projects, profiles, rubrics, settings, candidates, chunks, 
             if context_mode is not None:request['context_selection']['context_mode']=context_mode
             if context_mode==v3.RETRIEVED_CONTEXT:
                 request['context_selection']['coverage']='RETRIEVED_SUBSET_NOT_EXHAUSTIVE_DOCUMENT_REVIEW'
+                budget_limited=[o for o in omitted if o['reason'] in ('INPUT_BUDGET_EXCEEDED','PARENT_CHUNK_SUBSPAN_SELECTED')]
+                request['context_selection']['truncation']=dict(policy=TRUNCATION_POLICY,
+                    material=status==EVIDENCE_TRUNCATED,top_ranked_chunk_id=top,top_ranked_intact=top_intact,
+                    budget_omitted_chunk_ids=sorted({o['chunk_id'] for o in budget_limited if o['reason']=='INPUT_BUDGET_EXCEEDED'}),
+                    subspan_chunk_ids=sorted({o['chunk_id'] for o in budget_limited if o['reason']=='PARENT_CHUNK_SUBSPAN_SELECTED'}),
+                    reason=('TOP_RANKED_UNIT_NOT_INTACT' if status==EVIDENCE_TRUNCATED else
+                            'TEMPLATE_EXCEEDS_EVIDENCE_THRESHOLD' if status=='STATIC_CONTEXT_TOO_LONG' else
+                            'NO_RETRIEVED_UNIT_FITS' if status=='NO_EVIDENCE_FITS' else
+                            'LOWER_RANKED_UNITS_OMITTED_BY_BUDGET' if budget_limited else None),
+                    evidence_threshold_tokens=budget['input_budget']-relational_reserve-reserve)
             if 'relational_context_receipt' in request:request['context_selection']['relational']=request['relational_context_receipt']
             if descriptor_too_long:
                 request['context_selection'].update(alternative='GRAPHRAG_FRAGMENTS_V1_REQUIRES_NEW_EXPLICIT_SELECTION',
@@ -391,9 +440,14 @@ def prepare_contexts(projects, profiles, rubrics, settings, candidates, chunks, 
                 request_sha256=canonical_hash(request), budget=budget,
                 prompt_bytes=len(request['prompt'].encode()), selected=selected, omitted=omitted))
             if 'relational_context_receipt' in request:diagnostics[-1]['relational']=request['relational_context_receipt']
+            if 'truncation' in request['context_selection']:
+                diagnostics[-1].update(evidence_limited=request['context_selection']['evidence_limited'],
+                    truncation=request['context_selection']['truncation'])
     return requests, dict(version=VERSION, evaluation_mode=evaluation_mode,context_mode=context_mode,
         indicator_ids=sorted(profiles),
         indicators_per_project=len(profiles), requests=diagnostics,
         omitted_static_components=['other_47_profiles', 'global_discovery', 'general_rule_reference_material',
             'rubric_basis_and_hashes', 'full_graph', *([] if full_descriptor else ['full_documents']), 'scores_as_confidence'],
-        estimator_note='Approximate, not exact tokenization; schema included; native usage checked after each call. No text truncation.')
+        estimator_note=('Pinned Qwen tokenizer plus calibrated template tokens; decoding schema not in prompt; native usage checked after each call. No text truncation.'
+            if tokenizer is not None else
+            'Approximate, not exact tokenization; schema included; native usage checked after each call. No text truncation.'))

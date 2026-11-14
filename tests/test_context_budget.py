@@ -299,8 +299,10 @@ def test_old_global_cache_is_not_relabelled_as_graph_context(live_run,corpus):
 
 
 @pytest.fixture
-def planner(tmp_path,monkeypatch,corpus):
+def planner(tmp_path,monkeypatch,corpus,tokenizer_stub):
     root=tmp_path;run=root/'outputs/runs/synthetic'
+    # Retrieved contexts now require the pinned tokenizer; use a hash-pinned stub.
+    monkeypatch.setattr(runner,'pinned_tokenizer',lambda root:tokenizer_stub)
     settings=dict(profiles=corpus.profiles,rubrics=corpus.rubrics,rules=[],budgets={},
         observed_character_ratio=.1,discovery_version=live.gd.VERSION,assessment_version=v3.VERSION,source_hashes={})
     frozen=root/'frozen.json';write(frozen,settings)
@@ -509,6 +511,9 @@ def test_coordinator_sends_global_relations_only_for_selected_evaluation(planner
     assert len(plan['context_requests']['TEST_PROJECT'])==48
     assert plan['evaluation_policy']==policy
     request=plan['context_requests']['TEST_PROJECT']['I00']
+    assert request['context_budget']['estimator']=='PINNED_QWEN_TOKENIZER_AND_CALIBRATED_TEMPLATE_V1'
+    assert request['context_budget']['input_cap']==request['context_budget']['input_budget']==8000
+    assert request['context_selection']['truncation']['policy']==cb.TRUNCATION_POLICY
     assert any(n['entity_id']=='UNSELECTED' for n in request['payload']['relational_context']['entities'])
     assert request['context_selection']['relational']['graph_manifest_sha256']=='synthetic_graph'
 

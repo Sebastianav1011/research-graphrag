@@ -187,7 +187,8 @@ def persisted_records(root,run,*,contract=DEFAULT_CONTRACT):
     selection=execution['project_ids']
     if len(set(selection))!=len(selection):raise ValueError('Selección duplicada')
     projects={};profiles=None;expected=set();receipts={};catalog_hashes={}
-    base=run/'layer5_results' if (run/'layer5_results').exists() else run/'workspace/outputs/layer4'
+    from knowledge_store import evaluation_dir
+    base=evaluation_dir(run)
     for directory in sorted(base.glob('batch_*')):
         manifest=read(directory/'manifest.json')
         plan_path=pinned(directory,'plan.json',manifest['plan_sha256']);plan=read(plan_path)

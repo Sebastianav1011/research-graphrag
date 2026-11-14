@@ -115,7 +115,7 @@ Respeta IDs y temporalidad de rubrica. Devuelve JSON completo corregido.
 
 def corrective_request(request, schema, settings, issues=None):
     """Keep the exact evidence payload; budget and fingerprint the actual prompt."""
-    from .context_budget import estimate
+    from .context_budget import rebudget
     revised = dict(request)
     prefix, marker, payload = request['prompt'].partition('INPUT_JSON:\n')
     if not marker:
@@ -138,9 +138,7 @@ def corrective_request(request, schema, settings, issues=None):
                 + json.dumps(details[:count], ensure_ascii=False, separators=(',', ':'))
                 + (f'\nOtros errores pendientes: {len(details)-count}' if count<len(details) else '')
                 + '\n' + marker + payload)
-            if estimate(revised['prompt'], schema, settings,
-                    tokenizer=request.get('context_budget', {}).get('tokenizer'),
-                    conservative=request.get('context_budget',{}).get('conservative',False))['fits']:
+            if rebudget(revised['prompt'], schema, settings, request.get('context_budget'))['fits']:
                 break
     else:
         feedback = ('\nERRORES: ' + '; '.join(sorted({i['category'] for i in issues}))
@@ -152,16 +150,14 @@ def corrective_request(request, schema, settings, issues=None):
                 'NOT_SUPPORTED: todos NOT_DEMONSTRATED, strength=0. Apoyo parcial: INSUFFICIENT_EVIDENCE.',
                 SK_STATE_INSTRUCTIONS)
         revised['prompt'] = prefix + correction + feedback + '\n' + marker + payload
-    revised['context_budget'] = estimate(revised['prompt'], schema, settings,
-        tokenizer=request.get('context_budget', {}).get('tokenizer'),
-        conservative=request.get('context_budget',{}).get('conservative',False))
+    revised['context_budget'] = rebudget(revised['prompt'], schema, settings, request.get('context_budget'))
     return revised
 
 
 def context_guard(prompt, schema, settings, runtime=None, budget=None):
     if budget is not None:
-        from .context_budget import estimate
-        actual = estimate(prompt, schema, settings,tokenizer=budget.get('tokenizer'),conservative=budget.get('conservative',False))
+        from .context_budget import rebudget
+        actual = rebudget(prompt, schema, settings, budget)
         if budget.get('tokenizer') and runtime:
             descriptor=budget['tokenizer']
             if any(descriptor[k]!=runtime[k] for k in ('model_metadata_sha256',)) or descriptor['model_digest']!=runtime['digest']:
@@ -365,8 +361,8 @@ class OllamaAssessmentProvider:
         generation = self.settings | dict(num_predict=output or self.settings['num_predict'])
         budget = request.get('context_budget')
         if budget and generation != self.settings:
-            from .context_budget import estimate
-            budget = estimate(prompt, schema, generation, tokenizer=budget.get('tokenizer'),conservative=budget.get('conservative',False))
+            from .context_budget import rebudget
+            budget = rebudget(prompt, schema, generation, budget)
         context_guard(prompt, schema, generation, runtime, budget)
         payload = dict(model=self.settings['model'], messages=[dict(role='user', content=prompt)], format=schema,
                        stream=False, truncate=False, shift=False, keep_alive=self.settings['keep_alive'],

@@ -17,10 +17,13 @@ PHASE12_IDS=IDS[:4]+IDS[-2:]
 
 
 def prepare(root,name,*,phase12=False):
-    from .comparison import location
+    from .comparison import location,historical_run
     root=Path(root).resolve();directory=location(root,name)
     previous_relative=PHASE12_PREVIOUS if phase12 else PREVIOUS
-    previous=root/previous_relative
+    # Read from the resolved run (explicit error if absent, before any write);
+    # manifests keep the logical historical locator as identity.
+    previous=historical_run(root,previous_relative);logical=root/previous_relative
+    key=lambda target:(logical/target.relative_to(previous)).relative_to(root).as_posix()
     ids=PHASE12_IDS if phase12 else IDS
     version=PHASE12_VERSION if phase12 else VERSION
     if directory.exists():raise ValueError('El experimento ya existe; no se sobrescribe')
@@ -39,7 +42,8 @@ def prepare(root,name,*,phase12=False):
     config='config/autonomous_phase12.json' if phase12 else 'config/autonomous_phase11.json'
     policy=p.validate(s.read(root/config))
     if policy['version']!=(p.PHASE12 if phase12 else p.PHASE11):raise ValueError('Politica incompatible con la fase solicitada')
-    metrics={r['case_id']:r for r in csv.DictReader((previous/'metrics.csv').open(encoding='utf-8-sig')) if r['arm']=='corrected'}
+    with (previous/'metrics.csv').open(encoding='utf-8-sig') as stream:
+        metrics={r['case_id']:r for r in csv.DictReader(stream) if r['arm']=='corrected'}
     references=[]
     for c in cases:
         pid=c['data']['project']['project_id'];iid=c['indicator_id'];result=previous/'corrected/results'/pid/(iid+'.json')
@@ -51,16 +55,16 @@ def prepare(root,name,*,phase12=False):
             decision=bundle['row']['decision'] if bundle else None,
             confidence=bundle['row']['confidence_raw_score'] if bundle else None,
             criterion_assessments=bundle['row']['criterion_assessments'] if bundle else None,
-            result_path=result.relative_to(root).as_posix() if bundle else None,
+            result_path=key(result) if bundle else None,
             evidence_limited_calls=sum(observations),reference_status='PENDING_HUMAN_REVIEW',
             provenance='PREVIOUS_MODEL_OBSERVATION_NOT_GROUND_TRUTH'))
         # Bind all previous attempts/results/timings for the selected cases.
         paths=list((previous/'corrected/attempts'/pid/iid).rglob('*'))
         paths += [result,previous/'corrected/timing'/(c['case_id']+'.json')]
         for target in paths:
-            if target.is_file():origins[target.relative_to(root).as_posix()]=s.sha(target)
+            if target.is_file():origins[key(target)]=s.sha(target)
     for filename in ('manifest.json','metrics.csv','authorization.json'):
-        target=previous/filename;origins[target.relative_to(root).as_posix()]=s.sha(target)
+        target=previous/filename;origins[key(target)]=s.sha(target)
     directory.mkdir(parents=True)
     s.write(directory/'assets/cases.json',cases)
     s.write(directory/'assets/previous_corrected.json',references)

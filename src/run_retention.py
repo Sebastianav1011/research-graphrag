@@ -166,6 +166,10 @@ def plan(root, policy):
         meta=read_json(root/locator)
         official.update(v for field,v in meta.items() if field in ('run_id','layer1_run_id','layer2_run_id','layer3_run_id') and isinstance(v,str))
     pinned.update(k for k in runs if k.split('/')[-1] in official)
+    # Checkpoints backing registered shared knowledge versions are dependencies.
+    from knowledge_store import registered_locations
+    backing=registered_locations(root)
+    pinned.update(k for k,p in runs.items() if p.resolve() in backing)
     # Historical comparators can require a run even when it is not a publication.
     # Match literal IDs/locators in executable code, not timestamps or similar names.
     for source in (root/'src',root/'scripts'):

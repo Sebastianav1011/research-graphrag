@@ -54,6 +54,20 @@ def location(root,name):
     return find_run(Path(root),Path(root)/'outputs/runs',name)
 
 
+def historical_run(root,locator):
+    """Real directory of a historical run locator (flat or provider bucket).
+
+    The logical locator remains the identity recorded in manifests; only reads
+    use the resolved path. An absent run fails here, before anything is written,
+    instead of producing empty globs or a FileNotFoundError mid-preparation.
+    """
+    from run_paths import relocate
+    path=relocate(Path(root)/locator)
+    if not path.is_dir():
+        raise ValueError(f'Dependencia historica ausente: {locator}; no se escribe ningun resultado')
+    return path
+
+
 def synthetic(pid,iid,text,source_hash):
     fields=dict.fromkeys(('title','summary','methodology','objectives','expected_results','keywords'),'')
     fields['summary']=text
@@ -74,12 +88,16 @@ def prepare(root,name):
     started=time.perf_counter()
     root=Path(root).resolve();directory=location(root,name)
     if directory.exists():raise ValueError('El experimento ya existe; no se sobrescribe')
-    source=root/'outputs/runs'/HISTORY/'autonomous/main';old=s.read(source/'manifest.json')
+    # Read from the resolved run; record the unchanged logical locator as identity.
+    logical=root/'outputs/runs'/HISTORY/'autonomous/main'
+    source=historical_run(root,'outputs/runs/'+HISTORY)/'autonomous/main';old=s.read(source/'manifest.json')
     binding=s.read(source/'graph.binding.json')
-    if s.sha(source/'candidate_index.sqlite')!=binding['index_sha256']:
+    index=source/'candidate_index.sqlite'
+    if not index.is_file():raise ValueError('Dependencia historica ausente: '+(logical/'candidate_index.sqlite').relative_to(root).as_posix())
+    if s.sha(index)!=binding['index_sha256']:
         raise ValueError('Indice historico incompatible con graph.binding.json')
     # Read-only historical artifacts; never invoke lifecycle or open writable queue.
-    db=sqlite3.connect((source/'candidate_index.sqlite').resolve().as_uri()+'?mode=ro',uri=True)
+    db=sqlite3.connect(index.resolve().as_uri()+'?mode=ro',uri=True)
     cases=[];origins={}
     try:
         for pid,iid in REAL:
@@ -93,7 +111,7 @@ def prepare(root,name):
             if len(data['candidates'])!=1:raise ValueError('Candidato historico no univoco')
             cases.append(dict(case_id=pid+'__'+iid,indicator_id=iid,origin='INSTITUTIONAL_OBSERVATION',data=data,
                 reference=dict(status='PENDING_HUMAN_REVIEW',decision=None),design_target=None))
-            origins[path.relative_to(root).as_posix()]=s.sha(path)
+            origins[(logical/ref['path']).relative_to(root).as_posix()]=s.sha(path)
     finally:db.close()
     directory.mkdir(parents=True)
     s.write(directory/'assets/synthetic_sources.json',[dict(project_id=pid,indicator_id=iid,text=text,synthetic=True) for pid,iid,target,text in CONTROLS])
@@ -108,9 +126,8 @@ def prepare(root,name):
         writer.writeheader();writer.writerows(dict(case_id=c['case_id'],status='PENDING_HUMAN_REVIEW') for c in cases)
     code=runtime_files(root)
     code['scripts/compare_evaluation.py']=s.sha(root/'scripts/compare_evaluation.py')
-    origins[(source/'manifest.json').relative_to(root).as_posix()]=s.sha(source/'manifest.json')
-    origins[(source/'candidate_index.sqlite').relative_to(root).as_posix()]=s.sha(source/'candidate_index.sqlite')
-    origins[(source/'graph.binding.json').relative_to(root).as_posix()]=s.sha(source/'graph.binding.json')
+    for name in ('manifest.json','candidate_index.sqlite','graph.binding.json'):
+        origins[(logical/name).relative_to(root).as_posix()]=s.sha(source/name)
     # Source bytes, not only extracted inputs, remain bound to approval.
     for case in cases[:16]:
         for field in case['data']['project']['field_provenance'].values():
@@ -152,7 +169,8 @@ def prepare(root,name):
 
 def offline_synthesis(root,directory):
     """Replay budgets only: historical judgments are NOT new accepted assessments."""
-    source=Path(root)/'outputs/runs'/HISTORY/'autonomous/main';old=s.read(source/'manifest.json')
+    logical=Path(root)/'outputs/runs'/HISTORY/'autonomous/main'
+    source=historical_run(root,'outputs/runs/'+HISTORY)/'autonomous/main';old=s.read(source/'manifest.json')
     policy=s.read(directory/'corrected/manifest.json')['policy'];rows=[]
     for pid,iid in REAL[:8]:
         data=s.read(source/old['projects'][pid]['path']);requests=[];judgments=[];evidence=[];receipts={}
@@ -162,7 +180,7 @@ def offline_synthesis(root,directory):
             step=call.parents[3]/'step.json';response=call.parent/'response.json';item=s.read(response)['assessments'][0]
             requests.append(s.read(step)['request']);base=len(evidence);evidence+=item['evidence']
             judgments += [{**c,'evidence_indices':[i+base for i in c['evidence_indices']]} for c in item['criterion_assessments']]
-            for path in (call,step,response):receipts[path.relative_to(root).as_posix()]=s.sha(path)
+            for path in (call,step,response):receipts[(logical/path.relative_to(source)).relative_to(root).as_posix()]=s.sha(path)
         evidence,judgments=phase1.merge(evidence,judgments)
         request=phase1.synthesis(data['project'],old['profiles'][iid],old['rubrics'][iid],requests,judgments,evidence)
         schema=p.schema(data['project']['fields'],policy,decision_only=True)

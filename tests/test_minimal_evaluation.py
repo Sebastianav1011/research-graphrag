@@ -13,9 +13,14 @@ from tests.test_autonomous_execution import environment
 from tests.test_context_budget import corpus
 from tests.test_ollama_provider import sample
 
+from tests import historical
+
 ROOT=Path(__file__).resolve().parents[1]
-CASES={c['case_id']:c for c in s.read(ROOT/m.PREVIOUS/'assets/cases.json') if c['case_id'] in m.IDS}
-MANIFEST=s.read(ROOT/m.PREVIOUS/'corrected/manifest.json')
+# Read lazily from the resolved historical run: nothing is read at import time.
+CASES=historical.Lazy(lambda:{c['case_id']:c for c in s.read(historical.require(m.PREVIOUS)/'assets/cases.json') if c['case_id'] in m.IDS})
+MANIFEST=historical.Lazy(lambda:s.read(historical.require(m.PREVIOUS)/'corrected/manifest.json'))
+COMPACTED_MINIMAL='outputs/runs/run_institutional_minimal_3x3_20261102'  # compacted by retention
+MINIMAL_V1='outputs/runs/minimal_3_v1'
 
 
 def answer(case):
@@ -94,7 +99,9 @@ def test_existing_categories_do_not_force_all_criteria_to_follow_global_decision
 
 
 def test_title_only_clear_is_rejected_without_reclassifying_evidence():
-    root=ROOT/'outputs/runs/run_institutional_minimal_3x3_20261102/autonomous/main'
+    """Historical replay (opt-in). The rule itself is covered synthetically in
+    test_title_only_clear_rule_is_enforced_on_synthetic_evidence."""
+    root=historical.require(COMPACTED_MINIMAL,compacted=True)/'autonomous/main'
     step=s.read(root/'attempts/PROJ_4636/TEC-03/minimal/1/step.json')
     manifest=s.read(root/'manifest.json');reg=step['request']['evidence_registry']
     raw=s.read(root/'attempts/PROJ_4636/TEC-03/minimal/1/transport/PROJ_4636/attempt_1/response.raw.txt')
@@ -117,7 +124,7 @@ def test_title_only_clear_is_rejected_without_reclassifying_evidence():
 def test_historical_v4_temporal_errors_are_prevented_by_enum_not_python_relabeling():
     for cid in m.IDS[:2]:
         case=CASES[cid];iid=case['indicator_id'];pid=case['data']['project']['project_id'];r=MANIFEST['rubrics'][iid]
-        raw=s.read(ROOT/m.PREVIOUS/'corrected/attempts'/pid/iid/'r0_full/1/transport'/pid/'attempt_1/response.raw.txt')['assessments'][0]
+        raw=s.read(historical.require(m.PREVIOUS)/'corrected/attempts'/pid/iid/'r0_full/1/transport'/pid/'attempt_1/response.raw.txt')['assessments'][0]
         assert raw['decision']=='SUPPORTED' and all(e['stage']=='CONTEXT' for e in raw['evidence'])
         proposed=answer(case);proposed['criteria']['C02']['judgment']='CLEAR__CONTEXT'
         assert list(Draft202012Validator(m.schema(r,m.registry(case['data'],iid))).iter_errors(proposed))
@@ -421,9 +428,9 @@ def test_historical_negative_clarification_scope_end_to_end(tmp_path,monkeypatch
     outer=comparison.verify(ROOT,directory,authorized=False)
     assert outer['cases']==1 and outer['case_ids']==[cid]
     assert comparison.case_inputs(ROOT,directory,outer)==[CASES[cid]]
-    historical=ROOT/'outputs/runs/minimal_3_v1/corrected/attempts'/pid/iid/'minimal/1'
-    raw=s.read(historical/'transport'/pid/'attempt_1/response.raw.txt')
-    issues=s.read(historical/'diagnosis.json')['issues']
+    previous=historical.require(MINIMAL_V1)/'corrected/attempts'/pid/iid/'minimal/1'
+    raw=s.read(previous/'transport'/pid/'attempt_1/response.raw.txt')
+    issues=s.read(previous/'diagnosis.json')['issues']
     assert issues[0]['criterion_ids']==['C01'] and m.question(MANIFEST['rubrics'][iid],raw,issues)==['C01']
     comparison.authorize(ROOT,'three',prepared['manifest_sha256'])
     def replay(data,value,n):
@@ -575,7 +582,7 @@ def test_institutional_historical_answers_and_mixed_diagnostic_routing(tmp_path,
     import sqlite3
     from autonomous_execution.engine import JobError
     from layer4_evaluation.indicators.validation_diagnostics import semantic_issues
-    history=ROOT/'outputs/runs/run_institutional_minimal_3x3_20261102/autonomous/main'
+    history=historical.require(COMPACTED_MINIMAL,compacted=True)/'autonomous/main'
     manifest=s.read(history/'manifest.json');source=history/'attempts'/pid/iid/'minimal/1'
     step=s.read(source/'step.json');request=step['request']
     answer=s.read(source/'transport'/pid/'attempt_1/response.raw.txt')
@@ -583,7 +590,7 @@ def test_institutional_historical_answers_and_mixed_diagnostic_routing(tmp_path,
     assert not list(Draft202012Validator(step['schema']).iter_errors(answer))
     sent=s.read(source/'transport'/pid/'attempt_1/request.json')
     assert sent['messages'][0]['content']==request['prompt'] and sent['format']==step['schema']
-    assert manifest['prompts']['semantic']==s.read(ROOT/'outputs/runs/minimal_3_v1/corrected/manifest.json')['prompts']['semantic']
+    assert manifest['prompts']['semantic']==s.read(historical.require(MINIMAL_V1)/'corrected/manifest.json')['prompts']['semantic']
     data=s.read(history/manifest['projects'][pid]['path'])
     connection=sqlite3.connect((history/'candidate_index.sqlite').as_uri()+'?mode=ro',uri=True)
     try:data['candidates']=[json.loads(r[0]) for r in connection.execute("SELECT value FROM rows WHERE kind='candidates' AND pid=?",(pid,))]

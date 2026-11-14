@@ -1,5 +1,6 @@
 """CLI orchestration; existing layer implementations operate inside a private root."""
 from run_paths import file_path as run_file
+from knowledge_store import knowledge_workspace, evaluation_dir
 import argparse
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -84,6 +85,8 @@ def lock(folder):
 
 def graph_configuration(root, run):
     """Bind GraphRAG to a prepared knowledge checkpoint without building embeddings."""
+    if read(run_file(run, 'run.json')).get('knowledge_ref'):
+        return  # Shared versions are sealed with their own GraphRAG configuration.
     workspace = run / 'workspace'
     if not (workspace / 'config/layer3.yaml').exists():
         layer3 = yaml.safe_load(layer_config(root, 4).read_text(encoding='utf-8'))
@@ -112,7 +115,7 @@ def graph(root, run, build=False):
     if check(root, run)['status'] != 'PREPARED':
         raise ValueError('Ejecutar knowledge antes de GraphRAG')
     from layer3_graphrag.pipeline import run as graphrag
-    workspace = run / 'workspace'
+    workspace = knowledge_workspace(run)
     graph_configuration(root, run)
     config_path = workspace / 'config/layer3.yaml'
     config = yaml.safe_load(config_path.read_text(encoding='utf-8'))
@@ -137,10 +140,28 @@ def validated_graph(root, run):
     from layer3_graphrag.embeddings import create_provider
     from layer3_graphrag.pipeline import load_artifacts
     from layer3_graphrag.validate_inputs import validate_inputs
-    workspace = run / 'workspace'
+    workspace = knowledge_workspace(run)
     config, _ = load_config(workspace)
     snapshot = validate_inputs(workspace, config)
     manifest, _, _ = load_artifacts(workspace, snapshot, config, create_provider(config['embeddings']))
+    return manifest
+
+
+def register_built_knowledge(root, run, request):
+    """After a complete, verified BASE build: register it in place and activate it.
+
+    The previous active version stays active until this point; a failure during
+    the build never reaches here. Nothing is copied or moved.
+    """
+    import knowledge_store
+    state = read(run_file(run, 'run.json'))
+    if (state.get('configuration', {}).get('knowledge_scope') != 'BASE_GLOBAL_V1' or state.get('knowledge_ref')
+            or state.get('global_reuse')):
+        return None
+    manifest = knowledge_store.register(root, run, activate=True)
+    request['knowledge_version'] = dict(version_id=manifest['version_id'], fingerprint=manifest['fingerprint'],
+        location=manifest['location'], storage=manifest['storage'])
+    write(run_file(run, 'execution.json'), request)
     return manifest
 
 
@@ -148,13 +169,13 @@ def engine(root, run):
     import importlib
     from layer4_evaluation import live_execution
     module = importlib.reload(live_execution)
-    module.BASE = run / 'layer5_results' if (run / 'layer5_results').exists() else run / 'workspace/outputs/layer4'
+    module.BASE = evaluation_dir(run)
     return module
 
 
 def projects_without_evidence(run, selected):
     """Isolate missing input before batching; never classify title-only projects."""
-    base = run / 'workspace/outputs/layer2'
+    base = knowledge_workspace(run) / 'outputs/layer2'
     projects = pq.read_table(base / 'canonical/proyectos.parquet').to_pylist()
     sections = pq.read_table(base / 'knowledge/source_sections.parquet').to_pylist()
     fields = {}
@@ -191,6 +212,17 @@ def evaluation_settings(root, module):
     return settings, resources
 
 
+def pinned_tokenizer(root):
+    """Pinned Qwen tokenizer descriptor, verified by SHA-256; no model is loaded."""
+    descriptor=read(root/'config/qwen_tokenizer.json')
+    path=(root/descriptor['path']).resolve()
+    if not path.is_file():
+        raise ValueError('Tokenizer Qwen fijado ausente: uv run python scripts/prepare_qwen_tokenizer.py')
+    if sha(path)!=descriptor['sha256']:
+        raise ValueError('Tokenizer local distinto del fijado en config/qwen_tokenizer.json')
+    return descriptor|dict(path=str(path))
+
+
 def prepare_evaluation(root, run, selected):
     from layer4_evaluation.indicators.context_budget import VERSION as context_version, prepare_contexts
     from layer4_evaluation.indicators import assessment_v3 as v3
@@ -200,7 +232,7 @@ def prepare_evaluation(root, run, selected):
     requested = read(request_path) if request_path.is_file() else {}
     policy=requested.get('evaluation_policy',state['configuration'].get('evaluation_policy',{}))
     provider_config = llm_configuration(requested.get('llm', state['configuration'].get('llm')))
-    workspace = run / 'workspace'
+    workspace = knowledge_workspace(run)  # Read-only knowledge; evaluation writes under evaluation_dir(run).
     projects = pq.read_table(workspace / 'outputs/layer2/canonical/proyectos.parquet').to_pylist()
     if not selected:
         if len(projects) > 2:
@@ -303,11 +335,15 @@ def prepare_evaluation(root, run, selected):
         # Keep existing cached retrieval unchanged in fragment mode.
         scoped_candidates,retrieval_report=from_published_cache(workspace,inputs,settings['profiles'],source_chunks,
             **({'relational_contexts':relational_contexts} if relational_contexts is not None else {}))
+    # Retrieved contexts are budgeted with the pinned, hash-verified Qwen
+    # tokenizer; RUNTIME_DRIFT is enforced by the transport before each call.
+    tokenizer=pinned_tokenizer(root) if policy.get('context_mode')==v3.RETRIEVED_CONTEXT else None
     requests, context_report = prepare_contexts(inputs, settings['profiles'], settings['rubrics'], provider_config,
         scoped_candidates,source_chunks,sections,
         evidence_references=True, assessment_version=v3.SK_VERSION,
         evaluation_mode=policy.get('evaluation_mode'),context_mode=policy.get('context_mode'),
-        relational_contexts=relational_contexts)
+        relational_contexts=relational_contexts,
+        **({'tokenizer':tokenizer} if tokenizer is not None else {}))
     context_report['project_scoped_retrieval']=retrieval_report
     write(directory / 'context_selection.json', context_report)
     review['context_selection'] = context_report
@@ -333,6 +369,7 @@ def prepare_evaluation(root, run, selected):
     plan = {k: settings[k] for k in ('profiles', 'rubrics', 'rules', 'budgets', 'observed_character_ratio', 'discovery_version', 'assessment_version')}
     for path in (root/'src/layer4_evaluation/indicators/openai_provider.py',
                  root/'src/layer4_evaluation/indicators/evidence_references.py',
+                 root/'src/layer4_evaluation/indicators/token_budget.py',root/'config/qwen_tokenizer.json',
                  root/'src/layer4_evaluation/indicators/scoped_retrieval.py',run_file(run, 'model.binding.json')):
         if path.exists():source_hashes[path.relative_to(root).as_posix()]=sha(path)
     plan.update(version='MANUAL_RAW_V3_3_OLLAMA_V1', execution_id=uuid.uuid4().hex, projects=inputs,
@@ -402,7 +439,7 @@ def export(root, run, *, offline=False, output_contract=None):
     coverage, valid_results=[], []
     evaluated_projects, blocked_results, complete_projects = set(), set(), set()
     export_exclusions=[];indicator_ids=set()
-    all_projects = {p['source_project_id'] for p in pq.read_table(run / 'workspace/outputs/layer2/canonical/proyectos.parquet').to_pylist()}
+    all_projects = {p['source_project_id'] for p in pq.read_table(knowledge_workspace(run) / 'outputs/layer2/canonical/proyectos.parquet').to_pylist()}
     request = read(run_file(run, 'execution.json')) if (run_file(run, 'execution.json')).exists() else {}
     target_projects = set(request['project_ids']) if request.get('selection') and request.get('project_ids') is not None else all_projects
     if not target_projects or not target_projects <= all_projects:
@@ -434,6 +471,12 @@ def export(root, run, *, offline=False, output_contract=None):
                     s.get('context_limits',{}).get(iid) or 'PENDING')
                 coverage.append(dict(siap_id=p['siap_id'],indicator_id=iid,status=status,
                     decision=decisions.get(iid),project_complete=s['complete']))
+                # Audit only: the prepared context state travels with every
+                # indicator, so evidence limits are never hidden behind VALID.
+                context=plan.get('context_requests',{}).get(s['project_id'],{}).get(iid,{}).get('context_selection')
+                if context:
+                    coverage[-1].update(context_status=context.get('status'),evidence_limited=context.get('evidence_limited'),
+                        **({'truncation':context['truncation']} if 'truncation' in context else {}))
             for row in s['rows']:
                 iid = row['indicator_id']
                 assessment = module.assessment_from_row(row)
@@ -466,8 +509,11 @@ def export(root, run, *, offline=False, output_contract=None):
                     rows.append(record)
                     csv_records[pair] = consumer
                     codes_by_pair[pair] = codes
+                    context=plan.get('context_requests',{}).get(p['project_id'],{}).get(iid,{}).get('context_selection',{})
                     lineage.append(dict(siap_id=p['siap_id'], indicator_id=iid, batch=directory.name, evidence=locations,
-                        raw_fields={e['field']: p['field_provenance'][e['field']]['raw_sources'] for e in locations}))
+                        raw_fields={e['field']: p['field_provenance'][e['field']]['raw_sources'] for e in locations},
+                        context_status=context.get('status'),evidence_limited=context.get('evidence_limited'),
+                        **({'truncation':context['truncation']} if 'truncation' in context else {})))
     # Prepared batches may not yet have run when a cooperative interruption occurs.
     covered={(c['siap_id'],c['indicator_id']) for c in coverage}
     for pid in sorted(target_projects):
@@ -644,7 +690,7 @@ def execution_status(root, config_path='config/pipeline_manual.json', run_id=Non
     stages = dict(preprocessing='VERIFIED', knowledge='VERIFIED' if state['status'] == 'PREPARED' else 'PENDING',
                   graphrag='PENDING', evaluation='PENDING', export='PENDING')
     batches = {}
-    publication = run / 'workspace/outputs/layer3/publication/_manifest.json'
+    publication = knowledge_workspace(run) / 'outputs/layer3/publication/_manifest.json'
     if publication.exists():
         validated_graph(root, run)
         stages['graphrag'] = 'VERIFIED'
@@ -659,14 +705,17 @@ def execution_status(root, config_path='config/pipeline_manual.json', run_id=Non
         if sha(run_file(run, 'resultado_indicadores.xlsx')) != saved['excel_sha256']:
             raise ValueError('Excel publicado modificado')
         stages['export'] = saved['status'] + '_HASH_VERIFIED'
-    return dict(status='VERIFIED', run_id=run.name, location=str(run), stages=stages, evaluations=batches,
+    knowledge = dict(storage='SHARED_REFERENCE', reference=state['knowledge_ref'], location=str(knowledge_workspace(run).parent)) \
+        if state.get('knowledge_ref') else dict(storage='RUN_LOCAL_COPY' if state.get('global_reuse') else 'RUN_LOCAL_BUILD',
+            source_run=state.get('global_reuse', {}).get('source_run'))
+    return dict(status='VERIFIED', run_id=run.name, location=str(run), stages=stages, evaluations=batches, knowledge=knowledge,
                 sources=state['raw_path'], progress=read(run_file(run, 'progress.json')) if (run_file(run, 'progress.json')).exists() else None,
                 limitations=['Evaluacion actual: PROJECT; ARTICLE pendiente', 'Exportador actual: sin puente territorial nuevo verificado'])
 
 
 def scope_projects(root, run, selection, requested=None):
     """Scope results using canonical identities and explicit field provenance only."""
-    folder = run / 'workspace/outputs/layer2/canonical'
+    folder = knowledge_workspace(run) / 'outputs/layer2/canonical'
     rows = pq.read_table(folder / 'proyectos.parquet').to_pylist()
     selected = [row['source_project_id'] for row in rows]
     if selection['mode'] in ('file', 'delivery'):
@@ -997,9 +1046,12 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
                 if config.get('knowledge_scope')=='BASE_GLOBAL_V1':
                     config.pop('processing_scope',None)
             if not prepared and config.get('base_knowledge_action')=='reuse':
+                # Registry of shared versions, not a scan of historical runs.
                 candidate=processing.reuse_global_base(root,run,raw,config,dataset,probe=True,require_graph=True)
                 if not candidate:
-                    message='No hay conocimiento global BASE compatible (fuentes, contratos, embeddings o grafo). Puede reconstruir con --knowledge-action rebuild.'
+                    reason=getattr(processing.reuse_global_base,'last_reason',None)
+                    message=('No hay conocimiento global BASE compatible en outputs/shared/base (fuentes, contratos, embeddings o grafo)'
+                        +(f': {reason}' if reason else '')+'. Puede reconstruir con --knowledge-action rebuild.')
                     if confirm is None or confirm('knowledge_rebuild',dict(message=message)) is not True:
                         return progress('KNOWLEDGE_REBUILD_REQUIRED',message=message)
                     config['base_knowledge_action']='rebuild'
@@ -1041,8 +1093,10 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
                 if approval:verify_execution_approval(root,approval)
                 if run_file(run,'stop.request.json').exists():
                     return progress('INTERRUPTED',message='Detencion solicitada; checkpoints conservados')
-                reused=read(run_file(run,'run.json')).get('global_reuse',{})
-                if current in ('knowledge','graphrag') and reused and (current=='knowledge' or reused.get('graph_reused')):
+                current_state=read(run_file(run,'run.json'))
+                reused=current_state.get('global_reuse',{})
+                if current in ('knowledge','graphrag') and (current_state.get('knowledge_ref') or
+                        reused and (current=='knowledge' or reused.get('graph_reused'))):
                     if current=='graphrag':validated_graph(root,run)
                     progress('STAGE_REUSED')
                     continue
@@ -1050,8 +1104,9 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
                         (current=='knowledge' and state['status']=='PREPARED')):
                     progress('STAGE_REUSED')
                     continue
-                if resume and current=='graphrag' and (run/'workspace/outputs/layer3/publication/_manifest.json').exists():
+                if resume and current=='graphrag' and (knowledge_workspace(run)/'outputs/layer3/publication/_manifest.json').exists():
                     validated_graph(root,run)
+                    register_built_knowledge(root,run,request)  # Idempotent: completes an interrupted activation.
                     progress('STAGE_REUSED')
                     continue
                 # Persist the requested target before a resumable stage can fail.
@@ -1080,7 +1135,7 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
                     if check(root, run)['status'] != 'PREPARED':
                         raise ValueError('Conocimiento no preparado')
                 elif current == 'graphrag':
-                    if not (run / 'workspace/outputs/layer3/publication/_manifest.json').exists() and not approve_build and not approval:
+                    if not (knowledge_workspace(run) / 'outputs/layer3/publication/_manifest.json').exists() and not approve_build and not approval:
                         write(run_file(run, 'execution.json'), request)
                         approved = confirm is not None and confirm('build', dict(review=str(run / 'preprocess/review.json'),
                             note='Construir embeddings locales BGE-M3 e indices con las fuentes de apoyo; no se descargan modelos')) is True
@@ -1088,6 +1143,7 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
                             return progress('BUILD_APPROVAL_REQUIRED', message='Revisar preprocess/review.json y autorizar embeddings locales')
                     graph(root, run, build=True)
                     validated_graph(root, run)
+                    register_built_knowledge(root, run, request)
                 else:
                     check(root, run)
                     validated_graph(root, run)
@@ -1212,12 +1268,12 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
                                 warnings=[dict(code=w['code'], count=w.get('count', len(w.get('projects', w.get('groups', [])))))
                                           for w in report['warnings']],
                                 inference_calls=0, embeddings_created=0)
-            return progress('COMPLETE', through=target, results=str(run / 'workspace/outputs'),
+            return progress('COMPLETE', through=target, results=str(evaluation_dir(run)),
                             excel=str(run_file(run, 'resultado_indicadores.xlsx')) if target == 'export' else None,
                             **(dict(result=result) if target=='export' else evaluation_report),
                             limitations=['Evaluacion PROJECT; ARTICLE pendiente. Exportacion sin puente territorial nuevo verificado.'])
         except KeyboardInterrupt:
-            if any((run/'workspace/outputs/layer4').glob('batch_*')):
+            if any(evaluation_dir(run).glob('batch_*')):
                 try:export(root,run)
                 except Exception:write(run/'partial_export.pending.json',dict(reason='Reintentar uv run python run.py export --run-id '+name))
             progress('INTERRUPTED', message='Reanudar el mismo run; conservar checkpoints y claims del proveedor')
@@ -1225,7 +1281,7 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
         except Exception as exc:
             if run.is_dir():
                 write(run_file(run,'failure.json'), dict(stage=current,error=str(exc),error_type=type(exc).__name__))
-            if model_binding['llm']['provider']=='openai' and any((run/'workspace/outputs/layer4').glob('batch_*')):
+            if model_binding['llm']['provider']=='openai' and any(evaluation_dir(run).glob('batch_*')):
                 try:
                     partial_result=export(root,run)
                     if 'API_BUDGET' in str(exc):return progress('PARTIAL',result=partial_result,reason='API_BUDGET')
@@ -1300,7 +1356,7 @@ def main(argv=None):
                 candidates = [d for d in module.BASE.glob('batch_*') if (d / 'plan.json').exists()]
                 if not candidates:
                     raise ValueError('Ejecutar review y leer review.txt antes de evaluate')
-                selected = args.project_id or [p['source_project_id'] for p in pq.read_table(run / 'workspace/outputs/layer2/canonical/proyectos.parquet').to_pylist()]
+                selected = args.project_id or [p['source_project_id'] for p in pq.read_table(knowledge_workspace(run) / 'outputs/layer2/canonical/proyectos.parquet').to_pylist()]
                 batch = batch_name(selected)
                 if not (module.BASE / batch / 'review.txt').exists():
                     raise ValueError('Falta revision de este lote: ejecutar review con los mismos --project-id')
@@ -1309,7 +1365,7 @@ def main(argv=None):
                 result = export(ROOT, run)
             else:
                 result = graph(ROOT, run) if state['status'] == 'PREPARED' else dict(status='PREPROCESSING_VERIFIED', counts=state['counts'])
-                if (run / 'workspace/outputs/layer3/publication/_manifest.json').exists():
+                if (knowledge_workspace(run) / 'outputs/layer3/publication/_manifest.json').exists():
                     result['graph_manifest'] = validated_graph(ROOT, run)['layer3_run_id']
                 module = engine(ROOT, run)
                 result['evaluations'] = {d.name: module.summary(module.verify_run(d)) for d in module.BASE.glob('batch_*')}
