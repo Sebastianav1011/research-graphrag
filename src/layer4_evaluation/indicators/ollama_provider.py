@@ -121,18 +121,47 @@ def corrective_request(request, schema, settings, issues=None):
     if not marker:
         raise ValueError('Solicitud correctiva sin INPUT_JSON')
     prefix = prefix.split('\nCORRECTIVE_JSON_RULES:\n', 1)[0]
-    feedback = ('\nERRORES: ' + '; '.join(sorted({i['category'] for i in issues}))
-                if issues else '')
-    revised['prompt'] = prefix + CORRECTION + feedback + '\n' + marker + payload
+    from .evidence_references import active
+    if active(request):
+        # Versioned separately from legacy literal prompts: old call hashes can
+        # still be reconstructed byte for byte.
+        prefix = prefix.split('\nREFERENCE_CORRECTION:\n', 1)[0]
+        details = [{k:i[k] for k in ('category','path','rule','criterion_id','criterion_ids',
+            'evidence_indices','evidence_count','temporal_requirement','observed_stages','missing_fields','correction_hint') if k in i}
+            for i in (issues or [])]
+        for detail in details:
+            if 'path' in detail:
+                detail['path'] = detail['path'].replace('.evidence_indices', '.evidence_refs')
+        for count in range(len(details), 0, -1) if details else [0]:
+            revised['prompt'] = (prefix + '\nREFERENCE_CORRECTION:\nCorrige el JSON completo segun estas reglas fallidas. '
+                'Conserva IDs del INPUT_JSON; evidence_refs usa fragment_id y stage, nunca indices ni citas.\nERRORES: '
+                + json.dumps(details[:count], ensure_ascii=False, separators=(',', ':'))
+                + (f'\nOtros errores pendientes: {len(details)-count}' if count<len(details) else '')
+                + '\n' + marker + payload)
+            if estimate(revised['prompt'], schema, settings,
+                    tokenizer=request.get('context_budget', {}).get('tokenizer'),
+                    conservative=request.get('context_budget',{}).get('conservative',False))['fits']:
+                break
+    else:
+        feedback = ('\nERRORES: ' + '; '.join(sorted({i['category'] for i in issues}))
+                    if issues else '')
+        correction = CORRECTION
+        from .assessment_v3 import SK_VERSION, SK_STATE_INSTRUCTIONS
+        if request.get('assessment_version') == SK_VERSION:
+            correction = correction.replace(
+                'NOT_SUPPORTED: todos NOT_DEMONSTRATED, strength=0. Apoyo parcial: INSUFFICIENT_EVIDENCE.',
+                SK_STATE_INSTRUCTIONS)
+        revised['prompt'] = prefix + correction + feedback + '\n' + marker + payload
     revised['context_budget'] = estimate(revised['prompt'], schema, settings,
-        tokenizer=request.get('context_budget', {}).get('tokenizer'))
+        tokenizer=request.get('context_budget', {}).get('tokenizer'),
+        conservative=request.get('context_budget',{}).get('conservative',False))
     return revised
 
 
 def context_guard(prompt, schema, settings, runtime=None, budget=None):
     if budget is not None:
         from .context_budget import estimate
-        actual = estimate(prompt, schema, settings,tokenizer=budget.get('tokenizer'))
+        actual = estimate(prompt, schema, settings,tokenizer=budget.get('tokenizer'),conservative=budget.get('conservative',False))
         if budget.get('tokenizer') and runtime:
             descriptor=budget['tokenizer']
             if any(descriptor[k]!=runtime[k] for k in ('model_metadata_sha256',)) or descriptor['model_digest']!=runtime['digest']:
@@ -287,9 +316,21 @@ class OllamaAssessmentProvider:
                 if exc.code == 'INVALID_ASSESSMENT' and attempt < self.corrective_retries:
                     if any(i.get('category') == 'INTERNAL_VALIDATION_ERROR' for i in self.calls[-1]['validation_issues']):
                         raise
-                    request = corrective_request(self.input_factory(project, indicators),
+                    revised = corrective_request(self.input_factory(project, indicators),
                         strict_json(self.schema.read_text(encoding='utf-8')), self.settings,
                         self.calls[-1]['validation_issues'])
+                    revised_output = output
+                    if revised.get('evidence_protocol') and revised['context_budget']['fits']:
+                        # A previous token-limit retry may have raised the output
+                        # allowance. Keep room for the specific corrective input.
+                        revised_output = min(output, self.settings['num_ctx'] - self.settings['context_margin_tokens']
+                            - revised['context_budget']['estimated_input_tokens'])
+                    if (self.settings['provider'] == 'ollama' and
+                            revised['prompt'] == request['prompt'] and revised_output == output):
+                        # The same failed correction with the same allowance is
+                        # not another recovery strategy. Keep its original error.
+                        raise
+                    request, output = revised, revised_output
                     continue
                 if exc.code != 'TOKEN_LIMIT' or attempt >= self.token_limit_retries:
                     raise
@@ -301,8 +342,11 @@ class OllamaAssessmentProvider:
                     input_tokens = max(input_tokens, observed)
                 available = self.settings['num_ctx'] - self.settings['context_margin_tokens'] - input_tokens
                 ceiling = min(max(output, self.settings['max_predict']), available)
-                if ceiling > output:
-                    output = min(output * 2, ceiling)
+                if ceiling <= output:
+                    # No additional output room: do not repeat a deterministically
+                    # truncated request at the same cap (including on the last tier).
+                    raise
+                output = min(output * 2, ceiling)
 
     def _evaluate_once(self, project, indicators, *, attempt=0, output=None, request=None):
         self.last_output = None
@@ -322,7 +366,7 @@ class OllamaAssessmentProvider:
         budget = request.get('context_budget')
         if budget and generation != self.settings:
             from .context_budget import estimate
-            budget = estimate(prompt, schema, generation, tokenizer=budget.get('tokenizer'))
+            budget = estimate(prompt, schema, generation, tokenizer=budget.get('tokenizer'),conservative=budget.get('conservative',False))
         context_guard(prompt, schema, generation, runtime, budget)
         payload = dict(model=self.settings['model'], messages=[dict(role='user', content=prompt)], format=schema,
                        stream=False, truncate=False, shift=False, keep_alive=self.settings['keep_alive'],
@@ -365,6 +409,10 @@ class OllamaAssessmentProvider:
             validation_stage = 'schema'
             Draft202012Validator(schema).validate(parsed)
             validation_stage = 'semantic'
+            from .evidence_references import active, materialize
+            if active(request):
+                save('selection.json', parsed)
+                parsed = materialize(request, parsed)
             self.wrapper_validator(parsed, project['project_id'], [i['indicator_id'] for i in indicators])
             save('response.json', parsed)
             self.last_output = parsed

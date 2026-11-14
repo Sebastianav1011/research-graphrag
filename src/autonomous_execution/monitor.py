@@ -49,6 +49,9 @@ def snapshot(directory):
             end=datetime.now().astimezone().isoformat() if active else worker.get('finished_at') or last['at']
             elapsed=max(0,(datetime.fromisoformat(end)-datetime.fromisoformat(worker['started_at'])).total_seconds())
         result=dict(status=state,projects_total=len(projects),
+            projects_processed=sum(bool(v) and all(j['status'] in ('PASS','BLOCKED','UNCERTAIN') for j in v) for v in groups.values()),
+            processing_complete=bool(jobs) and all(j['status'] in ('PASS','BLOCKED','UNCERTAIN') for j in jobs),
+            results_available=bool(passed),
             projects_with_partial_results=sum(0<sum(j['status']=='PASS' for j in v)<len(v) for v in groups.values()),
             **{'projects_'+k:categories[k] for k in ('completed','running','partial','failed','pending','without_jobs')},
             projects_with_errors=sum(any(j['status'] in ('BLOCKED','UNCERTAIN') for j in v) for v in groups.values()),
@@ -105,6 +108,7 @@ def render(r):
     rows=['GRAPHRAG — ESTADO DE EJECUCIÓN','',f"Run ID: {r.get('run_id','')}",f"Estado: {labels.get(r['status'],r['status'])}",'']
     for key,label in [('total','seleccionados'),('completed','completados'),('running','en proceso'),('partial','con resultados parciales'),('pending','pendientes'),('failed','fallidos sin resultados válidos')]:
         rows.append(f"Proyectos {label}: {r['projects_'+key]}")
+    rows.append(f"Proyectos procesados (incluidos los errores individuales): {r['projects_processed']}")
     rows.append(f"Proyectos sin trabajos LLM en el manifiesto: {r['projects_without_jobs']} (no se cuentan como evaluados)")
     rows.append(f"Proyectos con avance parcial, incluidos los activos: {r['projects_with_partial_results']}")
     rows += [f"Proyectos con errores (pueden ser parciales): {r['projects_with_errors']}",'',

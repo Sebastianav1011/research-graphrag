@@ -46,6 +46,8 @@ def describe_columns(headers, rows, mapping, catalog, selected=None, decisions=(
             item.update(role='excluded_sensitive', authorization='DENIED', reason=reason or 'SENSITIVE_HEADER')
         elif namespaces or field and (field.endswith('_id') or field in ('doi', 'eid', 'document_number')):
             item.update(role='identifier', authorization='METADATA_ONLY')
+        elif field in ('title','keywords'):
+            item.update(role='metadata',authorization='METADATA_ONLY')
         elif typed_metadata:
             item.update(role='metadata', authorization='METADATA_ONLY')
         elif blocked:

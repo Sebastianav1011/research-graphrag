@@ -172,5 +172,6 @@ def relationships(candidates, assignments, projects, articles, run_id):
 
 
 def write_parquet(path, rows, dataset):
-    table = pa.Table.from_pylist(rows, schema=arrow_schema(dataset))
+    table = pa.Table.from_pylist(rows, schema=arrow_schema(dataset,
+        allow_missing_title=dataset=='articulos' and any(r.get('title') is None for r in rows)))
     pq.write_table(table, path, compression="zstd")

@@ -72,8 +72,8 @@ def failed_batch(tmp_path, monkeypatch, corpus, sample):
     plan = dict(projects=[corpus.project], profiles=corpus.profiles, rubrics=corpus.rubrics,
         request_protocol=live.CONTEXT_VERSION, context_requests=requests, rules={}, source_hashes={},
         runtime=dict(provider='ollama', configuration=corpus.settings), requested_model=corpus.settings['model'],
-        execution_id='test', maximum_calls=48, total_token_reservation_cap=48*4096, timeout_seconds=600,
-        budgets=dict(assessment_reservation=4096, assessment_postcall_review_threshold=4096),
+        execution_id='test', maximum_calls=48, total_token_reservation_cap=48*corpus.settings['num_ctx'], timeout_seconds=600,
+        budgets=dict(assessment_reservation=corpus.settings['num_ctx'], assessment_postcall_review_threshold=corpus.settings['num_ctx']),
         discovery_version=live.gd.VERSION, assessment_version=v3.VERSION)
     for name,value in [('plan.json',plan),('cache.json',{}),('context_selection.json',report),
         ('review.json',dict(requests=requests, context_selection=report))]:

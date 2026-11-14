@@ -40,14 +40,16 @@ def fields(dataset):
     return FIELDS[dataset] | PROVENANCE
 
 
-def arrow_schema(dataset):
+def arrow_schema(dataset,*,allow_missing_title=False):
     types = {"string": pa.string(), "integer": pa.int64(), "boolean": pa.bool_(), "array": pa.list_(pa.string())}
     mandatory = NON_NULL[dataset] + ["record_source", "source_row", "etl_run_id", "provenance_json"]
+    if dataset=='articulos' and allow_missing_title:mandatory=[f for f in mandatory if f!='title']
     return pa.schema([pa.field(k, types[t], nullable=k not in mandatory) for k, t in fields(dataset).items()])
 
 
-def logical_schema(dataset):
+def logical_schema(dataset,*,allow_missing_title=False):
     mandatory = NON_NULL[dataset] + ["record_source", "source_row", "etl_run_id", "provenance_json"]
+    if dataset=='articulos' and allow_missing_title:mandatory=[f for f in mandatory if f!='title']
     properties = {}
     for field, kind in fields(dataset).items():
         prop = {"type": kind if field in mandatory else [kind, "null"]}

@@ -141,6 +141,7 @@ def reusable_result(root,source,manifest,job,data):
     from jsonschema import Draft202012Validator
     from . import minimal as m, policy as p
     from .engine import identity,result_row,gate
+    version=manifest.get('schema_version',m.v3.VERSION)
     pid,iid=job['pid'],job['iid'];directory=Path(source)/'autonomous/main'
     files={}
     def pin(path,expected):
@@ -172,8 +173,11 @@ def reusable_result(root,source,manifest,job,data):
         if (call['exit_status'] not in (0,'INVALID_ASSESSMENT') or native.get('done') is not True or native.get('done_reason')!='stop' or
             identity(call['runtime'])!=identity(manifest['runtime']) or json.loads(native['message']['content'])!=raw or
             sent['messages'][0]['content']!=step['request']['prompt'] or sent['format']!=step['schema']):raise ValueError('BATCH_TRANSCRIPT_INCOMPATIBLE')
-        Draft202012Validator(step['schema']).validate(raw)
+        # The transport can contain invalid siblings. Reuse requires this member's
+        # complete contract, alongside the unchanged original transport hashes.
+        if not isinstance(raw,dict) or set(raw)-set(step['schema']['properties']):raise ValueError('BATCH_ENVELOPE_INCOMPATIBLE')
         merged=raw[iid]
+        Draft202012Validator(m.schema(manifest['rubrics'][iid],registry,version=version)).validate(merged)
         if bundle.get('shared_initial'):
             prefix=f'attempts/{pid}/{iid}/clarification/1'
             step=s.read(artifact(prefix+'/step.json'))
@@ -186,10 +190,11 @@ def reusable_result(root,source,manifest,job,data):
                 step['request']['semantic_input']['previous']!=merged):raise ValueError('SHARED_CLARIFICATION_INCOMPATIBLE')
             selected=m.question(manifest['rubrics'][iid],merged,step['request']['semantic_input']['question']['issues'])
             if selected!=step['request']['semantic_input']['requested_criteria']:raise ValueError('SHARED_CLARIFICATION_SCOPE_CHANGED')
-            merged=dict(criteria={**merged['criteria'],**answer['criteria']},conclusion=answer['conclusion'],why=answer['why'])
+            merged=dict(criteria={**merged['criteria'],**answer['criteria']},conclusion=answer['conclusion'],why=answer['why'],
+                **({'strength_rubric':answer['strength_rubric']} if version==m.v3.SK_VERSION else {}))
         if merged!=bundle['semantic_answer']:raise ValueError('BATCH_MEMBER_INCOMPATIBLE')
-        Draft202012Validator(m.schema(manifest['rubrics'][iid],registry)).validate(merged)
-        if m.assemble(data['project'],iid,manifest['rubrics'][iid],registry,merged)!=bundle['wrapper']:raise ValueError('BATCH_DECISION_INCOMPATIBLE')
+        Draft202012Validator(m.schema(manifest['rubrics'][iid],registry,version=version)).validate(merged)
+        if m.assemble(data['project'],iid,manifest['rubrics'][iid],registry,merged,version=version)!=bundle['wrapper']:raise ValueError('BATCH_DECISION_INCOMPATIBLE')
         gate(data['project'],manifest['profiles'][iid],manifest['rubrics'][iid],bundle['request'],bundle['wrapper'])
         if result_row(data['project'],manifest['profiles'][iid],manifest['rubrics'][iid],bundle['wrapper'])!=bundle['row']:raise ValueError('BATCH_SCORE_INCOMPATIBLE')
         return bundle,files
@@ -212,11 +217,12 @@ def reusable_result(root,source,manifest,job,data):
         if stage=='minimal':
             if bundle['request']!=step['request']:raise ValueError('RESULT_REQUEST_INCOMPATIBLE')
             merged=raw
-        else:merged=dict(criteria={**merged['criteria'],**raw['criteria']},conclusion=raw['conclusion'],why=raw['why'])
+        else:merged=dict(criteria={**merged['criteria'],**raw['criteria']},conclusion=raw['conclusion'],why=raw['why'],
+            **({'strength_rubric':raw['strength_rubric']} if version==m.v3.SK_VERSION else {}))
     if call['exit_status']!=0 or merged!=bundle['semantic_answer']:raise ValueError('RESULT_RESPONSE_INCOMPATIBLE')
-    Draft202012Validator(m.schema(manifest['rubrics'][iid],registry)).validate(merged)
+    Draft202012Validator(m.schema(manifest['rubrics'][iid],registry,version=version)).validate(merged)
     project=data['project'];profile=manifest['profiles'][iid];rubric=manifest['rubrics'][iid]
-    if m.assemble(project,iid,rubric,registry,merged)!=bundle['wrapper']:raise ValueError('RESULT_DECISION_INCOMPATIBLE')
+    if m.assemble(project,iid,rubric,registry,merged,version=version)!=bundle['wrapper']:raise ValueError('RESULT_DECISION_INCOMPATIBLE')
     gate(project,profile,rubric,bundle['request'],bundle['wrapper'])
     if result_row(project,profile,rubric,bundle['wrapper'],manifest['llm']['provider'])!=bundle['row']:raise ValueError('RESULT_SCORE_INCOMPATIBLE')
     return bundle,files
@@ -255,8 +261,8 @@ def reuse_run(root,source_id,new_id,policy,*,batch_size=1):
             auth.get('authorized') is not True or auth.get('manifest_sha256')!=digest):raise ValueError('SOURCE_AUTHORIZATION_MISMATCH')
     scope.check(root,manifest['source_inventory']);current_catalog,catalog_files=catalog(root)
     if (manifest['profiles']!=current_catalog['profiles'] or manifest['rubrics']!=current_catalog['rubrics'] or
-            manifest['schema_version']!=v3.VERSION or manifest.get('evaluator')!=minimal.VERSION or
-            manifest['prompts']!=dict(version=minimal.VERSION,semantic=minimal.INSTRUCTIONS) or
+            manifest['schema_version']!=v3.SK_VERSION or manifest.get('confidence_version')!=v3.SK_CONFIDENCE_VERSION or manifest.get('evaluator')!=minimal.VERSION or
+            manifest['prompts']!=dict(version=minimal.VERSION,semantic=minimal.SK_INSTRUCTIONS) or
             manifest['policy']!=p.validate(policy)):
         raise ValueError('SOURCE_CATALOG_SCHEMA_POLICY_INCOMPATIBLE')
     origins=dict(manifest['files'])|catalog_files

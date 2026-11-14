@@ -154,6 +154,8 @@ def map_rows(rows, spec):
 def validate_columns(headers, spec, domain, settings, run_id, path):
     mapping = spec.get("mapping", {})
     required = settings["validation"]["required_columns"].get(domain, [])
+    if domain=='articulos' and spec.get('base_record_policy')=='BASE_VALID_ROWS_V1':
+        required=[f for f in required if f!='title']
     missing = [field for field in required if not any(header(c) in headers for c in source_columns(mapping.get(field, "")))]
     # Explicit configured mappings may not silently disappear.
     absent = [dest for dest, src in mapping.items() if not source_columns(src) or
@@ -189,6 +191,8 @@ def validate_rows(rows, domain, settings, run_id):
                                   row["_row"], None if domain == "investigadores" else source_id))
 
         for field in settings["validation"]["required_fields"].get(domain, []):
+            if domain=='articulos' and field=='title' and row.get('_spec',{}).get('base_record_policy')=='BASE_VALID_ROWS_V1':
+                continue  # BASE adapter already checked a trusted publication identifier.
             if official and field == 'source_project_id':
                 continue
             if not text(row.get(field)):

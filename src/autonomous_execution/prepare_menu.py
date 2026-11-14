@@ -16,20 +16,21 @@ from project_menu import select_projects, SelectionCancelled
 Cancelled = SelectionCancelled
 
 
-def choose(title, labels):
+def choose(title, labels, *, back_label='Cancelar',default=None):
     if not labels:
         raise ValueError('No hay opciones disponibles: '+title)
     while True:
         print('\n'+title)
         for number,label in enumerate(labels,1):
-            print(f'{number}. {label}')
-        print('0. Cancelar')
+            print(f'{number}. {label}'+(' (predeterminado)' if default==number-1 else ''))
+        print('0. '+back_label)
         try:
             answer=input('Opcion: ').strip()
         except EOFError:
             raise Cancelled() from None
         if answer=='0':
             raise Cancelled()
+        if answer=='' and default is not None:return default
         if answer.isascii() and answer.isdigit() and 1<=int(answer)<=len(labels):
             return int(answer)-1
         print('Opcion invalida; elija un numero de la lista.')
@@ -89,9 +90,9 @@ def browse_file(root):
             return selected.relative_to(Path(root)).as_posix()
 
 
-def select_source(root):
-    mode=choose('Fuente documental',[
-        'Base institucional completa','Archivo especifico','Entrega completa'])
+def select_source(root, *, incoming_only=False):
+    mode=(choose('Incoming',['Archivo especifico','Entrega completa'])+1 if incoming_only else
+          choose('Fuente documental',['Base institucional completa','Archivo especifico','Entrega completa']))
     if mode==0:
         return dict(source='base',input_file=None,delivery=None)
     if mode==1:

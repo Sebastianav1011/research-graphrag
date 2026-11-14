@@ -16,6 +16,65 @@ from scripts import pipeline_coordinator as runner
 from layer4_evaluation.indicators import assessment_v3 as v3
 
 
+def test_base_isolates_missing_identity_retains_sparse_entities_and_lineage(sandbox):
+    from layer2_processing.preprocessing.adapters import discover_sources
+    root,_,config=sandbox;base=root/'data/layer1_sources/base'
+    write(base/'descriptores.json',[
+        dict(id_actividad='',resumen='Excluded anonymous row'),
+        dict(id_actividad='0001',resumen='',metodologia='',objetivos=''),
+        dict(id_actividad='0002',objetivos='Desarrollar una intervencion comunitaria concreta.',
+            justificacion='Necesidad documentada de la comunidad atendida.',actividades_formacion='Talleres previstos para investigadores locales.')])
+    write(base/'produccion.json',[
+        dict(nombre_producto='',doi='10.1234/valid',resumen='Evidence from identified publication.',cedula='D1',investigador_docente='Synthetic Person'),
+        dict(nombre_producto='Title without verifiable identifier',resumen='Excluded unidentifiable publication'),
+        dict(nombre_producto='',eid='2-s2.0-12345',resumen='Another identified publication')])
+    write(base/'miembros.json',[dict(id_actividad='0001',id_empleado='E1',documento='D1',nombre_completo='Synthetic Person')])
+    config=config|dict(knowledge_scope='BASE_GLOBAL_V1')
+    fingerprints={p.name:sha(p) for p in base.iterdir()}
+    preview=discover_sources(root,config,base)
+    assert preview['status']=='READY_FOR_VALIDATION'
+    counts={i['domain']:i['record_validation'] for i in preview['files']}
+    assert counts['proyectos']['valid']==2 and counts['proyectos']['rejected_rows'][0]['row']==1
+    assert counts['articulos']['valid']==2 and counts['articulos']['rejected_rows'][0]['row']==2
+    production=next(i for i in preview['files'] if i['domain']=='articulos')
+    assert 'nombre_producto' not in production['pending_authorization']
+    run=root/'outputs/runs/sparse_base'
+    runner.prepare(root,run,base,'raw',config)
+    folder=run/'workspace/outputs/layer2/canonical'
+    projects=pq.read_table(folder/'proyectos.parquet').to_pylist()
+    assert {p['source_project_id'] for p in projects}=={'0001','0002'}
+    assert len(pq.read_table(folder/'articulos.parquet'))==2
+    assert pq.read_table(folder/'proyecto_investigador.parquet').num_rows==1
+    assert pq.read_table(folder/'articulo_investigador.parquet').num_rows==1
+    sections=pq.read_table(run/'workspace/outputs/layer2/knowledge/source_sections.parquet').to_pylist()
+    assert {s['field_name'] for s in sections if s['source_id']=='PROJ_0002'}>={'objectives','text__justificacion','text__actividades_formacion'}
+    section=next(s for s in sections if s['source_id']=='PROJ_0002' and s['field_name']=='objectives')
+    assert json.loads(section['provenance_json'])['layer1'][0]['source_row']==3
+    assert not any('Excluded' in (s['text_original'] or '') for s in sections)
+    assert fingerprints=={p.name:sha(p) for p in base.iterdir()}
+    diagnostics=json.loads((run/'preprocess/diagnostics.json').read_text(encoding='utf-8'))
+    assert sum(d['code']=='BASE_ROW_EXCLUDED' for d in diagnostics)==2
+
+
+@pytest.mark.parametrize('rows',[[{'resumen':'Missing ID column'}],[{'id_actividad':'','resumen':'No usable identity'}]])
+def test_base_structurally_invalid_or_entirely_unusable_source_stays_blocked(sandbox,rows):
+    from layer2_processing.preprocessing.adapters import discover_sources
+    root,_,config=sandbox;base=root/'data/layer1_sources/base'
+    write(base/'descriptores.json',rows)
+    preview=discover_sources(root,config,base)
+    assert preview['status']=='PENDING_OR_INVALID' and preview['files'][0]['status']=='INVALID'
+
+
+def test_incoming_article_title_contract_is_not_relaxed(sandbox):
+    from layer2_processing.preprocessing.ingestion import validate_rows
+    import yaml
+    root,_,_=sandbox
+    settings=yaml.safe_load((root/'config/layer1.yaml').read_text(encoding='utf-8'))
+    row=dict(_file='incoming/synthetic.csv',_row=2,title=None,doi='10.1234/valid')
+    accepted,rejected,_=validate_rows([row],'articulos',settings,'synthetic')
+    assert not accepted and len(rejected)==1
+
+
 def test_new_fields_survive_with_exact_lineage_and_separate_meanings(sandbox):
     root, raw, config = sandbox
     values = project() | {

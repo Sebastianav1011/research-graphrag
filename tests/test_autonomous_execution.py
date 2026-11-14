@@ -145,11 +145,12 @@ def test_manifest_requires_exact_explicit_authorization_once(environment):
 @pytest.mark.parametrize('resource',['territories','template','reference'])
 def test_projection_resources_are_pinned_before_authorization(environment,resource):
     e=environment
+    from autonomous_execution.final_output import template_path
     manifest=l.verify(e.root,e.run,require_authorization=False)
     assert manifest['final_projection']['filename']=='resultado_final.xlsx'
     assert not (e.directory/'authorization.json').exists()
     paths=dict(territories=e.directory/'territories.json',
-        template=e.root/'data/templates/plantilla_resultado_final_indicadores_territorios.xlsx',
+        template=template_path(e.root),
         reference=e.root/'outputs/layer2/reference/dane_territories.parquet')
     path=paths[resource]
     assert path.relative_to(e.root).as_posix() in manifest['files']
@@ -257,6 +258,30 @@ def test_invalid_evidence_remains_blocked_and_other_indicator_continues(environm
     assert l.retry_pending(e.root,e.run)['requeued']==0
 
 
+@pytest.mark.parametrize('kind',['schema','semantic'])
+def test_local_validation_exception_does_not_stop_other_indicators(environment,monkeypatch,kind):
+    from jsonschema import ValidationError
+    from layer4_evaluation.indicators.validation_diagnostics import AssessmentValidationError
+    e=environment;authorize(e);evaluate=Worker.evaluate
+    def isolated(self,data,iid,round_number):
+        if iid=='I00':
+            if kind=='schema':raise ValidationError('Synthetic invalid assessment')
+            raise AssessmentValidationError([dict(category='INVALID_FIELD_VALUE',rule='SYNTHETIC',path='$')])
+        return evaluate(self,data,iid,round_number)
+    monkeypatch.setattr(Worker,'evaluate',isolated)
+    factory=ClientFactory(e.sample);result=execute(e,factory)
+    assert result['status']=='PARTIAL' and result['evaluated']==1 and result['blocked']==1
+    assert result['projects_processed']==1 and result['projects_completed']==0
+    assert result['processing_complete'] and result['results_available'] and len(factory.calls)==1
+    original={f:f.read_bytes() for f in (e.directory/'results').rglob('*.json')}
+    exported=l.export(e.root,e.run)
+    assert exported['exported_rows']==1 and exported['supported']==1 and exported['blocked_assessments']==1
+    assert exported['pending_assessments']==0 and exported['status']=='PARTIAL'
+    assert all(f.read_bytes()==value for f,value in original.items())
+    audit=s.read(Path(exported['path']).with_suffix('.receipt.json'))['evaluations']
+    assert next(r for r in audit if r['status']=='BLOCKED')['confidence'] is None
+
+
 def test_timeout_never_blindly_repeats_and_requires_explicit_uncertain_ack(environment):
     e=environment
     def timeout(data,payload,result,n):
@@ -284,6 +309,53 @@ def test_crash_after_receipt_recovers_without_repeating_approved_call(environmen
     assert len(factory.calls)==1
     assert execute(e,factory)['status']=='COMPLETE'
     assert len(factory.calls)==2
+
+
+def test_persisted_pass_must_match_manifest_confidence_contract(environment):
+    e=environment;factory=ClientFactory(e.sample);authorize(e)
+    assert execute(e,factory)['status']=='COMPLETE'
+    path=e.directory/'manifest.json';manifest=s.read(path)
+    # A synthetic checkpoint cannot reinterpret a V3 PASS as the newer SK contract.
+    from layer4_evaluation.indicators import assessment_v3 as v3
+    manifest.update(schema_version=v3.SK_VERSION,confidence_version=v3.SK_CONFIDENCE_VERSION)
+    s.write(path,manifest)
+    with pytest.raises((ValueError,JobError),match='CONTRACT'):
+        l.verify(e.root,e.run,require_authorization=False)
+    assert len(factory.calls)==2
+
+
+@pytest.mark.parametrize('field,value',[
+    ('assessment_version','ASSESSMENT_V2'),('confidence_version','RAW_CONFIDENCE_V1'),
+    ('confidence_version','EVIDENCE_CONFIDENCE_SK_V1'),('conceptual_coverage_version','OTHER_K')])
+def test_result_contract_rejects_old_score_or_components_without_recalculation(sample,field,value):
+    from autonomous_execution.engine import check_result_contract
+    from layer4_evaluation.indicators import assessment_v3 as v3
+    project=dict(project_id='SYNTH',fields=sample['fields'])
+    row=v3.indicator_row(project,sample['profile'],sample['assessment'],sample['rubric'])
+    bundle=dict(row=row,wrapper=dict(assessments=[deepcopy(sample['assessment'])]))
+    check_result_contract(dict(schema_version=v3.VERSION),bundle)
+    bundle['row'][field]=value;original=deepcopy(bundle)
+    with pytest.raises(JobError,match='RESULT_CONTRACT_INCOMPATIBLE'):
+        check_result_contract(dict(schema_version=v3.VERSION),bundle)
+    assert bundle==original
+
+
+def test_repeated_resume_preserves_pass_bytes_and_counts_progress_separately(environment):
+    e=environment;factory=ClientFactory(e.sample);authorize(e)
+    assert execute(e,factory)['status']=='COMPLETE'
+    protected={p:p.read_bytes() for folder in ('results','attempts') for p in (e.directory/folder).rglob('*') if p.is_file()}
+    def forbidden(*args):pytest.fail('Completed PASS must not contact a model')
+    for _ in range(2):
+        state=execute(e,forbidden)
+        assert state['status']=='COMPLETE' and state['evaluated']==2 and state['calls']==2
+    assert len(factory.calls)==2
+    assert all(path.read_bytes()==content for path,content in protected.items())
+    db=s.connect(e.directory)
+    try:
+        assert db.execute("SELECT COUNT(*) FROM jobs WHERE status='PASS'").fetchone()[0]==2
+        assert db.execute("SELECT COUNT(*) FROM events WHERE code='RESUMED'").fetchone()[0]==3
+        assert db.execute("SELECT COUNT(*) FROM events WHERE code='PASS'").fetchone()[0]==2
+    finally:db.close()
 
 
 def test_restart_with_inflight_claim_blocks_uncertain_and_continues(environment,monkeypatch):
@@ -314,20 +386,31 @@ def test_memory_floor_pauses_without_inference(environment,monkeypatch):
 
 def test_partial_export_separates_verified_pass_and_unvalidated_pending(environment):
     e=environment;authorize(e)
+    from layer4_evaluation.thesis_output import COLUMNS,SHEETS
     def fail(data,payload,result,n):
         if n==1:raise OllamaError('TIMEOUT','Synthetic timeout')
     execute(e,ClientFactory(e.sample,fail))
+    saved={p:p.read_bytes() for p in (e.directory/'results').rglob('*.json')}
+    before=s.status(e.directory)
     assert l.export(e.root,e.run)['status']=='PARTIAL'
     result=l.export(e.root,e.run,partial=True)
     book=openpyxl.load_workbook(result['path'],read_only=True)
-    assert book.sheetnames==['INDICADORES','TERRITORIOS']
-    rows=list(book['INDICADORES'].values)
-    assert len(rows)==3
-    records=[dict(zip(rows[0],r)) for r in rows[1:]]
-    assert sum(r['estado_cumplimiento']!='REVIEW_REQUIRED' for r in records)==1
-    pending=next(r for r in records if r['estado_cumplimiento']=='REVIEW_REQUIRED')
-    assert pending['confianza'] is None
-    book.close()
+    try:
+        assert book.sheetnames==SHEETS
+        rows=list(book['Proyectos'].values)
+        assert list(rows[0])==COLUMNS and len(rows)==2
+        record=dict(zip(rows[0],rows[1]))
+        assert record['estado_cumplimiento']=='SUPPORTED'
+        assert isinstance(record['confianza'],(float,int))
+        assert list(book[SHEETS[1]].values)==[tuple(COLUMNS)]
+    finally:book.close()
+    audit=s.read(Path(result['path']).with_suffix('.receipt.json'))['evaluations']
+    assert sum(r['status']=='PASS' for r in audit)==1
+    pending=next(r for r in audit if r['status']!='PASS')
+    assert pending['status']=='UNCERTAIN' and pending['confidence'] is None
+    after=s.status(e.directory)
+    assert before['calls']==after['calls'] and before['counts']==after['counts']
+    assert all(p.read_bytes()==data for p,data in saved.items())
     assert not (e.run/'resultado_indicadores.autonomous.final.xlsx').exists()
 
 

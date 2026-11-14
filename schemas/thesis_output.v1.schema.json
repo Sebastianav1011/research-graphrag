@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "THESIS_POSITIVE_OUTPUT_V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["Proyectos", "Artículos"],
+  "$defs": {
+    "positive": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["proyecto/articulo_siap_id", "indicador_id", "estado_cumplimiento", "parrafo_evidencia", "fuente_evidencia", "ubicacion_evidencia", "territorio_region", "confianza"],
+      "properties": {
+        "proyecto/articulo_siap_id": {"type": "string", "minLength": 1},
+        "indicador_id": {"type": "string", "minLength": 1},
+        "estado_cumplimiento": {"const": "SUPPORTED"},
+        "parrafo_evidencia": {"type": "string", "minLength": 1},
+        "fuente_evidencia": {"type": "string", "minLength": 1},
+        "ubicacion_evidencia": {"type": "string", "minLength": 1},
+        "territorio_region": {"type": ["string", "null"]},
+        "confianza": {"type": "number", "minimum": 0, "maximum": 100}
+      }
+    }
+  },
+  "properties": {
+    "Proyectos": {"type": "array", "items": {"$ref": "#/$defs/positive"}},
+    "Artículos": {"type": "array", "items": {"$ref": "#/$defs/positive"}}
+  }
+}

@@ -34,6 +34,8 @@ from layer4_evaluation.indicators.selection import FIELDS, canonical_hash
 from layer4_evaluation.indicators.selection import substantive_fields
 from layer4_evaluation.indicators.context_budget import VERSION as CONTEXT_VERSION
 from layer4_evaluation.indicators.validation_diagnostics import AssessmentValidationError, semantic_issues
+from layer4_evaluation.indicators import evidence_references as refs
+from layer4_evaluation.indicators.confidence import _normalize
 
 BASE=ROOT/'outputs/layer4/final/candidatos/demo_en_vivo'
 
@@ -43,10 +45,8 @@ def require(value,message):
     if not value: raise ValueError(message)
 
 def write(path,value):
-    path.parent.mkdir(parents=True,exist_ok=True)
-    temp=path.with_name(path.name+'.pending')
-    temp.write_text(json.dumps(value,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
-    temp.replace(path)
+    from autonomous_execution.store import write as atomic_write
+    atomic_write(path,value)
 
 def emit(value): print(json.dumps(value,ensure_ascii=True,indent=2),flush=True)
 
@@ -67,6 +67,8 @@ def run_dir(name):
 
 def assessment_from_row(row):
     return dict(assessment_version=row['assessment_version'],decision=row['decision'],support_strength=row['support_strength'],
+        **({'coverage_policy':row['coverage_policy']} if 'coverage_policy' in row else {}),
+        **({'strength_rubric':row['strength_rubric']} if 'strength_rubric' in row else {}),
         criterion_assessments=row['criterion_assessments'],explanation=row['evidence_explanation'],
         evidence=[dict(field=f,text=t,stage=s) for f,t,s in zip(row['evidence_source_fields'],row['evidence_texts'],row['evidence_stages'])])
 
@@ -88,22 +90,67 @@ def check(directory):
     require(sha256(directory/'plan.json')==manifest['plan_sha256'],'Plan modificado; no ejecutar')
     for name,digest in manifest['files'].items(): require(sha256(directory/name)==digest,'Texto revisado o entrada modificados: '+name)
     plan=read(directory/'plan.json');verify_hashes(ROOT,plan['source_hashes'])
+    policy=plan.get('evaluation_policy')
+    if policy:
+        v3.verify_evaluation_policy(policy)
+        require(manifest.get('evaluation_policy_sha256')==policy['sha256'],'Fingerprint de modos distinto del manifiesto')
+        require(plan['catalog_derivation']['effective_catalog_sha256']==canonical_hash(plan['rubrics']),
+            'Catalogo derivado distinto del plan sellado')
     if plan.get('recovery'):
         verify_hashes(ROOT, plan['recovery']['archive_hashes'])
     if plan.get('checkpoint_migration'):
         verify_hashes(ROOT, plan['checkpoint_migration']['archive_hashes'])
-    require(plan['discovery_version']==gd.VERSION and plan['assessment_version']==v3.VERSION and len(plan['profiles'])==48,'Configuracion incompatible')
+    require(plan['discovery_version']==gd.VERSION and plan['assessment_version'] in (v3.VERSION,v3.SK_VERSION) and len(plan['profiles'])==48,'Configuracion incompatible')
+    if plan['assessment_version']==v3.SK_VERSION:
+        require(plan.get('confidence_version')==v3.SK_CONFIDENCE_VERSION, 'Version de confianza incompatible')
     if plan.get('request_protocol') == CONTEXT_VERSION:
         require(set(plan['context_requests'])=={p['project_id'] for p in plan['projects']}, 'Cobertura de proyectos/contextos incompleta')
         for p in plan['projects']:
             requests=plan['context_requests'][p['project_id']]
             require(set(requests)==set(plan['profiles']), 'Cobertura de los 48 indicadores incompleta')
             for iid, request in requests.items():
+                if policy:
+                    require(request.get('evaluation_mode')==policy['evaluation_mode'] and
+                        request.get('context_mode')==policy['context_mode'],'Modos de request/plan incompatibles')
+                require(request.get('assessment_version',v3.VERSION)==plan['assessment_version'], 'Contrato de confianza/request difieren')
                 require(request['project_id']==p['project_id'] and
                     [i['indicator_id'] for i in request['payload']['indicators']]==[iid], 'Contexto de otro proyecto/indicador')
     return plan
 
-def verify_run(directory):
+def completed_record(out,cp):
+    """Recover only fully persisted local transports; an in-flight claim is not a result."""
+    base=out/cp['phase']/'ollama_runs'/cp['project_id']
+    attempts=sorted(base.glob('attempt_*'))
+    if not attempts or [p.name for p in attempts]!=['attempt_'+str(i+1) for i in range(len(attempts))]:
+        return None
+    if any(not (p/'call.json').is_file() for p in attempts):
+        return None
+    calls=[read(p/'call.json') for p in attempts]
+    if not calls[-1].get('successful_transport') or calls[-1].get('exit_status')!=0:
+        return None
+    response=attempts[-1]/'response.json'
+    if not response.is_file():return None
+    return dict(project_id=cp['project_id'],phase=cp['phase'],wrapper=read(response),calls=calls,
+        status='VALID',error=None,request_sha256=cp['request_sha256'],
+        artifact_hashes={p.relative_to(out).as_posix():sha256(p) for p in (out/cp['phase']/'ollama_runs').rglob('*') if p.is_file()})
+
+
+def call_verification(plan,cp,record):
+    """Same commit decision for normal execution and offline receipt recovery."""
+    tokens,wall=aggregate_metrics(record['calls']);phase=cp['phase'];status='PASS'
+    if record['status']!='VALID' or not 1<=len(record['calls'])<=cp['max_retries']+1:status='BLOCKED_ERROR'
+    elif wall is None or any(v is None for v in tokens.values()):status='BLOCKED_MISSING_METRICS'
+    elif tokens['total_tokens']>cp['reservation']:status='BLOCKED_TOKEN_BUDGET'
+    elif tokens['total_tokens']>plan['budgets'][phase+'_postcall_review_threshold']:status='PAUSED_TOKEN_REVIEW'
+    recovered=plan.get('recovery',{})
+    retry=max(0,len(record['calls'])-1)+int(recovered.get('project_id')==cp['project_id'] and recovered.get('indicator_ids')==cp['indicator_ids'])
+    result=dict(status=status,project_id=cp['project_id'],phase=phase,indicator_ids=cp['indicator_ids'],
+        calls=len(record['calls']),retries=retry,tokens=tokens,wall_seconds=wall,error=record['error'])
+    if status!='PASS':result['provider']=plan['runtime']['provider']
+    return result
+
+
+def verify_run(directory,*,recover=False):
     plan=check(directory);cache=read(directory/'cache.json');states=[];errors=[];usage=list(plan.get('recovery', {}).get('previous_usage', []))
     isolated_errors=[]
     local = plan.get('runtime', {}).get('provider') in ('ollama','openai')
@@ -133,18 +180,29 @@ def verify_run(directory):
             for out in sorted((directory/'calls'/pid).glob('*')):
                 if not out.is_dir(): continue
                 cp=read(out/'plan.json')
+                if plan.get('evaluation_policy'):
+                    require(cp.get('evaluation_policy_sha256')==plan['evaluation_policy']['sha256'],
+                        'Checkpoint de llamada pertenece a otros modos')
                 require(not bounded or cp['phase']=='assessment' and len(cp['indicator_ids'])==1,'Fase incompatible con contexto por indicador')
                 require(cp['run_plan_sha256']==sha256(directory/'plan.json'),'Plan de llamada no coincide')
                 request=call_request(plan,p,cp)
                 require(cp['request_sha256']==canonical_hash(request),'Request de llamada modificado')
-                expected_schema=gd.selection_schema(p['fields']) if cp['phase']=='discovery' else v3.schemas(p['fields'])['assessment_batch']
+                expected_schema=gd.selection_schema(p['fields']) if cp['phase']=='discovery' else refs.response_schema(request,p['fields'])
                 require(read(out/'schema.json')==expected_schema,'Schema modificado')
                 record_path=out/'records'/cp['phase']/(pid+'.json')
-                if not (out/'verification.json').exists():
+                missing_record=not record_path.exists()
+                record=read(record_path) if not missing_record else completed_record(out,cp) if local else None
+                missing_verification=not (out/'verification.json').exists()
+                if missing_verification and (not record or record.get('status')!='VALID'):
                     if (out/'dispatch.claim.json').exists(): errors.append(pid+': UNCERTAIN_OUTCOME; hay claim sin verificacion; no reintentar')
                     continue
-                verification=read(out/'verification.json');usage.append(verification)
-                record=read(record_path);verify_hashes(out,record['artifact_hashes'])
+                require(record is not None,'Registro persistido ausente o incompleto')
+                counted=call_verification(plan,cp,record)
+                verification=counted if missing_verification else read(out/'verification.json')
+                require(all(verification.get(key)==counted[key] for key in ('calls','retries','tokens','wall_seconds')),
+                    'Conteo/metricas de checkpoint no corresponden a los recibos persistidos')
+                usage.append(verification)
+                verify_hashes(out,record['artifact_hashes'])
                 require(record['request_sha256']==cp['request_sha256'],'Registro/request difieren')
                 if local and not record['calls'] and record['status'] == 'ERROR':
                     message=pid+': BLOCKED_ERROR; no llamada completada; conservar claim y revisar '+str(out)
@@ -156,7 +214,7 @@ def verify_run(directory):
                 retries=plan.get('token_limit_retries',0) if bounded else 0
                 corrective = cp.get('corrective_retries', 0)
                 require(type(corrective) is int and 0 <= corrective <= 2 and
-                    (not corrective or cp.get('correction_version') == CORRECTION_VERSION), 'Reintentos correctivos incompatibles')
+                    (not corrective or cp.get('correction_version') == (refs.VERSION if refs.active(request) else CORRECTION_VERSION)), 'Reintentos correctivos incompatibles')
                 retries=max(retries,corrective)
                 require(1 <= len(record['calls']) <= retries+1,'Numero de llamadas fuera del limite')
                 attempt_request=request
@@ -206,10 +264,31 @@ def verify_run(directory):
                         isolated_errors.append(message)
                         state['blocked_indicators'].update({iid:verification['status'] for iid in cp['indicator_ids']})
                         if verification['status']=='BLOCKED_ERROR' and all(c['exit_status'] in ('INVALID_ASSESSMENT','TOKEN_LIMIT') for c in record['calls']):
-                            state['retryable_indicators']+=cp['indicator_ids']
+                            # Local retries already used the sealed corrective /
+                            # output budget. Resume alone supplies no new evidence
+                            # or capacity; do not reset that finite allowance.
+                            if plan['runtime']['provider'] != 'ollama':
+                                state['retryable_indicators']+=cp['indicator_ids']
                     continue
                 require(native['successful_transport'] and native['response_sha256']==sha256(attempt/'response.json') and
                     read(attempt/'response.json')==record['wrapper'],'Respuesta nativa diferente/no valida')
+                if missing_record or missing_verification:
+                    from .indicators.ollama_provider import strict_json
+                    body=read(attempt/'native_response.json')
+                    require(body.get('done') is True and body.get('done_reason')=='stop' and
+                        body.get('model')==plan['requested_model'],'Transporte incompleto; conservar claim')
+                    parsed=strict_json(body['message']['content'])
+                    require(parsed==strict_json((attempt/'response.raw.txt').read_text(encoding='utf-8')) and
+                        refs.materialize(request,parsed)==record['wrapper'],'Respuesta original/recuperada difieren')
+                    require(native['usage_observations'][0]==dict(input_tokens=body.get('prompt_eval_count'),
+                        output_tokens=body.get('eval_count')),'Metricas originales/recuperadas difieren')
+                if refs.active(request):
+                    selection=read(attempt/'selection.json')
+                    from jsonschema import Draft202012Validator
+                    Draft202012Validator(expected_schema).validate(selection)
+                    from layer4_evaluation.indicators.ollama_provider import strict_json
+                    require(strict_json((attempt/'response.raw.txt').read_text(encoding='utf-8'))==selection and
+                        refs.materialize(request,selection)==record['wrapper'], 'Referencias/citas materializadas diferentes')
                 native_tokens,_=aggregate_metrics(record['calls'])
                 require(all(verification['tokens'][k]==native_tokens[k] for k in ('input_tokens','output_tokens','total_tokens')) and
                     verification['tokens']['total_tokens']<=plan['budgets'][cp['phase']+'_postcall_review_threshold'],'Metricas ausentes o requieren revision')
@@ -217,16 +296,25 @@ def verify_run(directory):
                     selection=gd.validate_selection(record['wrapper'],p,plan['profiles'])
                     state.update(discovery_complete=True,selected=selection['prioritized_ids'])
                 else:
-                    v3.validate_wrapper(record['wrapper'],pid,cp['indicator_ids'],p['fields'])
+                    v3.validate_wrapper(record['wrapper'],pid,cp['indicator_ids'],p['fields'],plan['assessment_version'])
                     validate_context_evidence(request, record['wrapper'])
-                    saved=read(out/'assessment.rows.json')
+                    rows_path=out/'assessment.rows.json'
+                    saved=read(rows_path) if rows_path.exists() else None
                     expected=[]
                     for a in record['wrapper']['assessments']:
                         row=indicator_row(plan,p,a)
                         require(row['assessment_validation_status']=='VALID','Assessment invalido')
                         expected.append(row)
-                    require(saved['record_sha256']==sha256(record_path) and saved['rows']==expected,'Filas/confianzas guardadas difieren')
-                    state['rows']+=saved['rows']
+                    if saved is not None:
+                        require(not missing_record and saved['record_sha256']==sha256(record_path) and saved['rows']==expected,'Filas/confianzas guardadas difieren')
+                    state['rows']+=expected
+                if recover:
+                    # Commit derived metadata last, only after every original gate.
+                    # Existing bytes (including incompatible metadata) are never repaired.
+                    if missing_record:write(record_path,record)
+                    if cp['phase']=='assessment' and not rows_path.exists():
+                        write(rows_path,dict(record_sha256=sha256(record_path),rows=expected))
+                    if missing_verification:write(out/'verification.json',verification)
             ids=[r['indicator_id'] for r in state['rows']]
             require(len(ids)==len(set(ids)) and set(ids)<=set(state['selected']),'Assessment duplicado o no seleccionado')
             resolved={message for message, indicators in failed_messages.items() if set(indicators)<=set(ids)}
@@ -236,8 +324,15 @@ def verify_run(directory):
             state['retryable_indicators']=sorted(set(state['retryable_indicators'])-set(ids))
             state['complete']=state['discovery_complete'] and set(ids)==set(state['selected']) and not any(e.startswith(pid+':') for e in errors)
         state['pending']=[i for i in state['selected'] if i not in {r['indicator_id'] for r in state['rows']}]
+        # `pending` remains the scheduling input (including retryable failures).
+        # Processing coverage must not confuse terminal errors with unvisited work.
+        state['pending_indicators']=[i for i in state['pending'] if i not in state['blocked_indicators']
+            and i not in state.get('context_limits',{})]
+        state['processed']=bool(state['discovery_complete'] and state['selected'] and not state['pending_indicators'])
+        state['results_available']=bool(state['rows'])
         states.append(state)
-    return dict(status='BLOCKED' if errors else ('COMPLETE' if all(s['complete'] for s in states) else 'PARTIAL'),projects=states,errors=errors,
+    return dict(status='BLOCKED' if any(e not in isolated_errors for e in errors) else ('COMPLETE' if all(s['complete'] for s in states) else 'PARTIAL'),projects=states,errors=errors,
+        **({'evaluation_policy':plan['evaluation_policy']} if plan.get('evaluation_policy') else {}),
         blocking_errors=[e for e in errors if e not in isolated_errors],usage=usage,
         new_calls=sum(v['calls'] for v in usage),total_tokens=sum(v['tokens']['total_tokens'] for v in usage if v['tokens']['total_tokens'] is not None),
         missing_token_metrics=sum(v['tokens']['total_tokens'] is None for v in usage))
@@ -253,8 +348,11 @@ def request_for(plan,project,phase,ids):
 def call_request(plan, project, call_plan):
     request=request_for(plan,project,call_plan['phase'],call_plan['indicator_ids'])
     if call_plan.get('correction_version'):
-        require(call_plan['correction_version']==CORRECTION_VERSION, 'Version correctiva incompatible')
-        request=corrective_request(request,v3.schemas(project['fields'])['assessment_batch'],plan['runtime']['configuration'])
+        if refs.active(request):
+            require(call_plan['correction_version']==refs.VERSION, 'Version correctiva incompatible')
+        else:
+            require(call_plan['correction_version']==CORRECTION_VERSION, 'Version correctiva incompatible')
+            request=corrective_request(request,v3.schemas(project['fields'])['assessment_batch'],plan['runtime']['configuration'])
     return request
 
 
@@ -266,10 +364,19 @@ def runnable_indicator(state, iid, attempted):
 def validate_context_evidence(request, wrapper):
     if request.get('input_version') != CONTEXT_VERSION:
         return
-    fields = request['payload']['project']['fields']
+    project = request['payload']['project']
     for item in wrapper['assessments']:
         for index, evidence in enumerate(item['evidence']):
-            if not evidence['text'] or evidence['text'] not in (fields.get(evidence['field']) or ''):
+            quote = _normalize(evidence['text'])
+            # Reference materialization owns exact original text. Legacy literal
+            # transport uses the same conservative NFC/whitespace policy as the
+            # normative quote validator; it never accepts paraphrases or matches
+            # across distinct retrieved fragments/items.
+            sources = project.get('fields', {}).get(evidence['field']) or ''
+            sources = sources if isinstance(sources, list) else [sources]
+            verified = (any(evidence['field']==f['field'] and evidence['text']==f['text'] for f in project['fragments'])
+                if refs.active(request) else any(quote in _normalize(source) for source in sources))
+            if not quote or not verified:
                 raise AssessmentValidationError([dict(category='EVIDENCE_NOT_VERIFIABLE',
                     rule='QUOTE_NOT_IN_SENT_GRAPHRAG_CONTEXT: la cita no pertenece a los fragmentos enviados', path=f'$.evidence[{index}].text',
                     indicator_id=item.get('indicator_id'), field=evidence['field'])])
@@ -296,8 +403,11 @@ def execution_lock():
 def execute(args):
     directory=run_dir(args.run)
     with execution_lock():
-        plan=check(directory);state=verify_run(directory)
+        plan=check(directory);state=verify_run(directory,recover=True)
         require(not state['blocking_errors'],'Ejecucion detenida: '+'; '.join(state['blocking_errors']))
+        snapshot=summary(state)
+        if not (directory/'status.json').exists() or read(directory/'status.json')!=snapshot:
+            write(directory/'status.json',snapshot)
         if state['status']=='COMPLETE': return summary(state)
         auth_path=directory/'authorization.json'
         if not auth_path.exists():
@@ -306,10 +416,10 @@ def execute(args):
                 authorization_reference='Explicit execute --authorize after review of extracted project text',
                 run_plan_sha256=sha256(directory/'plan.json'),review_sha256=sha256(directory/'review.json'),
                 project_ids=[p['project_id'] for p in plan['projects']],maximum_new_calls=plan['maximum_calls'],
-                token_reservation_cap=plan['total_token_reservation_cap'],max_retries=plan.get('token_limit_retries',0)))
+                token_reservation_cap=plan['total_token_reservation_cap'],max_retries=max(plan.get('token_limit_retries',0),plan.get('corrective_retries',0))))
         auth=read(auth_path)
         require(auth['authorized'] is True and auth['run_plan_sha256']==sha256(directory/'plan.json') and
-            auth['review_sha256']==sha256(directory/'review.json') and auth['max_retries']==plan.get('token_limit_retries',0),'Autorizacion no coincide con texto revisado')
+            auth['review_sha256']==sha256(directory/'review.json') and auth['max_retries']==max(plan.get('token_limit_retries',0),plan.get('corrective_retries',0)),'Autorizacion no coincide con texto revisado')
         require(plan.get('runtime', {}).get('provider') in ('ollama','openai'),
                 'Plan historico Codex: solo verificable/exportable; crear una nueva ejecucion Ollama, sin reutilizar sus respuestas')
         settings = llm_configuration(plan['runtime']['configuration'])
@@ -318,6 +428,10 @@ def execute(args):
                 runnable_indicator(p,iid,attempted) for p in state['projects'] for iid in p['pending']):
             write(directory/'status.json', summary(state))
             return summary(state)
+        if plan.get('resource_policy'):
+            from autonomous_execution.policy import free_ram_mb
+            require(settings['num_ctx']<=plan['resource_policy']['context_ceiling'],'Contexto fuera del techo autorizado')
+            require(free_ram_mb()>=plan['resource_policy']['min_free_ram_mb'],'RESOURCE_WAIT: RAM libre insuficiente; conservar checkpoint sin inferencia')
         client = OllamaClient(settings) if settings['provider']=='ollama' else create_client(settings)
         runtime = client.inspect()  # Metadata only; no inference or download.
         binding_path = directory/'provider.json'
@@ -343,11 +457,14 @@ def execute(args):
             if bounded:
                 ids=[i for i in st['pending'] if runnable_indicator(st,i,attempted)][:1]
             request=request_for(plan,p,phase,ids);reservation=plan['budgets'][phase+'_reservation']
-            retries=plan.get('token_limit_retries',0) if bounded else 0
-            schema = gd.selection_schema(p['fields']) if phase=='discovery' else v3.schemas(p['fields'])['assessment_batch']
-            correction = bounded and settings['provider']=='ollama' and plan.get('isolate_indicator_errors')
-            if correction:
+            token_retries=plan.get('token_limit_retries',0) if bounded else 0
+            corrective_retries=plan.get('corrective_retries',0) if bounded else 0
+            retries=max(token_retries,corrective_retries)
+            schema = gd.selection_schema(p['fields']) if phase=='discovery' else refs.response_schema(request,p['fields'])
+            correction = bounded and plan.get('isolate_indicator_errors') and (refs.active(request) or settings['provider']=='ollama')
+            if correction and not refs.active(request):
                 request=corrective_request(request,schema,settings)
+                corrective_retries=token_retries
             attempted.update((p['project_id'],iid) for iid in ids)
             estimate=(context_guard(request['prompt'],schema,settings,runtime,request['context_budget']) if bounded else
                 math.ceil(len(request['prompt'])*plan['observed_character_ratio']*1.25)+12000)
@@ -362,8 +479,9 @@ def execute(args):
             cp=dict(project_id=p['project_id'],phase=phase,indicator_ids=ids,run_plan_sha256=sha256(directory/'plan.json'),
                 request_sha256=canonical_hash(request),runtime=runtime,provider_binding_sha256=sha256(binding_path),requested_model=plan['requested_model'],
                 execution_id=plan['execution_id'],maximum_new_calls=1+retries,max_retries=retries,timeout_seconds=plan['timeout_seconds'],reservation=reservation,estimated_tokens=estimate)
+            if plan.get('evaluation_policy'):cp['evaluation_policy_sha256']=plan['evaluation_policy']['sha256']
             if correction:
-                cp.update(correction_version=CORRECTION_VERSION,corrective_retries=retries)
+                cp.update(correction_version=refs.VERSION if refs.active(request) else CORRECTION_VERSION,corrective_retries=corrective_retries)
             write(out/'plan.json',cp);write(out/'schema.json',schema)
             call_auth=dict(authorized=True,project_ids=[p['project_id']],phase=phase,indicator_ids=ids,plan_sha256=sha256(out/'plan.json'),
                 request_sha256=cp['request_sha256'],token_budget=reservation,maximum_new_calls=1+retries,max_retries=retries,
@@ -375,19 +493,20 @@ def execute(args):
                     require(pid==p['project_id'] and indicator_ids==[gd.MARKER],'Envelope de descubrimiento difiere')
                     gd.validate_selection(wrapper,p,plan['profiles'])
                 else:
-                    v3.validate_wrapper(wrapper,pid,ids,p['fields'])
+                    v3.validate_wrapper(wrapper,pid,ids,p['fields'],plan['assessment_version'])
                     validate_context_evidence(request, wrapper)
                     for item in wrapper['assessments']:
                         assessment = {k:v for k,v in item.items() if k!='indicator_id'}
                         issues = semantic_issues(v3.validate(p['fields'],plan['profiles'][item['indicator_id']],
-                            assessment,plan['rubrics'][item['indicator_id']]), assessment, item['indicator_id'])
+                            assessment,plan['rubrics'][item['indicator_id']]), assessment, item['indicator_id'],
+                            plan['rubrics'][item['indicator_id']],p['fields'])
                         if issues:
                             raise AssessmentValidationError(issues)
             emit(dict(status='CALL_STARTED',project_id=p['project_id'],phase=phase,indicator_ids=ids,token_reservation=reservation))
             provider = OllamaAssessmentProvider(out/phase/'ollama_runs', out/'schema.json', lambda p,i:request,
                 settings=settings, client=client, runtime=runtime, wrapper_validator=gate,
-                execution_id=plan['execution_id'], max_retries=0, max_indicators=3, token_limit_retries=retries,
-                corrective_retries=retries if correction else 0)
+                execution_id=plan['execution_id'], max_retries=0, max_indicators=3, token_limit_retries=token_retries,
+                corrective_retries=corrective_retries if correction else 0)
             error = None
             try:
                 provider.evaluate(dict(project_id=p['project_id'], fields=p['fields']),
@@ -400,21 +519,11 @@ def execute(args):
                 calls=provider.calls, status='ERROR' if error else 'VALID', error=error,
                 request_sha256=canonical_hash(request), artifact_hashes=artifacts)
             write(record_path,record)
-            tokens,wall=aggregate_metrics(record['calls'])
-            status='PASS'
-            if record['status']!='VALID' or not 1<=len(record['calls'])<=retries+1: status='BLOCKED_ERROR'
-            elif wall is None or any(v is None for v in tokens.values()): status='BLOCKED_MISSING_METRICS'
-            elif tokens['total_tokens']>reservation: status='BLOCKED_TOKEN_BUDGET'
-            elif tokens['total_tokens']>plan['budgets'][phase+'_postcall_review_threshold']: status='PAUSED_TOKEN_REVIEW'
+            result=call_verification(plan,cp,record);status=result['status']
             if status=='PASS' and phase=='assessment':
                 rows=[indicator_row(plan,p,a) for a in record['wrapper']['assessments']]
                 write(out/'assessment.rows.json',dict(record_sha256=sha256(record_path),rows=rows))
             verify_hashes(out,record['artifact_hashes']);check(directory)
-            recovered = plan.get('recovery', {})
-            retry = max(0,len(record['calls'])-1)+int(recovered.get('project_id') == p['project_id'] and recovered.get('indicator_ids') == ids)
-            result=dict(status=status,project_id=p['project_id'],phase=phase,indicator_ids=ids,calls=len(record['calls']),retries=retry,tokens=tokens,wall_seconds=wall,error=record['error'])
-            if status!='PASS':
-                result['provider'] = settings['provider']
             write(out/'verification.json',result);emit(result)
             state=verify_run(directory);write(directory/'status.json',summary(state))
             if status!='PASS' and not (bounded and plan.get('isolate_indicator_errors')):
@@ -422,5 +531,17 @@ def execute(args):
         return summary(state)
 
 def summary(state):
+    from collections import Counter
+    decisions=Counter(r['decision'] for project in state['projects'] for r in project['rows'])
     return {**{k:v for k,v in state.items() if k!='projects'},'projects':[{k:v for k,v in s.items() if k!='rows'} for s in state['projects']],
+        'selected_projects':len(state['projects']),
+        'processed_projects':sum(p['processed'] for p in state['projects']),
+        'completed_projects':sum(p['complete'] for p in state['projects']),
+        'expected_assessments':sum(len(p['selected']) for p in state['projects']),
+        'supported':decisions['SUPPORTED'],'insufficient_evidence':decisions['INSUFFICIENT_EVIDENCE'],
+        'not_supported':decisions['NOT_SUPPORTED'],
+        'blocked_assessments':sum(len(set(p['blocked_indicators'])|set(p.get('context_limits',{}))) for p in state['projects']),
+        'pending_assessments':sum(len(p['pending_indicators']) for p in state['projects']),
+        'processing_complete':all(p['processed'] for p in state['projects']),
+        'results_available':bool(decisions),
         'valid_assessments':sum(len(s['rows']) for s in state['projects'])}

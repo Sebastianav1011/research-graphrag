@@ -22,6 +22,45 @@ VERSION = 'ASSESSMENT_V3'
 RUBRIC_VERSION = 'CATALOG_ROLES_V3_CANDIDATE'
 CONFIDENCE_VERSION = v2.CONFIDENCE_VERSION
 K_VERSION = 'CONCEPTUAL_UNITS_V3_REQUIRED_ALTERNATIVE'
+# Legacy contracts above remain readable without rescoring their checkpoints.
+SK_VERSION = 'ASSESSMENT_V3_SK_V1'
+SK_CONFIDENCE_VERSION = 'EVIDENCE_CONFIDENCE_SK_V1'
+SK_K_VERSION = 'CRITERIA_COVERAGE_SK_V1_REQUIRED_GATE'
+PARTIAL_COVERAGE = 'CRITERIA_COVERAGE_SK_V2_ESSENTIAL_MEAN'
+SK_STATE_INSTRUCTIONS = '''Estados de cumplimiento de esta version: SUPPORTED (strength 3 o 4) e
+INSUFFICIENT_EVIDENCE (strength 0, 1 o 2). Fuerza 0 significa analisis completado sin respaldo
+verificable: todos los criterios NOT_DEMONSTRATED, coverage=0 y dimensiones de fuerza=0.
+Fuerza 1 o 2 conserva respaldo debil o parcial verificable y permite calcular confianza.
+Evidencia debil, parcial o ausente no es un fallo tecnico ni motivo de REVIEW_REQUIRED.
+REVIEW_REQUIRED solo indica que falta un juicio indispensable para una evaluacion valida;
+no sustituye PARTIAL ni NOT_DEMONSTRATED. Fallos de transporte, esquema o validacion se
+registran tecnicamente; no son incumplimiento ni reciben confianza cero.
+'''
+STRENGTH_DIMENSIONS = ('directness', 'specificity', 'clarity', 'temporal_alignment')
+SK_INSTRUCTIONS = '''
+CONFIANZA_SK_V1: conserva decision y support_strength entero 0..4 segun las reglas anteriores;
+esa nota historica ya NO calcula S. assessment_version=ASSESSMENT_V3_SK_V1.
+Agrega coverage a cada criterio: 0 sin respaldo (NOT_DEMONSTRATED); 1 indicio indirecto,
+2 parte sustancial pero incompleta, 3 casi completo con una brecha explicita (PARTIAL);
+4 requisito integro demostrado (CLEAR). Justifica grado y brecha en explanation con sus referencias.
+No inventes condiciones: usa solo criterios, roles y temporalidad de la rubrica adjunta.
+Agrega strength_rubric: directness, specificity, clarity, temporal_alignment (enteros 0..4),
+evidence_indices y explanation. En transporte por fragmentos usa evidence_refs en vez de indices.
+Referencias SOLO a evidencia de criterios positivos. Explica cada dimension y limitacion; no des
+notas sin fundamento. Rubrica de niveles, siempre relativa a lo que exige el indicador:
+directness: 0 sin soporte; 1 afinidad tematica; 2 vinculo indirecto; 3 afirmacion directa con
+una inferencia pendiente; 4 vinculo explicito demostrado sin inferencias pendientes.
+specificity: 0 sin soporte; 1 generalidad; 2 accion identificada sin detalle comprobable;
+3 hechos concretos delimitados con alguna laguna; 4 hechos precisos y soporte documental completo.
+clarity: 0 sin soporte; 1 vago; 2 ambiguo; 3 claro con salvedad; 4 inequivoco y sin contradiccion.
+temporal_alignment: 0 sin soporte; 1 intencion cuando se exige realizacion; 2 resultado esperado
+o etapa insuficiente; 3 etapa requerida afirmada con incertidumbre; 4 etapa exigida demostrada.
+Diseno o mecanismo vigente puede alcanzar 4 si eso exige el catalogo; no exige impacto adicional.
+Si exige resultados logrados, objetivos, expectativas o actividades solas no alcanzan 4.
+Sin respaldo: cuatro dimensiones=0 y referencias vacias. Una cita o SUPPORTED no otorga maximos.
+El maximo exige las cuatro dimensiones excepcionales y criterios esenciales completos. No devuelvas
+confianza ni probabilidad de impacto: Python calcula respaldo documental, no similitud semantica.
+'''
 CATALOG_ID = 'CATALOG_RUBRIC_V3'
 ROLES = ('REQUIRED', 'ALTERNATIVE', 'COMPLEMENTARY')
 EVIDENCE_TYPES = ('INCORPORATED_APPROACH', 'MECHANISM_OR_COLLABORATION',
@@ -38,6 +77,108 @@ TEMPORAL = {
 }
 BASIS_FIELDS = ('indicator_name', 'descripcion_ampliada', 'key_elements',
                 'favorable_evidence', 'insufficient_evidence', 'relational_context')
+
+# Orthogonal execution policies. Legacy plans without these fields remain
+# demonstrated/retrieved; never infer a new policy when resuming old results.
+DEMONSTRATED = 'DEMONSTRATED_V1'
+PROSPECTIVE = 'PROSPECTIVE_V1'
+GRAPHRAG_CONTEXT = 'GRAPHRAG_FRAGMENTS_V1'
+FULL_CONTEXT = 'FULL_DESCRIPTOR_V1'
+BASE_CONTEXT = 'BASE_DESCRIPTOR_GRAPH_V1'
+RETRIEVED_CONTEXT = 'BASE_RETRIEVED_GRAPH_V1'
+MODE_VERSION = 'EVALUATION_MODES_V1'
+PROSPECTIVE_TEMPORAL = {
+    'DESIGN_OR_EXECUTION': 'PROPOSAL_OR_HIGHER',
+    'ESTABLISHED_OR_EXECUTED': 'PROPOSAL_OR_HIGHER',
+    'EXECUTED_ACTIVITY': 'PROPOSAL_OR_HIGHER',
+    'DEMONSTRATED_RESULT': 'EXPECTED_OR_DEMONSTRATED',
+}
+PROSPECTIVE_INSTRUCTIONS = '''
+MODO PROSPECTIVE_V1: evalua respaldo de contribuciones PREVISTAS, no impacto ocurrido.
+Lee la definicion, rationale y temporalidad efectiva de CADA criterio. Las actividades,
+productos y mecanismos concretos previstos pueden satisfacer PROPOSAL_OR_HIGHER;
+un resultado concreto esperado puede satisfacer EXPECTED_OR_DEMONSTRATED.
+Un impacto previsto es RESULT_EXPECTED referido explicitamente al cambio que se espera
+producir y a su mecanismo; no lo confundas con un producto, actividad o hecho demostrado.
+Identificacion contextual usa CONTEXT; actividad prevista ACTIVITY_PROPOSED; resultado
+o impacto previsto RESULT_EXPECTED; ejecucion ACTIVITY_EXECUTED; logro RESULT_DEMONSTRATED.
+Conserva DESIGN_DOCUMENTED y MECHANISM_ESTABLISHED cuando la cita describe esos hechos.
+Barrera de concrecion: una intencion vaga, afinidad tematica, tecnologia o poblacion
+mencionada no demuestra una contribucion. CLEAR exige que el texto fundamente que hara
+o producira ESTE proyecto y, cuando lo pida el criterio, para quien, con quien y como.
+Si falta una condicion, usa PARTIAL o NOT_DEMONSTRATED y explica la brecha; no inventes.
+Conserva REQUIRED, alternativas, actores y conjunciones. Un criterio contextual no
+compensa requisitos esenciales. No descartes una contribucion concreta SOLO por ser futura.
+Los textos originales del catalogo se conservan: las exclusiones relativas a hechos
+realizados se interpretan segun la temporalidad efectiva adjunta, sin anular exclusiones
+de pertinencia, destinatarios, mecanismo o concrecion. Una actividad no prueba un resultado.
+Para S usa las mismas cuatro dimensiones 0..4: valora explicitud, precision, claridad
+y alineacion con la ETAPA EXIGIDA EN ESTE MODO. Una propuesta concreta puede tener
+temporal_alignment=4 si satisface la etapa prospectiva; eso no demuestra ejecucion.
+No otorgues maximos automaticamente por usar futuro ni por tener una cita literal.
+SUPPORTED significa contribucion prevista suficientemente respaldada. Python mantiene
+la formula 100*(0.55*S+0.45*K); no emitas porcentajes ni probabilidades de exito.
+'''
+
+
+def evaluation_policy(mode=None, context=None, *, base=False, configured=None, saved=None):
+    """Resolve new-run defaults or enforce the exact frozen/legacy policy."""
+    configured=configured or {}
+    modes={'prospective':PROSPECTIVE,'demonstrated':DEMONSTRATED,PROSPECTIVE:PROSPECTIVE,DEMONSTRATED:DEMONSTRATED}
+    contexts={'full-descriptor':FULL_CONTEXT,'graphrag':GRAPHRAG_CONTEXT,'descriptor-graph':BASE_CONTEXT,'retrieved-graph':RETRIEVED_CONTEXT,
+        RETRIEVED_CONTEXT:RETRIEVED_CONTEXT,
+        FULL_CONTEXT:FULL_CONTEXT,GRAPHRAG_CONTEXT:GRAPHRAG_CONTEXT,BASE_CONTEXT:BASE_CONTEXT}
+    if saved is not None:
+        if saved:verify_evaluation_policy(saved)
+        old_mode=saved.get('evaluation_mode',DEMONSTRATED);old_context=saved.get('context_mode',GRAPHRAG_CONTEXT)
+        if (mode is not None and modes.get(mode)!=old_mode or context is not None and contexts.get(context)!=old_context):
+            raise ValueError('Modos incompatibles con el checkpoint; crear un run nuevo')
+        return dict(saved)
+    mode=mode or configured.get('mode') or (PROSPECTIVE if base else DEMONSTRATED)
+    if mode not in modes:raise ValueError('Modo de evaluacion desconocido')
+    mode=modes[mode]
+    context=context or configured.get('context_mode') or (RETRIEVED_CONTEXT if base else GRAPHRAG_CONTEXT)
+    if base and contexts.get(context)!=RETRIEVED_CONTEXT:
+        raise ValueError('BASE requiere retrieved-graph sin descriptor completo; crear un run nuevo con ese contexto')
+    if context not in contexts:raise ValueError('Modo de contexto desconocido')
+    value=dict(version=MODE_VERSION,evaluation_mode=mode,context_mode=contexts[context],
+        instructions_version='PROSPECTIVE_SK_PROMPT_V2_PARTIAL' if mode==PROSPECTIVE else 'DEMONSTRATED_SK_PROMPT_V2_PARTIAL',
+        supported_meaning='PLANNED_CONTRIBUTION_SUPPORTED' if mode==PROSPECTIVE else 'CATALOG_REQUIRED_STAGE_SUPPORTED',
+        instructions_sha256=canonical_hash([SK_INSTRUCTIONS,PROSPECTIVE_INSTRUCTIONS if mode==PROSPECTIVE else '',PARTIAL_COVERAGE]),
+        confidence_version=SK_CONFIDENCE_VERSION)
+    value['sha256']=canonical_hash(value)
+    return value
+
+
+def verify_evaluation_policy(policy):
+    if (policy.get('version')!=MODE_VERSION or policy.get('evaluation_mode') not in (PROSPECTIVE,DEMONSTRATED)
+            or policy.get('context_mode') not in (FULL_CONTEXT,GRAPHRAG_CONTEXT,BASE_CONTEXT,RETRIEVED_CONTEXT)
+            or policy.get('sha256')!=canonical_hash({k:v for k,v in policy.items() if k!='sha256'})):
+        raise ValueError('Fingerprint de modos incompatible o alterado')
+    return policy
+
+
+def prospective_rubric(rubric):
+    """Non-destructive temporal derivation; roles, labels and provenance survive."""
+    value=deepcopy(rubric)
+    value.pop('rubric_sha256')
+    for criterion in value['criteria']:
+        criterion['temporal_requirement']=PROSPECTIVE_TEMPORAL.get(
+            criterion['temporal_requirement'],criterion['temporal_requirement'])
+    value['rubric_sha256']=canonical_hash(value)
+    return value
+
+
+def catalog_for_mode(profiles,rubrics,mode):
+    if mode not in (PROSPECTIVE,DEMONSTRATED):raise ValueError('Modo de evaluacion desconocido')
+    derived={iid:prospective_rubric(r) if mode==PROSPECTIVE else deepcopy(r) for iid,r in rubrics.items()}
+    for iid,r in derived.items():check_rubric(profiles[iid],r)
+    receipt=dict(version='TEMPORAL_CATALOG_DERIVATION_V1',evaluation_mode=mode,
+        original_catalog_sha256=canonical_hash(rubrics),effective_catalog_sha256=canonical_hash(derived),
+        criteria={iid:[dict(criterion_id=c['criterion_id'],original_temporal_requirement=c['temporal_requirement'],
+            effective_temporal_requirement=d['temporal_requirement']) for c,d in zip(r['criteria'],derived[iid]['criteria'])]
+            for iid,r in rubrics.items()})
+    return derived,receipt
 
 
 def _object(properties):
@@ -64,17 +205,28 @@ def rubric_response_schema():
                         assessments=dict(type='array', items=item, minItems=1, maxItems=1)))
 
 
-def schemas(fields=FIELDS):
+def schemas(fields=FIELDS, version=VERSION):
+    if version not in (VERSION, SK_VERSION):
+        raise ValueError('Unknown assessment confidence contract: '+str(version))
     result = field_schema(deepcopy(v2.schemas()), fields)
     assessment = result['assessment']
-    assessment['properties']['assessment_version']['const'] = VERSION
+    assessment['properties']['assessment_version']['const'] = version
     assessment['properties']['evidence']['items']['properties']['stage']['enum'] = STAGES
     criterion = assessment['properties']['criterion_assessments']['items']
     criterion['properties'].pop('required_stage')
     criterion['required'].remove('required_stage')
+    if version == SK_VERSION:
+        criterion['properties']['coverage'] = dict(type='integer', minimum=0, maximum=4)
+        criterion['required'].append('coverage')
+        assessment['properties']['strength_rubric'] = _object(dict(
+            **{name:dict(type='integer', minimum=0, maximum=4) for name in STRENGTH_DIMENSIONS},
+            evidence_indices=dict(type='array', items=dict(type='integer', minimum=0), uniqueItems=True),
+            explanation=dict(type='string', minLength=1)))
+        assessment['required'].append('strength_rubric')
+        assessment['properties']['coverage_policy']=dict(type='string',const=PARTIAL_COVERAGE)
     item = deepcopy(assessment)
     item['properties'] = {'indicator_id':dict(type='string', minLength=1), **item['properties']}
-    item['required'] = list(item['properties'])
+    item['required'] = [k for k in item['properties'] if k!='coverage_policy']
     # Transport subset excludes uniqueItems, while normative Python validation
     # still rejects duplicate evidence indices.
     def transport(value):
@@ -88,6 +240,9 @@ def schemas(fields=FIELDS):
     result['rubric_batch'] = rubric_response_schema()
     result['confidence_result']['properties']['conceptual_coverage_version'] = dict(type='string', const=K_VERSION)
     result['confidence_result']['required'].append('conceptual_coverage_version')
+    if version == SK_VERSION:
+        result['confidence_result']['properties']['confidence_version']['const'] = SK_CONFIDENCE_VERSION
+        result['confidence_result']['properties']['conceptual_coverage_version'] = dict(type='string',enum=[SK_K_VERSION,PARTIAL_COVERAGE])
     return result
 
 
@@ -173,8 +328,8 @@ def check_rubric(profile, rubric):
     return rubric
 
 
-def validate_wrapper(wrapper, project_id, ids, fields=FIELDS):
-    Draft202012Validator(schemas(fields)['assessment_batch']).validate(wrapper)
+def validate_wrapper(wrapper, project_id, ids, fields=FIELDS, version=VERSION):
+    Draft202012Validator(schemas(fields, version)['assessment_batch']).validate(wrapper)
     actual = [a['indicator_id'] for a in wrapper['assessments']]
     if wrapper['project_id'] != project_id or len(actual) != len(set(actual)) or set(actual) != set(ids):
         raise AssessmentValidationError([dict(category='INVALID_FIELD_VALUE',
@@ -227,18 +382,49 @@ def validate_criteria(project_fields, profile, assessment, rubric, ids):
 
 def validate(project_fields, profile, assessment, rubric):
     check_rubric(profile, rubric)
+    version = assessment.get('assessment_version') if isinstance(assessment, dict) else None
+    if version not in (VERSION, SK_VERSION):
+        return ['V3_SCHEMA:UNKNOWN_ASSESSMENT_VERSION']
     errors = [f'V3_SCHEMA:{list(e.absolute_path)}:{e.validator}' for e in
-              Draft202012Validator(schemas(project_fields)['assessment']).iter_errors(assessment)]
+              Draft202012Validator(schemas(project_fields, version)['assessment']).iter_errors(assessment)]
     if errors:
         return errors
     criteria = {c['criterion_id']:c for c in rubric['criteria']}
     actual = [c['criterion_id'] for c in assessment['criterion_assessments']]
     if len(actual) != len(set(actual)) or set(actual) != set(criteria):
         return ['V3_CRITERIA:EXACT_FROZEN_RUBRIC_REQUIRED']
-    errors += validate_assessment(project_fields, profile, v2.legacy_projection(profile, assessment))
+    projection = v2.legacy_projection(profile, assessment)
+    # Only the new state policy merges completed no-support judgments. Reuse the
+    # legacy gates without changing V1/V2/V3 or the meanings of S and K.
+    if version == SK_VERSION and assessment['decision'] == 'INSUFFICIENT_EVIDENCE' and assessment['support_strength'] == 0:
+        projection['decision'] = 'NOT_SUPPORTED'
+    errors += validate_assessment(project_fields, profile, projection)
     criterion_errors,clear,positive=_criterion_contract(project_fields,assessment,rubric)
     errors+=criterion_errors
     evidence=assessment['evidence']
+    if version == SK_VERSION:
+        for item in assessment['criterion_assessments']:
+            grade = item['coverage']
+            allowed = {'CLEAR': (4,), 'PARTIAL': (1, 2, 3), 'NOT_DEMONSTRATED': (0,)}
+            if grade not in allowed[item['support']]:
+                errors.append('SK_CRITERION:COVERAGE_SUPPORT_MISMATCH')
+            if not item['explanation'].strip():
+                errors.append('SK_CRITERION:JUSTIFICATION_REQUIRED')
+        strength = assessment['strength_rubric']
+        indices = strength['evidence_indices']
+        positive_refs = {i for c in assessment['criterion_assessments']
+                         if c['support'] != 'NOT_DEMONSTRATED' for i in c['evidence_indices']}
+        if any(i >= len(evidence) or i not in positive_refs for i in indices):
+            errors.append('SK_STRENGTH:UNVERIFIABLE_CRITERION_REFERENCE')
+        if not strength['explanation'].strip():
+            errors.append('SK_STRENGTH:JUSTIFICATION_REQUIRED')
+        total = sum(strength[name] for name in STRENGTH_DIMENSIONS)
+        if total and not indices:
+            errors.append('SK_STRENGTH:POSITIVE_REQUIRES_EVIDENCE')
+        if (assessment['support_strength'] == 0) != (total == 0):
+            errors.append('SK_STRENGTH:ZERO_ANCHOR_MISMATCH')
+        if assessment['support_strength'] == 0 and positive:
+            errors.append('SK_ZERO_SUPPORT:CANNOT_CLAIM_POSITIVE_CONCEPTUAL_SUPPORT')
     if assessment['decision'] == 'NOT_SUPPORTED' and positive:
         errors.append('V3_NOT_SUPPORTED:CANNOT_CLAIM_POSITIVE_CONCEPTUAL_SUPPORT')
     if assessment['support_strength'] > 0 and not evidence:
@@ -256,17 +442,26 @@ def validate(project_fields, profile, assessment, rubric):
 
 def confidence(project_fields, profile, assessment, rubric):
     errors = validate(project_fields, profile, assessment, rubric)
-    result = dict(confidence_version=CONFIDENCE_VERSION, conceptual_coverage_version=K_VERSION,
+    granular = isinstance(assessment, dict) and assessment.get('assessment_version') == SK_VERSION
+    result = dict(confidence_version=SK_CONFIDENCE_VERSION if granular else CONFIDENCE_VERSION,
+        conceptual_coverage_version=assessment.get('coverage_policy',SK_K_VERSION) if granular else K_VERSION,
         confidence_status='INVALID_ASSESSMENT', confidence_raw_score=None, conceptual_coverage=None,
         support_strength_score=None, confidence_probability=None, confidence_level=None, validation_errors=errors)
     if errors:
         return result
-    values = {c['criterion_id']:v2.LEVELS[c['support']] for c in assessment['criterion_assessments']}
-    units = [values[c['criterion_id']] for c in rubric['criteria'] if c['role'] == 'REQUIRED']
-    groups = {c['alternative_group'] for c in rubric['criteria'] if c['role'] == 'ALTERNATIVE'}
-    units += [max(values[c['criterion_id']] for c in rubric['criteria'] if c['alternative_group'] == group) for group in groups]
     with localcontext(Context(prec=50, rounding=ROUND_HALF_UP)):
+        values = {c['criterion_id']:(Decimal(c['coverage'])/4 if granular else v2.LEVELS[c['support']])
+                  for c in assessment['criterion_assessments']}
+        units = [values[c['criterion_id']] for c in rubric['criteria'] if c['role'] == 'REQUIRED']
+        groups = {c['alternative_group'] for c in rubric['criteria'] if c['role'] == 'ALTERNATIVE'}
+        units += [max(values[c['criterion_id']] for c in rubric['criteria'] if c['alternative_group'] == group) for group in groups]
         k = sum(units, Decimal(0))/len(units); s = Decimal(assessment['support_strength'])/4
+        if granular:
+            required = [values[c['criterion_id']] for c in rubric['criteria'] if c['role'] == 'REQUIRED']
+            if required and assessment.get('coverage_policy')!=PARTIAL_COVERAGE:
+                k = min(k, min(required))
+            strength = assessment['strength_rubric']
+            s = sum((Decimal(strength[name]) for name in STRENGTH_DIMENSIONS), Decimal(0))/16
         score = (100*(Decimal('.55')*s+Decimal('.45')*k)).quantize(Decimal('.01'))
     result.update(confidence_status='COMPUTED', confidence_raw_score=float(score),
                   conceptual_coverage=float(k), support_strength_score=float(s))
@@ -275,9 +470,19 @@ def confidence(project_fields, profile, assessment, rubric):
 
 def indicator_row(project, profile, assessment, rubric):
     computed = confidence(project['fields'], profile, assessment, rubric)
+    decision = assessment.get('decision')
+    # NOT_SUPPORTED remains an accepted input alias. Its original response,
+    # criteria and strength stay in the existing receipts; never relabel invalid
+    # assessments or rewrite historical contracts/results.
+    if (assessment.get('assessment_version') == SK_VERSION and
+            not computed['validation_errors'] and decision == 'NOT_SUPPORTED'):
+        decision = 'INSUFFICIENT_EVIDENCE'
     return dict(project_id=project['project_id'], **{k:profile[k] for k in
         ('indicator_id','indicator_name','indicator_category','indicator_dimension')},
-        assessment_version=VERSION, decision=assessment.get('decision'), support_strength=assessment.get('support_strength'),
+        **({'strength_rubric':deepcopy(assessment['strength_rubric'])}
+           if 'strength_rubric' in assessment else {}),
+        assessment_version=assessment.get('assessment_version'), decision=decision, support_strength=assessment.get('support_strength'),
+        **({'coverage_policy':assessment['coverage_policy']} if 'coverage_policy' in assessment else {}),
         criterion_assessments=assessment.get('criterion_assessments', []),
         evidence_source_fields=[e['field'] for e in assessment.get('evidence', [])],
         evidence_texts=[e['text'] for e in assessment.get('evidence', [])],
@@ -344,6 +549,10 @@ si el indicador no lo pide. Adopción o mejoras realizadas sí requieren hechos 
 vinculación temática potencial no es una acción. No impongas condiciones ajenas al catálogo.
 No devuelvas confianza ni probabilidades. assessment_version=ASSESSMENT_V3. Un assessment por id.
 '''
+
+SK_ASSESSMENT_INSTRUCTIONS = INSTRUCTIONS.replace(
+    'SUPPORTED strength3-4; INSUFFICIENT_EVIDENCE1-2; NOT_SUPPORTED0 y ningún criterio positivo.',
+    SK_STATE_INSTRUCTIONS)
 
 
 def make_input(project, profiles, rules, rubrics):

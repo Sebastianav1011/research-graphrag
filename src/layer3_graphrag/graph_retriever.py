@@ -32,6 +32,27 @@ class GraphRetriever:
             for row in snapshot.tables.get(prefix + "_chunks", []):
                 self._chunks[space].setdefault(row["document_id"], []).append(row)
 
+    def project_context(self,project_id):
+        """Exact canonical seed; shared authorship never asserts project production."""
+        seeds=[key for key,node in self.store.nodes.items()
+            if node['entity_type']=='PROJECT' and node['canonical_id']==project_id]
+        if len(seeds)!=1:raise ValueError('Proyecto sin nodo de grafo inequivoco: '+project_id)
+        result=self.retrieve(seeds)
+        from .security import remove_personal_identifiers
+        def provenance(value):
+            value=remove_personal_identifiers(value)
+            if isinstance(value,dict):return {k:provenance(v) for k,v in value.items() if k!='original_values'}
+            if isinstance(value,list):return [provenance(v) for v in value]
+            return value
+        return dict(project_id=project_id,seed_entity_id=seeds[0],version='PROJECT_RELATIONAL_CONTEXT_V1',
+            evidence_role='RELATIONAL_CONTEXT_ONLY',
+            entities=[{k:n[k] for k in ('entity_id','entity_type','canonical_id','label')} for n in result['entities']],
+            relations=[dict(relation_id=r['relation_id'],source_entity_id=r['source_entity_id'],
+                target_entity_id=r['target_entity_id'],relation_type=r['relation_type'],
+                evidence_type=r['evidence_type'],attributes=json_object(r['attributes_json']),
+                provenance=provenance(json_object(r['provenance_json']))) for r in result['relations']],
+            support_paths=result['support_paths'],metrics=result['metrics'])
+
     def retrieve(self, seed_entity_ids, space="SOURCE"):
         if space not in {"SOURCE", "REFERENCE"}:
             raise ValueError("Graph retrieval space must be SOURCE or REFERENCE")

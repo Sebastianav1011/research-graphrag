@@ -657,6 +657,13 @@ def measured_pipeline(fn):
         kwargs['run_id']=name;run=find_run(Path(root).resolve(),runs,name)
         if run.exists() and not kwargs.get('resume') and not kwargs.get('stage'):
             raise ValueError('Run ID ya existe; usar resume --run-id ' + name + ' o elegir otro ID')
+        # Reject incompatible methodology before monitoring writes any receipt.
+        from run_paths import file_path
+        checkpoint=file_path(run,'execution.json')
+        if checkpoint.exists():
+            from .assessment_v3 import evaluation_policy
+            frozen=json.loads(checkpoint.read_text(encoding='utf-8')).get('evaluation_policy',{})
+            evaluation_policy(kwargs.get('evaluation_mode'),kwargs.get('context_mode'),saved=frozen)
         with run_session(run,deferred=kwargs.get('single_authorization',False)) as measurement:
             result=fn(root,**kwargs)
             if measurement:measurement.data['status']=result.get('status','COMPLETE')

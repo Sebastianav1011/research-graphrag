@@ -19,10 +19,12 @@ def seal(run):
     write(run_file(run, 'prepared_hashes.json'), {p.relative_to(run).as_posix(): sha(p) for p in files})
 
 
-def check(root, run):
+def check(root, run, *, knowledge_only=False):
     state = read(run_file(run, 'run.json'))
     from .checkpoints import resolve
     raw = resolve(root, state['raw_path'])
+    if state.get('global_catalog_sha256') is not None and sha(resolve(root,state['configuration']['reference_catalog']))!=state['global_catalog_sha256']:
+        raise ValueError('Catalogo global BASE modificado')
     verify_raw(raw, read(run_file(run, 'raw_manifest.json'))['files'], state['configuration'].get('source_paths'))
     selection = state['configuration'].get('project_selection')
     if selection:
@@ -30,6 +32,8 @@ def check(root, run):
             if not (root / name).is_file() or sha(root / name) != fingerprint:
                 raise ValueError('Fuente del manifiesto de seleccion modificada: ' + name)
     for name, fingerprint in state['code_hashes'].items():
+        if knowledge_only and not name.startswith(('src/layer2_processing/preprocessing/','src/layer2_processing/knowledge/','src/layer3_graphrag/','config/')):
+            continue  # UI/evaluation changes do not alter stored knowledge.
         from .checkpoints import verify_expected
         verify_expected(root, name, fingerprint)
     if state['status'] not in ('PREPROCESSED', 'PREPARED'):
@@ -124,6 +128,69 @@ def layer_config(root, number):
     return root / 'config' / {2: 'layer1.yaml', 3: 'layer2.yaml', 4: 'layer3.yaml'}[number]
 
 
+def reuse_global_base(root,run,raw,config,dataset,*,probe=False,require_graph=False):
+    """Reuse an immutable compatible checkpoint; never reuse evaluations/selection."""
+    if config.get('knowledge_scope')!='BASE_GLOBAL_V1':return False
+    from .checkpoints import resolve
+    from jsonschema.exceptions import ValidationError
+    catalog_hash=sha(resolve(root,config['reference_catalog']))
+    from run_paths import list_runs
+    import shutil
+    ignored={'llm','evaluation','evaluation_policy','project_selection','processing_scope','runs_base','base_knowledge_action','base_knowledge_source'}
+    data_config=lambda value:{k:v for k,v in value.items() if k not in ignored}
+    for candidate in sorted(list_runs(root),reverse=True):
+        if candidate.resolve()==run.resolve():continue
+        if config.get('base_knowledge_source') and candidate.relative_to(root).as_posix()!=config['base_knowledge_source']:continue
+        try:
+            state=read(run_file(candidate,'run.json'))
+            if (state.get('status')!='PREPARED' or state.get('dataset')!=dataset or
+                    state.get('configuration',{}).get('knowledge_scope')!='BASE_GLOBAL_V1' or
+                    data_config(state['configuration'])!=data_config(config) or
+                    (root/state['raw_path']).resolve()!=raw.resolve()):continue
+            if state.get('global_catalog_sha256')!=catalog_hash:continue
+            check(root,candidate,knowledge_only=True)  # RAW, data contracts and sealed files.
+            knowledge=candidate/'workspace/outputs/layer2/knowledge/_manifest.json'
+            if not knowledge.is_file():continue
+            graph=candidate/'workspace/outputs/layer3/publication'
+            if require_graph and not (graph/'_manifest.json').is_file():continue
+            if (graph/'_manifest.json').exists():
+                from layer3_graphrag.manifest import validate_publication
+                validate_publication(graph,sha(knowledge))
+                if require_graph:
+                    from layer3_graphrag.configuration import load_config
+                    from layer3_graphrag.validate_inputs import validate_inputs
+                    from layer3_graphrag.pipeline import load_artifacts
+                    from layer3_graphrag.embeddings import create_provider
+                    graph_config,_=load_config(candidate/'workspace')
+                    snapshot=validate_inputs(candidate/'workspace',graph_config)
+                    load_artifacts(candidate/'workspace',snapshot,graph_config,create_provider(graph_config['embeddings']))
+        except (OSError,ValueError,KeyError,RuntimeError,ValidationError):continue
+        if probe:return candidate.relative_to(root).as_posix()
+        if (run/'workspace').exists():raise ValueError('No sobrescribir un workspace existente para reutilizar BASE')
+        for relative in ('workspace/config','workspace/data','workspace/outputs/layer2','preprocess'):
+            source=candidate/relative
+            if source.is_dir():
+                shutil.copytree(source,run/relative,ignore=shutil.ignore_patterns('selection_manifest.json'))
+        run_file(run,'raw_manifest.json').parent.mkdir(parents=True,exist_ok=True)
+        shutil.copyfile(run_file(candidate,'raw_manifest.json'),run_file(run,'raw_manifest.json'))
+        if (graph/'_manifest.json').exists():
+            shutil.copytree(graph,run/'workspace/outputs/layer3/publication')
+            queries=candidate/'workspace/outputs/layer3/query_cache'
+            if queries.is_dir():shutil.copytree(queries,run/'workspace/outputs/layer3/query_cache')
+        fresh=dict(state,run_id=run.name,configuration=config,code_hashes=code_hashes(root),
+            started_at=datetime.now(timezone.utc).isoformat(),
+            global_reuse=dict(source_run=candidate.name,knowledge_manifest_sha256=sha(knowledge),
+                graph_reused=(graph/'_manifest.json').exists()))
+        write(run_file(run,'run.json'),fresh)
+        seal(run)
+        if config.get('project_selection'):
+            from .preprocessing.project_selection import validate_selection
+            validate_selection(root,run)
+            seal(run)
+        return True
+    return False
+
+
 def prepare(root, run, raw, dataset, config, through='knowledge'):
     registered = (run_file(run, 'run.json')).exists() and read(run_file(run, 'run.json')).get('status') == 'REGISTERED'
     if (run_file(run, 'run.json')).exists() and not registered:
@@ -140,8 +207,15 @@ def prepare(root, run, raw, dataset, config, through='knowledge'):
     elif run.exists():
         raise ValueError('Directorio existente/incompleto: utilizar otro --run-id')
     run.mkdir(parents=True, exist_ok=registered)
+    action=config.get('base_knowledge_action','auto')
+    if action!='rebuild' and reuse_global_base(root,run,raw,config,dataset,require_graph=action=='reuse'):
+        return dict(status='REUSED_GLOBAL_BASE',run=str(run),inference_calls=0,embeddings_created=0)
+    if action=='reuse':raise ValueError('No existe conocimiento global BASE compatible; elegir reconstruir o --knowledge-action rebuild')
     state = dict(run_id=run.name, dataset=dataset, raw_path=raw.relative_to(root).as_posix(),
         status='PREPARING', started_at=datetime.now(timezone.utc).isoformat(), configuration=config, code_hashes=code_hashes(root))
+    if config.get('knowledge_scope')=='BASE_GLOBAL_V1':
+        from .checkpoints import resolve
+        state['global_catalog_sha256']=sha(resolve(root,config['reference_catalog']))
     write(run_file(run, 'run.json'), state)
     try:
         sources, lineage = prepare_files(root, raw, run, config)
@@ -156,6 +230,8 @@ def prepare(root, run, raw, dataset, config, through='knowledge'):
         scope_path=run/'preprocess/scope.json'
         if scope_path.is_file():
             settings['scope_identity_context']=str(run/'preprocess/identity_context.json')
+            settings['errors']['scoped_article_quarantine']='PROJECT_SCOPE_V1'
+        if config.get('knowledge_scope')=='BASE_GLOBAL_V1':
             settings['errors']['scoped_article_quarantine']='PROJECT_SCOPE_V1'
         (workspace / 'config/layer1.yaml').write_text(yaml.safe_dump(settings), encoding='utf-8')
         from layer2_processing.preprocessing.pipeline import run as etl
@@ -212,6 +288,8 @@ def knowledge(root, run):
     workspace = run / 'workspace'
     try:
         layer2 = yaml.safe_load(layer_config(root, 3).read_text(encoding='utf-8'))
+        if state['configuration'].get('knowledge_scope')=='BASE_GLOBAL_V1':
+            layer2['datasets']['articulos']['required_fields']=[f for f in layer2['datasets']['articulos']['required_fields'] if f!='title']
         # Append only fields explicitly selected by preprocessing, never arbitrary RAW keys.
         for dataset in ('proyectos', 'articulos'):
             for row in pq.read_table(workspace / f'outputs/layer2/canonical/{dataset}.parquet').to_pylist():

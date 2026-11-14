@@ -56,7 +56,8 @@ class TerritoryCodes:
         return sorted(codes)
 
 
-def write_results(run, columns, records, codes_by_pair):
+def write_results(run, columns, records, codes_by_pair, *, filename='indicadores.csv',
+                  territorial_filename='indicadores_territorios.csv', exclusive=False):
     """Preserve the caller's grain (including researcher), expanding only codes.
 
     CSV has no type metadata: identifiers are literal text, never Excel formulas.
@@ -72,7 +73,7 @@ def write_results(run, columns, records, codes_by_pair):
             continue
         seen.add(key)
         normal.append(row)
-        pair = row['siap_id'], row['indicador_id']
+        pair = row.get('proyecto/articulo_siap_id',row.get('siap_id')), row['indicador_id']
         for code in sorted(set(codes_by_pair.get(pair, []))):
             if not isinstance(code, str) or len(code) not in (2, 5) or not code.isascii() or not code.isdigit():
                 raise ValueError('Codigo DANE no textual o incompatible')
@@ -80,8 +81,12 @@ def write_results(run, columns, records, codes_by_pair):
     directory = Path(run)/'resultados'
     directory.mkdir(parents=True, exist_ok=True)
     paths = {}
-    for name, fields, rows in [('indicadores.csv', columns, normal),
-                               ('indicadores_territorios.csv', columns+['codigo_dane'], territorial)]:
+    exports=[(filename,columns,normal)]
+    if territorial_filename is not None:exports.append((territorial_filename,columns+['codigo_dane'],territorial))
+    for name,_,_ in exports:
+        if Path(name).name!=name:raise ValueError('Nombre CSV incompatible')
+        if exclusive and (directory/name).exists():raise FileExistsError(directory/name)
+    for name, fields, rows in exports:
         target = directory/name
         temporary = target.with_suffix('.csv.pending')
         with temporary.open('w', encoding='utf-8-sig', newline='') as stream:

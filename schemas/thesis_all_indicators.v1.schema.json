@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "THESIS_ALL_INDICATORS_V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["Proyectos", "Artículos"],
+  "$defs": {
+    "indicator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["proyecto/articulo_siap_id", "indicador_id", "estado_cumplimiento", "parrafo_evidencia", "fuente_evidencia", "ubicacion_evidencia", "territorio_region", "confianza"],
+      "properties": {
+        "proyecto/articulo_siap_id": {"type": "string", "minLength": 1},
+        "indicador_id": {"type": "string", "minLength": 1},
+        "estado_cumplimiento": {"type": "string", "minLength": 1},
+        "parrafo_evidencia": {"type": ["string", "null"]},
+        "fuente_evidencia": {"type": ["string", "null"]},
+        "ubicacion_evidencia": {"type": ["string", "null"]},
+        "territorio_region": {"type": ["string", "null"]},
+        "confianza": {"type": ["number", "null"], "minimum": 0, "maximum": 100}
+      },
+      "allOf": [
+        {"if": {"properties": {"estado_cumplimiento": {"enum": ["SUPPORTED", "INSUFFICIENT_EVIDENCE", "NOT_SUPPORTED"]}}},
+         "then": {"properties": {"confianza": {"type": "number"}}},
+         "else": {"properties": {"confianza": {"type": "null"}, "parrafo_evidencia": {"type": "null"}, "fuente_evidencia": {"type": "null"}, "ubicacion_evidencia": {"type": "null"}, "territorio_region": {"type": "null"}}}},
+        {"if": {"properties": {"estado_cumplimiento": {"const": "SUPPORTED"}}},
+         "then": {"properties": {"parrafo_evidencia": {"type": "string", "minLength": 1}, "fuente_evidencia": {"type": "string", "minLength": 1}, "ubicacion_evidencia": {"type": "string", "minLength": 1}}}}
+      ]
+    }
+  },
+  "properties": {
+    "Proyectos": {"type": "array", "items": {"$ref": "#/$defs/indicator"}},
+    "Artículos": {"type": "array", "items": {"$ref": "#/$defs/indicator"}}
+  }
+}

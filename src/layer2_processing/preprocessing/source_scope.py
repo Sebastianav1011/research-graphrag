@@ -15,6 +15,7 @@ from .canonicalize import entity_id
 def plan_scope(root, raw, config, discovery, known):
     from .adapters import mapping_for, file_configuration, clean
     scope = config.get('processing_scope')
+    if config.get('knowledge_scope')=='BASE_GLOBAL_V1':return None
     if not scope:
         return None
     if any(f['status'] != 'READY_FOR_VALIDATION' for f in discovery.values()):

@@ -47,6 +47,49 @@ def test_build_preserves_original_identity_and_metadata():
     assert len(store.nodes) == 5
 
 
+def test_project_relational_context_keeps_external_projects_and_literal_lineage():
+    sample=snapshot()
+    for edge in sample.tables['relations']:
+        edge['provenance_json']=json.dumps({'layer1':[{'record_source':'base/members.csv',
+            'source_row':2,'raw_sha256':'synthetic','original_values':{'documento':'PRIVATE'}}]})
+    package=GraphRetriever(build_graph(sample),sample).project_context('p1')
+    assert {n['entity_id'] for n in package['entities']}=={'P1','P2','R','A'}
+    assert len(package['relations'])==3
+    assert package['support_paths']['P2']==['e1','e2']
+    assert package['relations'][0]['provenance']['layer1'][0]=={
+        'record_source':'base/members.csv','source_row':2,'raw_sha256':'synthetic'}
+    assert package['evidence_role']=='RELATIONAL_CONTEXT_ONLY'
+    assert {r['relation_type'] for r in package['relations']}=={'PROJECT_HAS_RESEARCHER','ARTICLE_HAS_RESEARCHER'}
+    with pytest.raises(ValueError,match='inequivoco'):
+        GraphRetriever(build_graph(sample),sample).project_context('unselected_missing')
+
+
+def test_read_only_project_relations_uses_published_graph_and_rejects_changed_facts(tmp_path,monkeypatch):
+    from layer4_evaluation.indicators.scoped_retrieval import project_relations
+    sample=snapshot();sample.manifest_hash='synthetic_knowledge'
+    for edge in sample.tables['relations']:
+        edge['provenance_json']='{"record_source":"base/members.csv","source_row":1}'
+    publication=tmp_path/'outputs/layer3/publication'
+    from copy import deepcopy
+    graph=build_graph(deepcopy(sample));graph.save(publication/'graph')
+    (publication/'_manifest.json').write_text('{}',encoding='utf-8')
+    monkeypatch.setattr('layer3_graphrag.configuration.load_config',lambda *a:({'graph':{'max_hops':2}},'config_hash'))
+    monkeypatch.setattr('layer3_graphrag.validate_inputs.validate_inputs',lambda *a:sample)
+    checks=[]
+    def verified(path,fingerprint):
+        checks.append(fingerprint)
+        return {'layer3_run_id':'synthetic_layer3'}
+    monkeypatch.setattr('layer4_evaluation.indicators.scoped_retrieval.validate_publication',verified)
+    packages=project_relations(tmp_path,[{'project_id':'p1'}])
+    assert set(packages)=={'p1'} and checks==['synthetic_knowledge']
+    assert {n['entity_id'] for n in packages['p1']['entities']}=={'P1','P2','A','R'}
+    assert packages['p1']['knowledge_manifest_sha256']=='synthetic_knowledge'
+    graph.relations['e1']['attributes_json']='{"changed":true}'
+    graph.save(publication/'graph')
+    with pytest.raises(ValueError,match='conocimiento aprobado'):
+        project_relations(tmp_path,[{'project_id':'p1'}])
+
+
 def test_unknown_identity_status_cannot_bridge():
     sample = snapshot()
     sample.tables['entities'][2]['metadata_json'] = '{}'

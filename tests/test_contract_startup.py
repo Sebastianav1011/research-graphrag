@@ -25,6 +25,9 @@ def stable(system,monkeypatch):
         shutil.copyfile(SOURCE/'scripts'/name,target)
     for name in ('layer1.yaml','layer2.yaml','layer3.yaml','openai.json'):
         shutil.copyfile(SOURCE/'config'/name,root/'config'/name)
+    template=root/'data/templates/plantilla_resultado_tesis.xlsx'
+    template.parent.mkdir(parents=True,exist_ok=True)
+    shutil.copyfile(SOURCE/'data/templates/plantilla_resultado_tesis.xlsx',template)
     catalog=root/'data/layer1_sources/reference/indicadores/catalog.xlsx'
     catalog.parent.mkdir(parents=True,exist_ok=True);catalog.write_bytes(b'synthetic catalog')
     base=root/'data/layer1_sources/base/descriptores-limpio.json'
@@ -52,8 +55,10 @@ def stable(system,monkeypatch):
         def verified(directory):
             result=verify(directory)
             for project in result['projects']:
+                project.update(selected=[f'I{i:02}' for i in range(48)],blocked_indicators={})
                 project['rows']=[dict(project['rows'][0],indicator_id=f'I{i:02}',
-                    decision='SUPPORTED' if i else 'UNSUPPORTED') for i in range(48)] if project['rows'] else []
+                    assessment_validation_status='VALID',confidence_status='COMPUTED',evidence_explanation='Synthetic explanation',
+                    decision='SUPPORTED' if i else 'INSUFFICIENT_EVIDENCE') for i in range(48)] if project['rows'] else []
             return result
         module.verify_run=verified
         module.summary=lambda state:dict(status=state['status'],projects_evaluated=len(state['projects']),
@@ -96,7 +101,7 @@ def test_complete_thirty_project_cycle_one_approval(stable,monkeypatch,capsys,pr
         registrations.append(True)
         return verify(*args,**kwargs)
     monkeypatch.setattr(runner,'verify_sources',registered)
-    answers=['1','3','1'] if entry=='menu' else []
+    answers=['1','2','4','1'] if entry=='menu' else []
     if provider=='openai':answers+=['15']
     answers+=['S']
     if entry=='menu':answers+=['0']
@@ -123,7 +128,7 @@ def test_complete_thirty_project_cycle_one_approval(stable,monkeypatch,capsys,pr
     assert read(file_path(run,'execution.json'))['project_ids']==contracts.load(e.contract)['project_ids']
     with (run/'resultados/indicadores.csv').open(encoding='utf-8-sig',newline='') as stream:
         rows=list(csv.DictReader(stream,delimiter=';'))
-    assert len({r['siap_id'] for r in rows})==30
+    assert len({r['proyecto/articulo_siap_id'] for r in rows})==30
     assert all(r['parrafo_evidencia'] and r['confianza'] for r in rows)
     assert (run/'resultados/indicadores_territorios.csv').is_file()
     assert (run/'resultados/performance/resumen.csv').is_file()
@@ -142,7 +147,7 @@ def test_complete_thirty_project_cycle_one_approval(stable,monkeypatch,capsys,pr
 @pytest.mark.parametrize('answer',['N',''])
 @pytest.mark.parametrize('provider',['ollama','openai'])
 def test_cancellation_before_registration(stable,monkeypatch,answer,provider):
-    e=stable;values=['1','3','1']
+    e=stable;values=['1','2','4','1','','']
     if provider=='openai':values+=['15']
     answers=iter(values+[answer,'0'])
     monkeypatch.setattr('builtins.input',lambda prompt:next(answers))
@@ -150,7 +155,7 @@ def test_cancellation_before_registration(stable,monkeypatch,answer,provider):
     assert not list_runs(e.root) and not e.calls
 
 def test_invalid_answers_and_eof_are_visible(stable,monkeypatch,capsys):
-    answers=iter(['bad','1','bad-submenu','1','-1','2.3','3','maybe','N','0'])
+    answers=iter(['bad','1','2','bad-submenu','1','-1','2.3','3','maybe','N','0'])
     monkeypatch.setattr('builtins.input',lambda prompt:next(answers))
     assert console.main([])==0
     output=capsys.readouterr().out
@@ -278,7 +283,7 @@ def test_native_preprocessing_knowledge_seals_current_code_without_models(sandbo
             check(root,run)
     finally:options.reset(token)
 
-@pytest.mark.parametrize('selection,expected',[(['1','3'],3),(['2'],30),(['3','1'],30)])
+@pytest.mark.parametrize('selection,expected',[(['1','3'],3),(['3'],30),(['4','1'],30)])
 def test_minimal_menu_selectors_run_to_export_without_more_questions(stable,monkeypatch,capsys,selection,expected):
     e=stable;prompts=[];calls=[]
     original=runner.execute_pipeline
@@ -286,7 +291,7 @@ def test_minimal_menu_selectors_run_to_export_without_more_questions(stable,monk
         calls.append(kwargs)
         return original(*args,**kwargs)
     monkeypatch.setattr(runner,'execute_pipeline',execute)
-    answers=iter(['1']+selection+['S','0'])
+    answers=iter(['1','2']+selection+['S','0'])
     def answer(prompt):
         prompts.append(prompt)
         return next(answers)
@@ -320,7 +325,7 @@ def test_model_change_is_the_only_other_main_action(stable,monkeypatch,capsys,pr
 
 def test_back_and_contract_cancellation_do_not_start_work(stable,monkeypatch):
     e=stable
-    iterator=iter(['1','0','1','3','0','0','0'])
+    iterator=iter(['1','0','1','2','4','0','0','0','0'])
     monkeypatch.setattr('builtins.input',lambda prompt:next(iterator))
     assert console.main([])==0
     assert not e.calls and not list_runs(e.root)
@@ -334,6 +339,47 @@ def test_cli_autonomous_flag_uses_same_complete_executor(stable,monkeypatch):
     assert console.main(command(e)+['--autonomous'])==0
     assert asked==['¿Iniciar ejecución? (S/N): ']
     assert read(file_path(e.runpath,'progress.json'))['status']=='COMPLETE'
+
+
+def test_manual_ids_validate_then_use_all_existing_stages(stable,monkeypatch,capsys):
+    e=stable
+    answers=iter(['1','2','2','003,003','003,NO_EXISTE','003,001','S','0'])
+    monkeypatch.setattr('builtins.input',lambda prompt:next(answers))
+    assert console.main([])==0
+    output=capsys.readouterr().out
+    assert 'unicos' in output and 'IDs no encontrados en base: NO_EXISTE' in output
+    assert 'IDs institucionales: 003, 001' in output and 'Proyectos: 2' in output
+    run=list_runs(e.root)[0]
+    assert read(file_path(run,'execution.json'))['project_ids']==['003','001']
+    assert e.calls[:3]==['preprocessing','knowledge','graphrag']
+    assert [call for call in e.calls if isinstance(call,tuple)]==[('ollama',['003','001'])]
+    assert read(file_path(run,'export.json'))['processed_projects']==2
+    with (run/'resultados/indicadores.csv').open(encoding='utf-8-sig',newline='') as stream:
+        assert {r['proyecto/articulo_siap_id'] for r in csv.DictReader(stream,delimiter=';')}=={'003','001'}
+
+
+def test_manual_ids_cancel_returns_to_each_previous_menu(stable,monkeypatch,capsys):
+    answers=iter(['1','2','2','0','0','1','0','0','0'])
+    monkeypatch.setattr('builtins.input',lambda prompt:next(answers))
+    assert console.main([])==0
+    output=capsys.readouterr().out
+    assert output.count('1. Incoming\n2. Base')==3
+    assert not stable.calls and not list_runs(stable.root)
+
+
+@pytest.mark.parametrize('error',[KeyboardInterrupt,RuntimeError])
+def test_original_error_and_checkpoint_survive(stable,monkeypatch,capsys,error):
+    e=stable
+    def failed(*args,**kwargs):raise error('ORIGINAL_FAILURE')
+    monkeypatch.setattr(runner,'verify_sources',failed)
+    monkeypatch.setattr('builtins.input',lambda prompt:'S')
+    assert console.main(command(e))==(130 if error is KeyboardInterrupt else 2)
+    assert read(file_path(e.runpath,'run.json'))['status']=='REGISTERED'
+    assert (e.runpath/'estado/run.authorization.json').exists()
+    assert 'ORIGINAL_FAILURE' in (e.runpath/'logs/terminal.log').read_text(encoding='utf-8')
+    output=capsys.readouterr().out
+    assert ('KeyboardInterrupt' in output)==(error is KeyboardInterrupt)
+    assert 'resume --run-id fresh30' in output if error is KeyboardInterrupt else 'ORIGINAL_FAILURE' in output
 
 def test_preparation_error_preserves_registration_and_recovers_without_prompt(stable,monkeypatch,capsys):
     e=stable;original=runner.verify_sources

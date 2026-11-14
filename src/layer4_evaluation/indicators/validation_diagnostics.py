@@ -16,7 +16,7 @@ def semantic_issues(errors, assessment, indicator_id, rubric=None, project_field
         if match:
             path += '.' + match[1]
         category = ('EVIDENCE_NOT_VERIFIABLE' if 'QUOTE_NOT_FOUND' in code else
-                    'DECISION_CRITERIA_INCONSISTENCY' if 'NOT_SUPPORTED' in code or 'INCONSISTENT_DECISION' in code else
+                    'DECISION_CRITERIA_INCONSISTENCY' if 'NOT_SUPPORTED' in code or 'ZERO_SUPPORT' in code or 'INCONSISTENT_DECISION' in code else
                     'INVALID_FIELD_VALUE')
         if code=='V3_CRITERION:CLEAR_REQUIRES_COMPATIBLE_SUBSTANTIVE_EVIDENCE' and rubric is not None:
             from .assessment_v3 import TEMPORAL
@@ -35,15 +35,27 @@ def semantic_issues(errors, assessment, indicator_id, rubric=None, project_field
             continue
         if code == 'V3_CRITERION:EVIDENCE_INDEX_OUT_OF_RANGE':
             for index, criterion in enumerate(assessment['criterion_assessments']):
-                invalid = [i for i in criterion['evidence_indices'] if i >= len(assessment['evidence'])]
+                invalid = [i for i in criterion['evidence_indices'] if i < 0 or i >= len(assessment['evidence'])]
                 if invalid:
                     issues.append(dict(category='EVIDENCE_ID_NOT_FOUND', rule=code,
                         path=f'$.criterion_assessments[{index}].evidence_indices', indicator_id=indicator_id,
                         criterion_id=criterion['criterion_id'], evidence_indices=invalid,
                         evidence_count=len(assessment['evidence'])))
             continue
+        if code == 'V3_CRITERION:POSITIVE_SUPPORT_REQUIRES_QUOTE':
+            for index, criterion in enumerate(assessment['criterion_assessments']):
+                if criterion['support'] != 'NOT_DEMONSTRATED' and not criterion['evidence_indices']:
+                    issues.append(dict(category='INVALID_FIELD_VALUE', rule=code,
+                        path=f'$.criterion_assessments[{index}].evidence_indices',
+                        indicator_id=indicator_id, criterion_id=criterion['criterion_id']))
+            continue
         issue = dict(category=category, rule=code, path=path, indicator_id=indicator_id)
-        if code == 'V3_NOT_SUPPORTED:CANNOT_CLAIM_POSITIVE_CONCEPTUAL_SUPPORT':
+        if code == 'V3_POSITIVE_STRENGTH:REQUIRES_EVIDENCE':
+            issue.update(path='$.support_strength',
+                correction_hint='La fuerza positiva requiere referencias literales. Reevalua decision y criterios; '
+                    'no inventes evidencia ni conviertas un fallo tecnico en NOT_SUPPORTED.')
+        if code in ('V3_NOT_SUPPORTED:CANNOT_CLAIM_POSITIVE_CONCEPTUAL_SUPPORT',
+                    'SK_ZERO_SUPPORT:CANNOT_CLAIM_POSITIVE_CONCEPTUAL_SUPPORT'):
             issue.update(path='$.decision', criterion_ids=[c['criterion_id'] for c in
                 assessment['criterion_assessments'] if c['support'] != 'NOT_DEMONSTRATED'])
         elif code.startswith(('V3_CRITERION:', 'V3_CRITERIA:', 'V3_SUPPORTED:')):

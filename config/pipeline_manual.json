@@ -13,12 +13,16 @@
       }
     }
   },
+  "evaluation": {
+    "mode": null,
+    "context_mode": null
+  },
   "llm": {
     "provider": "ollama",
     "model": "qwen3.5:4b-q4_K_M",
     "endpoint": "http://127.0.0.1:11434",
     "temperature": 0,
-    "num_ctx": 8192,
+    "num_ctx": 16384,
     "num_predict": 4096,
     "token_limit_retries": 2,
     "max_predict": 6144,

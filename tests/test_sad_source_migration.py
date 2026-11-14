@@ -100,3 +100,17 @@ def test_split_checkpoint_binding_rejects_a_changed_extracted_implementation(tmp
     internal.write_bytes(b'unreviewed change')
     with pytest.raises(ValueError, match='Fingerprint mismatch'):
         verify_expected(tmp_path, 'old.py', digest(original))
+
+
+def test_fingerprint_reports_changed_main_module_not_unchanged_related_file(tmp_path):
+    original=tmp_path/'original.py';original.write_bytes(b'old bytes')
+    current=tmp_path/'current.py';current.write_bytes(b'approved new bytes')
+    related=tmp_path/'related.py';related.write_bytes(b'unchanged dependency')
+    digest=lambda path:hashlib.sha256(path.read_bytes()).hexdigest()
+    expected=digest(original);approved=digest(current)
+    write(tmp_path/'config/sad_relocations.json',dict(file_aliases={'old.py':'current.py'},runtime_bindings={
+        'old.py':dict(after_sha256=approved,snapshots=['original.py'],related_sha256={'related.py':digest(related)})}))
+    current.write_bytes(b'unreviewed change')
+    with pytest.raises(ValueError) as error:verify_expected(tmp_path,'old.py',expected)
+    assert 'Fingerprint mismatch: old.py' in str(error.value)
+    assert expected in str(error.value) and digest(current) in str(error.value)

@@ -238,7 +238,7 @@ def test_timeout_claim_blocks_duplicate_dispatch(live_run):
     with pytest.raises(ValueError, match='BLOCKED_ERROR'):
         live.execute(SimpleNamespace(run='batch_test', authorize=True))
     assert list(directory.rglob('dispatch.claim.json'))
-    with pytest.raises(ValueError, match='detenida'):
+    with pytest.raises(ValueError, match='UNCERTAIN_OUTCOME'):
         live.execute(SimpleNamespace(run='batch_test', authorize=False))
     assert client.request.call_count == 1
 
@@ -315,13 +315,14 @@ def planning_environment(tmp_path, monkeypatch):
     monkeypatch.setattr(coordinator, 'evaluation_settings', lambda *a:(settings,{}))
     monkeypatch.setattr(coordinator, 'check', lambda *a:{'configuration':{},'code_hashes':{}})
     monkeypatch.setattr(coordinator, 'validated_graph', lambda *a:{})
+    monkeypatch.setattr('layer4_evaluation.indicators.scoped_retrieval.from_published_cache',lambda *a:([],{}))
     def table(path):
         rows = projects if path.name=='proyectos.parquet' else [dict(indicator_id=i) for i in profiles] if path.name=='indicadores.parquet' else [dict(
             source_id='TEST_PROJECT', field_name='methodology', text_original='Synthetic authorized methodology.',
             section_id='SECTION', text_hash_original='synthetic', provenance_json='{"layer1":[]}')] if path.name=='source_sections.parquet' else []
         return SimpleNamespace(to_pylist=lambda:rows)
     from layer4_evaluation.indicators import context_budget
-    monkeypatch.setattr(context_budget, 'prepare_contexts', lambda *a:({}, {'requests':[]}))
+    monkeypatch.setattr(context_budget, 'prepare_contexts', lambda *a,**kw:({}, {'requests':[]}))
     monkeypatch.setattr(coordinator.pq, 'read_table', table)
     monkeypatch.setattr(coordinator.importlib.util, 'spec_from_file_location', lambda *a:SimpleNamespace(loader=SimpleNamespace(exec_module=lambda module:None)))
     monkeypatch.setattr(coordinator.importlib.util, 'module_from_spec', lambda spec:SimpleNamespace(check=lambda:settings))
@@ -333,7 +334,7 @@ def test_coordinator_prepares_ollama_plan_offline_and_rejects_codex_reuse(planni
     name = coordinator.prepare_evaluation(tmp_path, run, ['TEST'])
     plan = read(module.BASE/name/'plan.json')
     assert plan['runtime']['provider']=='ollama' and plan['requested_model']=='qwen3.5:4b-q4_K_M'
-    assert read(module.BASE/name/'review.json')['llm']['num_ctx']==4096
+    assert read(module.BASE/name/'review.json')['llm']['num_ctx']==transport.DEFAULTS['num_ctx']
     plan['runtime']={'command':['historical-codex']}
     write(module.BASE/name/'plan.json', plan)
     with pytest.raises(ValueError, match='historico'):
@@ -349,13 +350,14 @@ def test_context_change_before_dispatch_archives_and_requires_new_review(plannin
     old_hash = sha(directory/'plan.json')
     write(directory/'authorization.json', {'authorized':True, 'fixture':'previous review'})
     write(directory/'provider.json', {'fixture':'metadata, no inference'})
-    write(run/'execution.json', {'llm':{'num_ctx':8192}})
+    changed=transport.DEFAULTS['num_ctx']*2
+    write(run/'execution.json', {'llm':{'num_ctx':changed}})
     assert coordinator.prepare_evaluation(root, run, ['TEST']) == name
     archived = module.BASE/'review_versions'/name/old_hash
     assert (archived/'plan.json').read_bytes() == old_plan
     assert (archived/'review.txt').read_bytes() == old_review
     assert read(archived/'authorization.json')['authorized'] is True
-    assert read(directory/'plan.json')['runtime']['configuration']['num_ctx'] == 8192
+    assert read(directory/'plan.json')['runtime']['configuration']['num_ctx'] == changed
     assert not (directory/'authorization.json').exists()
     assert not (directory/'provider.json').exists()
 
@@ -366,17 +368,17 @@ def test_context_change_with_prior_dispatch_is_blocked(planning_environment):
     directory = module.BASE/name
     original = sha(directory/'plan.json')
     write(directory/'calls/TEST/discovery/dispatch.claim.json', {'fixture':'uncertain'})
-    write(run/'execution.json', {'llm':{'num_ctx':8192}})
+    write(run/'execution.json', {'llm':{'num_ctx':transport.DEFAULTS['num_ctx']*2}})
     with pytest.raises(ValueError, match='llamadas/cache previos'):
         coordinator.prepare_evaluation(root, run, ['TEST'])
     assert sha(directory/'plan.json') == original
     assert not (module.BASE/'review_versions').exists()
 
 
-def test_context_reports_approximation_and_8192_is_opt_in():
+def test_context_reports_approximation_and_preserves_current_defaults():
     settings = transport.configuration()
-    assert settings['num_ctx'] == 4096
-    assert transport.context_guard('fixture', {}, settings) == len('fixture') + 512 + 1024
+    assert (settings['num_ctx'],settings['num_predict']) == (8192,4096)
+    assert transport.context_guard('fixture', {}, settings) == len('fixture') + settings['context_margin_tokens'] + settings['num_predict']
     assert transport.configuration({'num_ctx':8192})['num_ctx'] == 8192
     with pytest.raises(transport.OllamaError, match='no tokenizacion exacta'):
         transport.context_guard('x'*4096, {}, settings)

@@ -17,7 +17,7 @@ from layer4_evaluation.indicators.ollama_provider import OllamaClient, configura
 from layer4_evaluation.indicators.selection import substantive_fields
 from layer4_evaluation.indicators.selection import canonical_hash
 from . import policy as p, store as s, scope
-from .engine import Worker, identity, result_row
+from .engine import Worker, identity, result_row, check_result_contract
 
 VERSION='AUTONOMOUS_EXECUTION_V1'
 from layer4_evaluation.indicators.performance import measured_run
@@ -221,8 +221,10 @@ def prepare(root, run, policy, *, runtime=None, evaluator=None, indicator_ids=No
         if evaluator!=MINIMAL:raise ValueError('Evaluador desconocido')
     llm=configuration(execution.get('llm',state['configuration'].get('llm')))
     if runtime is None:
-        client = OllamaClient(llm) if llm['provider']=='ollama' else create_client(llm)
-        runtime=binding or client.inspect()  # API inspection is offline.
+        runtime=binding
+        if runtime is None:
+            client = OllamaClient(llm) if llm['provider']=='ollama' else create_client(llm)
+            runtime=client.inspect()  # API inspection is offline.
     if runtime['model']!=llm['model'] or runtime['provider']!=llm['provider']:
         raise ValueError('Modelo/proveedor ajeno al alcance')
     directory.mkdir(parents=True)
@@ -260,6 +262,8 @@ def prepare(root, run, policy, *, runtime=None, evaluator=None, indicator_ids=No
                 if (pid,iid) in accepted:
                     bundle=accepted[(pid,iid)]
                     row=result_row(project,catalog['profiles'][iid],catalog['rubrics'][iid],bundle['wrapper'],llm['provider'])
+                    if evaluator is not None and row.get('confidence_version')!=v3.SK_CONFIDENCE_VERSION:
+                        raise ValueError('CONFIDENCE_CONTRACT_INCOMPATIBLE: conservar resultados historicos y preparar otra ejecucion')
                     if row!=bundle['row'] or error:
                         raise ValueError('Evidencia historica fuera del alcance autorizado actual')
                     s.write(directory/'results'/pid/(iid+'.json'),bundle)
@@ -347,12 +351,15 @@ def prepare(root, run, policy, *, runtime=None, evaluator=None, indicator_ids=No
         manifest['context_policy']['coverage']='NO_LOSS_RETRIEVED_INTERVALS_V1'
         manifest['allowed_operations']+=['SCOPED_RESPONSE_PATCHES','LOSSLESS_CRITERION_SUBDIVISION']
     if evaluator is not None:
-        from .minimal import VERSION as MINIMAL,INSTRUCTIONS
-        manifest.update(evaluator=MINIMAL,prompts=dict(version=MINIMAL,semantic=INSTRUCTIONS),
+        from .minimal import VERSION as MINIMAL,INSTRUCTIONS,SK_INSTRUCTIONS
+        manifest.update(evaluator=MINIMAL,prompts=dict(version=MINIMAL,semantic=SK_INSTRUCTIONS),
+            schema_version=v3.SK_VERSION,confidence_version=v3.SK_CONFIDENCE_VERSION,
             protocol=dict(normal_calls=1,max_calls_per_evaluation=2,
                 stable_contradiction='ONE_TARGETED_CLARIFICATION_THEN_REVIEW',patches=False,shards=False),
             allowed_operations=['LOCAL_GRAPH_BUILD','INDICATOR_EVALUATION','ONE_TARGETED_CLARIFICATION',
                 'VALIDATED_AND_REVIEW_EXPORT'])
+        if 'batching' in manifest:
+            manifest['batching']['instructions']=BATCH_PROMPT.replace(INSTRUCTIONS,SK_INSTRUCTIONS,1)
     if project_indicators is not None:manifest['project_indicators']=project_indicators
     if discovery is not None:
         manifest['discovery']=dict(path='discovery.json',sha256=s.sha(run_file(run, 'discovery.json')),
@@ -433,6 +440,7 @@ def verify(root, run, *, require_authorization=True):
                 path=(directory/(job['result_path'] or '')).resolve()
                 if not path.is_relative_to(directory.resolve()) or not path.is_file() or s.sha(path)!=job['result_hash']:
                     raise ValueError('Checkpoint PASS modificado o ausente')
+                check_result_contract(manifest,s.read(path))
     finally:
         db.close()
     return manifest

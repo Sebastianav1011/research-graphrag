@@ -137,6 +137,7 @@ def status(directory):
         total = sum(counts.values())
         projects = db.execute('SELECT COUNT(*) FROM projects').fetchone()[0]
         complete = db.execute("SELECT COUNT(*) FROM projects p WHERE NOT EXISTS (SELECT 1 FROM jobs j WHERE j.pid=p.pid AND j.status!='PASS')").fetchone()[0]
+        processed=db.execute("SELECT COUNT(*) FROM projects p WHERE EXISTS (SELECT 1 FROM jobs j WHERE j.pid=p.pid) AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.pid=p.pid AND j.status NOT IN ('PASS','BLOCKED','UNCERTAIN'))").fetchone()[0]
         tokens = db.execute('SELECT COUNT(*),COALESCE(SUM(input_tokens),0),COALESCE(SUM(output_tokens),0),'
             'SUM(input_tokens IS NULL OR output_tokens IS NULL),COALESCE(SUM(wall),0) FROM usage').fetchone()
         last = db.execute('SELECT at,stage,code FROM events ORDER BY seq DESC LIMIT 1').fetchone()
@@ -155,7 +156,8 @@ def status(directory):
             if state not in ('COMPLETE','PAUSED'):
                 state='RUNNING' if active else 'INTERRUPTED' if counts.get('RUNNING') else 'PARTIAL'
         return dict(status=state,
-            projects_total=projects,projects_completed=complete,indicators_total=total,
+            projects_total=projects,projects_completed=complete,projects_processed=processed,indicators_total=total,
+            processing_complete=bool(total) and processed==projects,results_available=bool(counts.get('PASS')),
             evaluated=counts.get('PASS',0),pending=counts.get('PENDING',0),running=counts.get('RUNNING',0),
             blocked=counts.get('BLOCKED',0),uncertain=counts.get('UNCERTAIN',0),recovered=recovered,
             counts=counts,calls=tokens[0],input_tokens=tokens[1],output_tokens=tokens[2],

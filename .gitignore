@@ -50,6 +50,7 @@ data/**
 !data/templates/plantilla_entrada_proyectos.xlsx
 !data/templates/plantilla_resultado_final_indicadores_territorios.xlsx
 !data/templates/resultado_final_indicadores.xlsx
+!data/templates/plantilla_resultado_tesis.xlsx
 !data/layer1_sources/README.md
 !data/layer1_sources/base/
 !data/layer1_sources/incoming/
@@ -90,6 +91,13 @@ tests/fixtures/**
 
 # Local recovery archives are not source or published deliverables.
 /archives/
+# Local Layer 4 execution archive (5,279 entries); contains private results.
+/layer4.zip
+# Local audit manifest includes private input hashes and Recycle Bin locations.
+/docs/auditoria_almacenamiento_2026-11-10.json
+# Private local inventories: original paths and historical artifact metadata.
+/docs/auditoria_profunda_almacenamiento_2026-11-10.md
+/docs/inventario_profundo_almacenamiento_2026-11-10.csv
 
 # Private model/vector/table payloads and interrupted transfers
 *.log

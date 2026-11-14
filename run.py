@@ -41,7 +41,8 @@ def report_progress(event):
     elif status=='RUNNING':print('Etapa: '+event['stage'],flush=True)
     elif status=='STAGE_REUSED':print('Checkpoint conservado: '+event['stage'],flush=True)
     elif status=='EVALUATION_PROGRESS':
-        print(f"Proyectos: {event['projects_evaluated']}/{event['total_projects']} | "
+        print(f"Proyectos procesados: {event.get('projects_processed',event['projects_evaluated'])}/{event['total_projects']} | "
+              f"Completamente evaluados: {event.get('projects_completed',event['projects_evaluated'])} | "
               f"Indicadores evaluados: {event.get('indicators_completed',0)}",flush=True)
     elif status in ('FAILED_OR_BLOCKED','INTERRUPTED','REVIEW_REQUIRED','BUILD_APPROVAL_REQUIRED','BLOCKED_INPUT'):
         print(status+': '+event.get('error',event.get('message','Revisar los registros del run.')),flush=True)
@@ -57,6 +58,16 @@ def render_result(result):
     if result.get('run_id'):print('Run ID: '+result['run_id'],flush=True)
     if result.get('error'):print('Error: '+result['error'],flush=True)
     if result.get('message'):print(result['message'],flush=True)
+    summary=result.get('result') or result.get('export') or result
+    if 'expected_assessments' in summary:
+        print(f"Proyectos seleccionados: {summary['selected_projects']}; procesados: {summary['processed_projects']}; "
+              f"completamente evaluados: {summary['completed_projects']}",flush=True)
+        print(f"Indicadores esperados: {summary['expected_assessments']}; evaluaciones validas: {summary['valid_assessments']}; "
+              f"SUPPORTED: {summary['supported']}; INSUFFICIENT_EVIDENCE: {summary['insufficient_evidence']}; "
+              f"NOT_SUPPORTED: {summary.get('not_supported',0)}",flush=True)
+        print(f"Bloqueados: {summary['blocked_assessments']}; pendientes: {summary['pending_assessments']}; "
+              f"filas exportadas: {summary.get('exported_rows',0)}",flush=True)
+        if summary.get('note'):print(summary['note'],flush=True)
     if result.get('blocked_projects'):print('Proyectos bloqueados: '+str(len(result['blocked_projects'])),flush=True)
     excel=result.get('excel') or result.get('result',{}).get('excel')
     if excel:print('Resultados: '+str(Path(excel).parent),flush=True)
@@ -107,19 +118,33 @@ def execute_with_console(engine, **kwargs):
         def confirm(kind,summary):
             with redirect_stdout(terminal_out),redirect_stderr(terminal_err):return confirm_action(kind,summary)
         interactive=kwargs.pop('interactive',True)
+        print('Validando configuracion y seleccion de proyectos; puede tardar mientras se leen las fuentes.',flush=True)
         try:
             return engine.execute_pipeline(ROOT,notify=notify,confirm=confirm if interactive else None,**kwargs)
         except BaseException as exc:
-            if log is not None:traceback.print_exc(file=log)
+            traceback.print_exc(file=log if log is not None else terminal_err)
+            exc.console_traceback_logged=True
+            exc.run_location=latest.get('location') if log is not None else None
             if not getattr(exc,'resume_command',None):exc.resume_command=latest.get('resume_command')
             raise
 
 
 def confirm_action(kind, summary):
+    if kind=='knowledge_rebuild':
+        print(summary['message'],flush=True)
+        if not sys.stdin.isatty():return False
+        try:return input('Reconstruir conocimiento completo de BASE [si/NO]: ').strip().lower() in ('si','sí')
+        except EOFError:return False
     if kind=='run':
         print('\nRun ID: '+summary['run_id'],flush=True)
         print('Modelo: '+summary['provider']+' | '+summary['model'],flush=True)
+        if summary.get('evaluation_policy'):
+            policy=summary['evaluation_policy']
+            print('Evaluacion: '+policy['evaluation_mode']+' | Contexto: '+policy['context_mode']+
+                ' | num_ctx: '+str(summary.get('num_ctx')),flush=True)
         print('Proyectos: '+str(summary['project_count']),flush=True)
+        if summary.get('project_ids'):
+            print('IDs institucionales: '+', '.join(summary['project_ids']),flush=True)
         print('Fuentes: '+('base' if all('/base/' in name or '/reference/' in name for name in summary['sources'])
             else ', '.join(summary['sources']))+f" ({len(summary['sources'])} archivos)",flush=True)
         contract=summary.get('contract')
@@ -275,6 +300,7 @@ def dispatch_pipeline(args):
             selection_manifest=args.selection_manifest, approve_build=args.approve_build, authorize=args.authorize_llm,
             confirm_all=args.confirm_all,
             single_authorization=True,
+            evaluation_mode=args.evaluation_mode,context_mode=args.context_mode,knowledge_action=args.knowledge_action,
             interactive=not args.non_interactive)
     if args.command == 'run' and not any((args.projects, args.project_id, args.input_file, args.delivery)):
         raise ValueError('Indicar --limit N, --all o IDs explicitos; nunca se ejecuta toda la base por defecto')
@@ -301,6 +327,7 @@ def dispatch_pipeline(args):
             authorize=args.authorize_llm, project_ids=selected_projects(args),
             input_file=args.input_file, delivery=args.delivery,
             single_authorization=True,
+            evaluation_mode=args.evaluation_mode,context_mode=args.context_mode,knowledge_action=args.knowledge_action,
             interactive=not args.non_interactive)
 
 
@@ -312,6 +339,7 @@ def exit_code(result):
 
 def parser():
     result = argparse.ArgumentParser(prog='uv run python run.py', description='GraphRag: ejecucion por capas SAD. Sin comando abre el menu.')
+    result.add_argument('--knowledge-action',choices=('reuse','rebuild'),help='BASE: reutilizar conocimiento compatible (predeterminado) o reconstruir; resume conserva la opcion original')
     result.add_argument('command', nargs='?', choices=('run', 'stage', 'resume', 'verify', 'status',
         'prepare','authorize','start','export','retry-pending','stop','model','contracts','contract-create','cleanup','migrate-runs','restore-run'))
     result.add_argument('--apply',action='store_true',help='cleanup: confirmar y aplicar solo eliminaciones verificadas')
@@ -327,6 +355,10 @@ def parser():
     result.add_argument('--count',type=int,help='Proyectos obligatorios de contract-create')
     result.add_argument('--require-evaluable',action='store_true',help='contract-create: muestrear solo proyectos con texto sustantivo autorizado; regla persistida')
     result.add_argument('--source', help='all, base, incoming o incoming/<entrega>; reanudar conserva la seleccion original')
+    result.add_argument('--evaluation-mode',choices=('prospective','demonstrated'),
+        help='Modo temporal: BASE nuevo usa prospective; resume conserva el modo sellado')
+    result.add_argument('--context-mode',choices=('full-descriptor','graphrag','descriptor-graph','retrieved-graph'),
+        help='BASE usa por defecto fragmentos BGE-M3 y relaciones GraphRAG, sin descriptor completo')
     result.add_argument('--config', default='config/pipeline_manual.json')
     result.add_argument('--through', choices=STAGES, help='Ultima etapa; run termina en export por defecto')
     result.add_argument('--project-id', action='append', help='Limita la evaluacion PROJECT; repetible, conserva el orden al reanudar')
@@ -356,21 +388,40 @@ def parser():
     return result
 
 
-def menu_selection(root, seed):
+def menu_selection(root, seed, config_path='config/pipeline_manual.json'):
     """Collect options only; sampling and contract validation stay in dispatch."""
     while True:
-        print('\n1. Seleccionar cantidad de proyectos.\n2. Procesar todos los proyectos.\n'
-              '3. Utilizar contrato existente.\n0. Volver.')
+        print('\n1. Seleccionar cantidad de proyectos.\n2. Seleccionar proyectos especificos por ID.\n'
+              '3. Procesar todos los proyectos.\n4. Utilizar contrato existente.\n0. Volver.')
         choice=input('Opcion: ').strip()
         if choice=='0':return None
-        if choice=='2':return dict(all_projects=True)
+        if choice=='3':return dict(all_projects=True)
         if choice=='1':
             while True:
                 value=input('Cantidad de proyectos (0: volver): ').strip()
                 if value=='0':break
                 if value.isascii() and value.isdigit() and int(value)>0:return dict(limit=int(value),seed=seed)
                 print('Ingrese una cantidad entera positiva.')
-        elif choice=='3':
+        elif choice=='2':
+            from layer2_processing.preprocessing.project_selection import select
+            population=None
+            while True:
+                value=input('IDs institucionales separados por comas (0: volver): ').strip()
+                if value=='0':break
+                try:
+                    ids=selected_projects(argparse.Namespace(projects=value,project_id=None))
+                    if population is None:
+                        print('Validando IDs contra la fuente base...',flush=True)
+                        config,raw,_=coordinator().selected_configuration(root,config_path,source='base')
+                        population=select(root,raw,config,all_projects=True)['project_ids']
+                    missing=[pid for pid in ids if pid not in population]
+                    if missing:
+                        print('IDs no encontrados en base: '+', '.join(missing))
+                        continue
+                    return dict(project_id=ids)
+                except ValueError as exc:
+                    render_error(exc)
+        elif choice=='4':
             paths=sorted((root/'data/contratos').glob('*.json'))
             if not paths:
                 print('No hay contratos disponibles.')
@@ -387,6 +438,7 @@ def menu_selection(root, seed):
 
 def menu(base):
     from model_access import label,change_model,preferences
+    from autonomous_execution.prepare_menu import choose,select_source,Cancelled
     while True:
         print('\nGraphRAG\nModelo actual: '+label(ROOT,base.provider))
         print('\n1. Ejecutar sistema\n2. Cambiar modelo\n0. Salir')
@@ -400,15 +452,44 @@ def menu(base):
             if choice!='1':
                 print('Opcion invalida.')
                 continue
-            selection=menu_selection(ROOT,base.seed)
+            while True:
+                try:
+                    source_choice=choose('Fuente de datos',['Incoming','Base'],back_label='Volver')
+                except Cancelled:
+                    selection=None
+                    break
+                if source_choice==1:
+                    source=dict(source='base',input_file=None,delivery=None)
+                    selection=menu_selection(ROOT,base.seed,base.config)
+                    if selection is None:continue
+                else:
+                    try:source=select_source(ROOT,incoming_only=True)
+                    except Cancelled:continue
+                    selection={}
+                if source.get('source')=='base':
+                    try:
+                        knowledge=choose('CONOCIMIENTO BASE',['Reutilizar conocimiento existente','Reconstruir conocimiento completo'],back_label='Volver',default=0)
+                    except Cancelled:continue
+                    selection['knowledge_action']=('reuse','rebuild')[knowledge]
+                    selection.update(evaluation_mode=base.evaluation_mode,context_mode='retrieved-graph')
+                    break
+                try:
+                    temporal=choose('MODO DE EVALUACION',['Prospectivo','Demostrado'],back_label='Volver',
+                        default=0 if source.get('source')=='base' else 1)
+                    context=choose('MODO DE CONTEXTO',['Descriptor completo','GraphRAG / fragmentos'],back_label='Volver',
+                        default=0 if source.get('source')=='base' and temporal==0 else 1)
+                except Cancelled:continue
+                selection.update(evaluation_mode=('prospective','demonstrated')[temporal],
+                    context_mode=('full-descriptor','graphrag')[context])
+                break
             if selection is None:continue
             # A clean CLI request prevents advanced flags leaking into the menu.
-            args=parser().parse_args(['run','--source','base','--through','export'])
+            args=parser().parse_args(['run','--through','export'])
             args.config=base.config
             args.provider=base.provider or preferences(ROOT)['provider']
             args.budget_usd=base.budget_usd
             args.autonomous=True
-            for key,value in selection.items():setattr(args,key,value)
+            for key,value in (source | selection).items():setattr(args,key,value)
             if args.provider=='openai' and args.budget_usd is None:
                 import math
                 while True:
@@ -456,8 +537,14 @@ def main(argv=None):
         if args.command in ('run','resume','stage') and not args.json:render_result(result)
         else:show(result)
         return exit_code(result)
-    except KeyboardInterrupt:
-        print('\nInterrumpido. Consultar status y reanudar el mismo --run-id; no borrar checkpoints.')
+    except KeyboardInterrupt as exc:
+        if not getattr(exc,'console_traceback_logged',False):
+            import logging
+            logging.getLogger(__name__).exception('KeyboardInterrupt en la consola')
+        print('\nInterrupcion recibida (KeyboardInterrupt). Se conservan los checkpoints.')
+        if getattr(exc,'run_location',None):print('Registros: '+str(exc.run_location))
+        if getattr(exc,'resume_command',None):print('Continuar: '+exc.resume_command)
+        else:print('Interrupcion anterior al registro de una ejecucion; revisar la traza original.')
         return 130
     except Exception as exc:
         if args.json:show(dict(status='FAILED_OR_BLOCKED',error_type=type(exc).__name__,error=str(exc)))

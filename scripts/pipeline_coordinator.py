@@ -25,7 +25,7 @@ from layer2_processing import pipeline as processing
 from layer2_processing.pipeline import check, same_configuration, layer_config, seal
 
 ROOT = Path(__file__).resolve().parents[1]
-COLUMNS = ['siap_id', 'indicador_id', 'parrafo_evidencia', 'fuente_evidencia', 'ubicacion_evidencia', 'confianza']
+from layer4_evaluation.thesis_output import COLUMNS
 TERRITORY_COLUMNS = ['siap_id', 'territory_type', 'territory_code', 'code_system']
 
 
@@ -193,10 +193,12 @@ def evaluation_settings(root, module):
 
 def prepare_evaluation(root, run, selected):
     from layer4_evaluation.indicators.context_budget import VERSION as context_version, prepare_contexts
+    from layer4_evaluation.indicators import assessment_v3 as v3
     state = check(root, run)
     from layer4_evaluation.indicators.ollama_provider import configuration as llm_configuration
     request_path = run_file(run, 'execution.json')
     requested = read(request_path) if request_path.is_file() else {}
+    policy=requested.get('evaluation_policy',state['configuration'].get('evaluation_policy',{}))
     provider_config = llm_configuration(requested.get('llm', state['configuration'].get('llm')))
     workspace = run / 'workspace'
     projects = pq.read_table(workspace / 'outputs/layer2/canonical/proyectos.parquet').to_pylist()
@@ -232,6 +234,8 @@ def prepare_evaluation(root, run, selected):
     batch = batch_name(selected)
     directory = module.BASE / batch
     if directory.exists():
+        if read(directory/'plan.json').get('evaluation_policy',{})!=policy:
+            raise ValueError('Modos incompatibles con el lote; crear un run nuevo')
         previous = module.check(directory)
         if previous.get('runtime', {}).get('provider') != provider_config['provider']:
             raise ValueError('Lote historico o proveedor/configuracion distinta: no reutilizar respuestas Codex como Qwen; crear otra ejecucion')
@@ -257,6 +261,10 @@ def prepare_evaluation(root, run, selected):
         if {p['siap_id'] for p in module.check(existing)['projects']} & set(selected):
             raise ValueError('Proyecto ya preparado en otro lote; reanudar la seleccion original para no repetir inferencias')
     settings, semantic_resources = evaluation_settings(root, module)
+    derivation=None
+    if policy:
+        settings=dict(settings)
+        settings['rubrics'],derivation=v3.catalog_for_mode(settings['profiles'],settings['rubrics'],policy['evaluation_mode'])
     catalog_ids = {r['indicator_id'] for r in pq.read_table(workspace / 'outputs/layer2/canonical/indicadores.parquet').to_pylist()}
     if catalog_ids != set(settings['profiles']):
         raise ValueError('Catalogo GraphRAG y los 48 perfiles V3.3 no tienen los mismos IDs')
@@ -275,13 +283,41 @@ def prepare_evaluation(root, run, selected):
     review = dict(projects=inputs, llm=provider_config,
         warnings=['Una solicitud por indicador, con fragmentos originales recuperados por GraphRAG. Se revisan los 48 indicadores.',
                   'Presupuesto aproximado de entrada incluye esquema; las omisiones y limitaciones constan en context_selection.json. No se truncan citas.'], inference_performed=False)
-    graph_folder = workspace / 'outputs/layer3/publication/retrieval'
+    relational_contexts=None
+    if policy.get('context_mode') in (v3.FULL_CONTEXT,v3.BASE_CONTEXT):
+        source_chunks,scoped_candidates=[],[]
+        retrieval_report=dict(context_mode=v3.FULL_CONTEXT,retrieval_used_for_evaluation=False)
+        review['warnings'][0]='Una solicitud por indicador con el descriptor completo autorizado; sin recorte ni fallback automatico.'
+        if policy['context_mode']==v3.BASE_CONTEXT:
+            from layer4_evaluation.indicators.scoped_retrieval import project_relations
+            relational_contexts=project_relations(workspace,inputs)
+            retrieval_report=dict(context_mode=v3.BASE_CONTEXT,relational_retrieval=True,
+                project_ids=sorted(relational_contexts))
+            review['warnings'][0]+=' Relaciones verificadas del grafo global como contexto complementario, sin transferir resultados entre proyectos.'
+    else:
+        from layer4_evaluation.indicators.scoped_retrieval import from_published_cache
+        source_chunks=pq.read_table(workspace / 'outputs/layer2/knowledge/source_chunks.parquet').to_pylist()
+        if policy.get('context_mode')==v3.RETRIEVED_CONTEXT:
+            from layer4_evaluation.indicators.scoped_retrieval import project_relations
+            relational_contexts=project_relations(workspace,inputs)
+        # Keep existing cached retrieval unchanged in fragment mode.
+        scoped_candidates,retrieval_report=from_published_cache(workspace,inputs,settings['profiles'],source_chunks,
+            **({'relational_contexts':relational_contexts} if relational_contexts is not None else {}))
     requests, context_report = prepare_contexts(inputs, settings['profiles'], settings['rubrics'], provider_config,
-        pq.read_table(graph_folder / 'source_indicator_candidates.parquet').to_pylist(),
-        pq.read_table(workspace / 'outputs/layer2/knowledge/source_chunks.parquet').to_pylist(), sections)
+        scoped_candidates,source_chunks,sections,
+        evidence_references=True, assessment_version=v3.SK_VERSION,
+        evaluation_mode=policy.get('evaluation_mode'),context_mode=policy.get('context_mode'),
+        relational_contexts=relational_contexts)
+    context_report['project_scoped_retrieval']=retrieval_report
     write(directory / 'context_selection.json', context_report)
     review['context_selection'] = context_report
     review['requests'] = requests
+    if policy:review.update(evaluation_policy=policy,catalog_derivation=derivation)
+    too_long=[dict(project_id=r['project_id'],indicator_id=r['indicator_id']) for r in context_report['requests']
+        if r['status']=='FULL_DESCRIPTOR_TOO_LONG']
+    if too_long:
+        review['warnings'].append('FULL_DESCRIPTOR_TOO_LONG: no se despachan estos indicadores; elegir explicitamente GraphRAG en un run nuevo. Ver context_selection.json.')
+        review['full_descriptor_blocked']=too_long
     if (run/'preprocess/scope.json').is_file():
         scoped=read(run/'preprocess/scope.json')
         review['scope_notice']=dict(selected_counts=scoped['selected_counts'],identity_links=scoped['identity_links'],
@@ -295,22 +331,35 @@ def prepare_evaluation(root, run, selected):
     for path in (module.FROZEN, root / 'src/layer4_evaluation/live_execution.py', root / 'src/layer4_evaluation/indicators/ollama_provider.py', root / 'src/layer4_evaluation/indicators/context_budget.py', run_file(run, 'prepared_hashes.json'), workspace / 'outputs/layer3/publication/_manifest.json'):
         source_hashes[path.relative_to(root).as_posix()] = sha(path)
     plan = {k: settings[k] for k in ('profiles', 'rubrics', 'rules', 'budgets', 'observed_character_ratio', 'discovery_version', 'assessment_version')}
-    for path in (root/'src/layer4_evaluation/indicators/openai_provider.py',run_file(run, 'model.binding.json')):
+    for path in (root/'src/layer4_evaluation/indicators/openai_provider.py',
+                 root/'src/layer4_evaluation/indicators/evidence_references.py',
+                 root/'src/layer4_evaluation/indicators/scoped_retrieval.py',run_file(run, 'model.binding.json')):
         if path.exists():source_hashes[path.relative_to(root).as_posix()]=sha(path)
     plan.update(version='MANUAL_RAW_V3_3_OLLAMA_V1', execution_id=uuid.uuid4().hex, projects=inputs,
+        assessment_version=v3.SK_VERSION, confidence_version=v3.SK_CONFIDENCE_VERSION,
+        coverage_policy=v3.PARTIAL_COVERAGE,
         request_protocol=context_version, context_requests=requests,
         isolate_indicator_errors=True,
+        corrective_retries=2,
         token_limit_retries=provider_config['token_limit_retries'] if provider_config['provider']=='ollama' else 0,
         runtime=dict(provider=provider_config['provider'], configuration=provider_config), requested_model=provider_config['model'],
         maximum_calls=len(settings['profiles']) * len(inputs), total_token_reservation_cap=170000 * len(inputs), timeout_seconds=provider_config['timeout_seconds'],
         source_hashes=source_hashes, territories=[], run_id=run.name)
-    plan['maximum_calls'] *= 1 + plan['token_limit_retries']
-    reservation=provider_config['num_ctx'] * (1 + plan['token_limit_retries'])
+    if policy:plan.update(evaluation_policy=policy,catalog_derivation=derivation)
+    if policy.get('context_mode') in (v3.FULL_CONTEXT,v3.BASE_CONTEXT):
+        resources=read(root/'config/autonomous.json') if (root/'config/autonomous.json').exists() else {}
+        plan['resource_policy']=dict(min_free_ram_mb=resources.get('min_free_ram_mb',1536),
+            context_ceiling=24576,out_of_memory='BLOCK_WITHOUT_AUTOMATIC_CONTEXT_CHANGE')
+    retry_limit=max(plan['token_limit_retries'],plan['corrective_retries'])
+    plan['maximum_calls'] *= 1 + retry_limit
+    reservation=provider_config['num_ctx'] * (1 + retry_limit)
     plan['budgets'] = dict(plan['budgets'], assessment_reservation=reservation,
         assessment_postcall_review_threshold=reservation)
     plan['total_token_reservation_cap'] = plan['maximum_calls'] * provider_config['num_ctx']
     write(directory / 'plan.json', plan)
-    write(directory / 'manifest.json', dict(plan_sha256=sha(directory / 'plan.json'), files={n: sha(directory / n) for n in ('review.json', 'review.txt', 'cache.json', 'context_selection.json')}))
+    write(directory / 'manifest.json', dict(plan_sha256=sha(directory / 'plan.json'),
+        **({'evaluation_policy_sha256':policy['sha256']} if policy else {}),
+        files={n: sha(directory / n) for n in ('review.json', 'review.txt', 'cache.json', 'context_selection.json')}))
     return batch
 
 
@@ -335,8 +384,14 @@ def evidence_sources(project, location):
     return '\n'.join(f'{r["record_source"]}; hoja={r.get("source_sheet")}; registro={r["source_row"]}; campo_RAW={r["field_mapping"][field]}; campo_preprocesado={field}' for r in valid)
 
 
-def export(root, run):
+def export(root, run, *, offline=False, output_contract=None):
     from layer4_evaluation.indicator_csv import TerritoryCodes, write_results
+    from layer4_evaluation.thesis_output import (positive_record, indicator_record, render as render_thesis,
+        TEMPLATE, SHEETS, DEFAULT_CONTRACT, POSITIVE_CONTRACT, ALL_CONTRACT, VALID_CONTRACT, GENERAL_COLUMNS, recover_export)
+    output_contract=output_contract or DEFAULT_CONTRACT
+    if output_contract not in (POSITIVE_CONTRACT,ALL_CONTRACT,VALID_CONTRACT):raise ValueError('Contrato desconocido')
+    consumer_columns=GENERAL_COLUMNS if output_contract==VALID_CONTRACT else COLUMNS
+    if offline:return recover_export(root,run,contract=output_contract)
     resolve_codes = TerritoryCodes(root)
     codes_by_pair, csv_records = {}, {}
     check(root, run)
@@ -345,7 +400,8 @@ def export(root, run):
         validated_graph(root, run)
     rows, lineage, processed, selected, errors = [], [], set(), set(), []
     coverage, valid_results=[], []
-    evaluated_projects, blocked_results = set(), set()
+    evaluated_projects, blocked_results, complete_projects = set(), set(), set()
+    export_exclusions=[];indicator_ids=set()
     all_projects = {p['source_project_id'] for p in pq.read_table(run / 'workspace/outputs/layer2/canonical/proyectos.parquet').to_pylist()}
     request = read(run_file(run, 'execution.json')) if (run_file(run, 'execution.json')).exists() else {}
     target_projects = set(request['project_ids']) if request.get('selection') and request.get('project_ids') is not None else all_projects
@@ -353,6 +409,9 @@ def export(root, run):
         raise ValueError('Seleccion de exportacion vacia o ausente del canonical')
     for directory in sorted(module.BASE.glob('batch_*')):
         plan, state = module.check(directory), module.verify_run(directory)
+        if plan.get('evaluation_policy',{})!=request.get('evaluation_policy',{}):
+            raise ValueError('No mezclar modos de evaluacion/contexto en una exportacion')
+        indicator_ids.update(plan['profiles'])
         errors.extend(state['errors'])
         for s in state['projects']:
             p = next(p for p in plan['projects'] if p['project_id'] == s['project_id'])
@@ -360,98 +419,115 @@ def export(root, run):
                 raise ValueError('Evaluacion fuera de la seleccion: no se publica un Excel mezclado')
             selected.add(p['siap_id'])
             if s['rows']:evaluated_projects.add(p['siap_id'])
+            if s['blocked_indicators'] or s.get('context_limits'):blocked_results.add(p['siap_id'])
             if any(error.startswith(s['project_id']+':') for error in state['errors']):blocked_results.add(p['siap_id'])
             if s['complete']:
-                processed.add(p['siap_id'])
+                complete_projects.add(p['siap_id'])
             valid_ids={r['indicator_id'] for r in s['rows']}
-            for iid in s['selected']:
+            decisions={r['indicator_id']:r['decision'] for r in s['rows']}
+            expected_ids=s.get('selected',sorted(plan['profiles']))
+            unresolved=set(expected_ids)-valid_ids-set(s['blocked_indicators'])-set(s.get('context_limits',{}))
+            if expected_ids and not unresolved and s.get('discovery_complete',True):
+                processed.add(p['siap_id'])
+            for iid in expected_ids:
                 status=('VALID' if iid in valid_ids else s['blocked_indicators'].get(iid) or
                     s.get('context_limits',{}).get(iid) or 'PENDING')
-                coverage.append(dict(siap_id=p['siap_id'],indicator_id=iid,status=status,project_complete=s['complete']))
+                coverage.append(dict(siap_id=p['siap_id'],indicator_id=iid,status=status,
+                    decision=decisions.get(iid),project_complete=s['complete']))
             for row in s['rows']:
                 iid = row['indicator_id']
                 assessment = module.assessment_from_row(row)
                 if module.v3.validate(p['fields'], plan['profiles'][iid], assessment, plan['rubrics'][iid]):
                     raise ValueError('Assessment guardado invalido')
                 valid_results.append(dict(row,siap_id=p['siap_id']))
+                if output_contract==POSITIVE_CONTRACT and row['decision']!='SUPPORTED':
+                    continue  # Negatives and partial support remain in verified diagnostics.
                 locations = module.evidence_locations(p, assessment)
                 relevant = any(c['support'] in ('CLEAR', 'PARTIAL') and any(assessment['evidence'][i]['field'] in substantive_fields(p['fields']) for i in c['evidence_indices']) for c in assessment['criterion_assessments'])
-                if not relevant or not locations or not all(e['match_valid'] and e['section_id'] for e in locations):
+                if row['decision']=='SUPPORTED' and (not relevant or not locations or not all(e['match_valid'] and e['section_id'] for e in locations)):
+                    if output_contract in (ALL_CONTRACT,VALID_CONTRACT):raise ValueError('SUPPORTED sin evidencia verificada')
+                    export_exclusions.append(dict(siap_id=p['siap_id'],indicator_id=iid,reason='UNVERIFIED_OR_NON_SUBSTANTIVE_EVIDENCE'))
                     continue
                 value = row['confidence_raw_score']
                 if type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 100:
                     raise ValueError('Confianza guardada invalida')
-                record = [p['siap_id'], iid, '\n\n'.join(e['text'] for e in locations),
-                    '\n'.join(evidence_sources(p, e) for e in locations),
-                    '\n'.join(f'section_id={e["section_id"]}; [{e["start"]},{e["end"]}); {e["coordinate_system"]}' for e in locations), value]
+                codes=resolve_codes(p,assessment)
+                try:consumer=indicator_record(p,iid,row=row,locations=locations,territory_codes=codes)
+                except (ValueError,KeyError,TypeError) as exc:
+                    if output_contract in (ALL_CONTRACT,VALID_CONTRACT):raise
+                    export_exclusions.append(dict(siap_id=p['siap_id'],indicator_id=iid,reason=str(exc)))
+                    continue
+                record=[consumer[c] for c in COLUMNS]
                 pair = (record[0], record[1])
                 previous = next((r for r in rows if (r[0], r[1]) == pair), None)
                 if previous and (previous != record or csv_records[pair]['estado_cumplimiento'] != row['decision']):
                     raise ValueError('Resultados contradictorios entre lotes')
                 if not previous:
                     rows.append(record)
-                    csv_records[pair] = dict(zip(COLUMNS, record), estado_cumplimiento=row['decision'])
-                    codes_by_pair[pair] = resolve_codes(p, assessment)
+                    csv_records[pair] = consumer
+                    codes_by_pair[pair] = codes
                     lineage.append(dict(siap_id=p['siap_id'], indicator_id=iid, batch=directory.name, evidence=locations,
                         raw_fields={e['field']: p['field_provenance'][e['field']]['raw_sources'] for e in locations}))
+    # Prepared batches may not yet have run when a cooperative interruption occurs.
+    covered={(c['siap_id'],c['indicator_id']) for c in coverage}
+    for pid in sorted(target_projects):
+        for iid in sorted(indicator_ids):
+            if (pid,iid) not in covered:
+                coverage.append(dict(siap_id=pid,indicator_id=iid,status='PENDING',decision=None,project_complete=False))
+    if output_contract==ALL_CONTRACT:
+        for item in coverage:
+            pair=item['siap_id'],item['indicator_id']
+            if item['status']=='VALID':continue
+            if pair in csv_records:raise ValueError('Estado contradictorio entre lotes')
+            consumer=indicator_record(dict(siap_id=pair[0]),pair[1],status=item['status'])
+            csv_records[pair]=consumer;rows.append([consumer[c] for c in COLUMNS])
+        if len({(c['siap_id'],c['indicator_id']) for c in coverage})!=len(coverage):
+            raise ValueError('Cobertura duplicada entre lotes')
     rows.sort(key=lambda r: (r[0], r[1]))
     if any(isinstance(c, str) and (len(c) > 32767 or re.search(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', c)) for r in rows for c in r):
         raise ValueError('Texto no representable en Excel; no se trunca evidencia')
-    book = openpyxl.Workbook()
-    ws = book.active
-    ws.title = 'RESULTADO_INDICADORES'
-    ws.append(COLUMNS)
-    for row in rows:
-        ws.append(row)
-        for cell in ws[ws.max_row][:5]:
-            cell.data_type = 's'
-            cell.number_format = '@'
-    territory = book.create_sheet('TERRITORIOS')
-    territory.append(TERRITORY_COLUMNS)
-    # No cross-experiment territorial lookup. New runs have no newly verified 4B bridge.
-    for sheet in book:
-        sheet.freeze_panes = 'A2'
-        sheet.auto_filter.ref = sheet.dimensions
     output = run_file(run, 'resultado_indicadores.xlsx')
-    candidate = run_file(run, 'resultado_indicadores.pending.xlsx')
-    candidate.parent.mkdir(parents=True,exist_ok=True)
-    book.save(candidate)
-    book.close()
-    checkbook = openpyxl.load_workbook(candidate, read_only=True)
-    try:
-        if checkbook.sheetnames != ['RESULTADO_INDICADORES', 'TERRITORIOS'] or list(next(checkbook.worksheets[0].values)) != COLUMNS or list(next(checkbook.worksheets[1].values)) != TERRITORY_COLUMNS:
-            raise ValueError('Contrato Excel invalido')
-        for cells in checkbook.worksheets[0].iter_rows(min_row=2):
-            if any(c.data_type != 's' for c in cells[:5]) or cells[5].data_type != 'n':
-                raise ValueError('Tipos Excel invalidos')
-    finally:
-        checkbook.close()
-    candidate.replace(output)
-    csv_result = write_results(run, COLUMNS+['estado_cumplimiento'],
+    render_thesis(root,output,[csv_records[(r[0],r[1])] for r in rows],contract=output_contract)
+    csv_result = write_results(run, consumer_columns,
                                [csv_records[(r[0], r[1])] for r in rows], codes_by_pair)
     coverage_path=run/'resultados/estado_indicadores.json'
-    write(coverage_path,dict(status='COMPLETE' if target_projects==processed else 'PARTIAL',
+    write(coverage_path,dict(status='COMPLETE' if target_projects==complete_projects else 'PARTIAL',
         note='VALID identifica evaluaciones verificadas; los demas estados no son evaluaciones completas.',indicators=coverage))
     valid_path=run/'resultados/evaluaciones_validas.json'
-    write(valid_path,dict(status='COMPLETE' if target_projects==processed else 'PARTIAL',assessments=valid_results))
-    result = dict(status='COMPLETE' if target_projects == processed and not errors else 'PARTIAL', excel=str(output),
+    write(valid_path,dict(status='COMPLETE' if target_projects==complete_projects else 'PARTIAL',assessments=valid_results))
+    result = dict(status='COMPLETE' if target_projects == complete_projects and not errors and not export_exclusions else 'PARTIAL', excel=str(output),
         preprocessed_projects=len(all_projects), scoped_projects=len(target_projects), pending_projects=sorted(target_projects - processed), errors=errors,
-        selected_projects=len(selected), processed_projects=len(processed), represented_projects=len({r[0] for r in rows}),
+        selected_projects=len(target_projects), processed_projects=len(processed), completed_projects=len(complete_projects), represented_projects=len({r[0] for r in rows}),
         relationships=len(rows), territories=0, excel_sha256=sha(output), power_bi_desktop_tested=False)
     result['csv'] = csv_result
+    if request.get('evaluation_policy'):result['evaluation_policy']=request['evaluation_policy']
+    result.update(output_contract=output_contract,sheets=SHEETS,columns=consumer_columns,
+        template=TEMPLATE.as_posix(),template_sha256=sha(root/TEMPLATE),positive_results_only=output_contract==POSITIVE_CONTRACT)
     result['indicator_statuses']=str(coverage_path)
     result['valid_results']=str(valid_path)
     result['valid_assessments']=sum(c['status']=='VALID' for c in coverage)
-    result['blocked_indicators']=[c for c in coverage if c['status']!='VALID']
-    result['note'] = ('Analisis terminado sin candidatos con evidencia pertinente' if not rows and result['status'] == 'COMPLETE'
-        else 'Resultados parciales; consultar proyectos pendientes' if result['status'] != 'COMPLETE'
-        else 'Analisis completo de los proyectos preparados')
+    result['blocked_indicators']=[c for c in coverage if c['status'] not in ('VALID','PENDING')]
+    result.update(expected_assessments=len(coverage),
+        supported=sum(c['decision']=='SUPPORTED' for c in coverage),
+        insufficient_evidence=sum(c['decision']=='INSUFFICIENT_EVIDENCE' for c in coverage),
+        not_supported=sum(c['decision']=='NOT_SUPPORTED' for c in coverage),
+        blocked_assessments=len(result['blocked_indicators']),
+        pending_assessments=sum(c['status']=='PENDING' for c in coverage),
+        exported_rows=len(rows),export_exclusions=export_exclusions,
+        processing_complete=target_projects==processed,results_available=bool(valid_results))
+    result['note'] = ('Excel vacio: no hay evaluaciones SUPPORTED; los resultados insuficientes y los errores se conservan en los registros internos.'
+        if not result['supported'] else 'Excel vacio: ningun SUPPORTED supero los controles de exportacion; consultar export_exclusions.' if not rows
+        else 'Se exportaron todos los positivos verificados, incluidos los de proyectos incompletos.')
+    if output_contract==ALL_CONTRACT:result['note']='Cobertura de todos los indicadores seleccionados; decisiones y confianzas originales.'
+    if output_contract==VALID_CONTRACT:result['note']='Evaluaciones validas, incluidas confianzas bajas y cero; errores y limites de recuperacion solo en auditoria.'
+    if result['status']!='COMPLETE':result['note']+=' Cobertura PARTIAL; consultar indicadores bloqueados y pendientes.'
     write(run_file(run, 'export.json'), result)
     write(run_file(run, 'evidence_lineage.json'), lineage)
-    complete=sorted(processed)
-    partial=sorted(evaluated_projects-processed)
-    blocked=sorted((set(request.get('blocked_projects',{}))|blocked_results)-processed-set(partial))
+    complete=sorted(complete_projects)
+    partial=sorted(evaluated_projects-complete_projects)
+    blocked=sorted((set(request.get('blocked_projects',{}))|blocked_results)-complete_projects-set(partial))
     write(run_file(run, 'runtime.manifest.json'),dict(run_id=run.name,provider=request.get('llm',{}).get('provider','ollama'),
+        **({'evaluation_policy':request['evaluation_policy']} if request.get('evaluation_policy') else {}),
         model=request.get('llm',{}).get('model'),evaluation_contract=request.get('evaluation_contract'),
         project_states=dict(complete=complete,partial=partial,blocked=blocked,
             pending=sorted(target_projects-set(complete)-set(partial)-set(blocked)))))
@@ -512,6 +588,7 @@ def selected_configuration(root, config_path, source=None, input_file=None, deli
             if source not in ('base', 'incoming') and not raw.is_relative_to(intake / 'incoming'):
                 raise ValueError('Seleccionar all, base, incoming o incoming/<entrega>')
         config['raw_base'] = raw.relative_to(root).as_posix()
+        if source=='base':config['knowledge_scope']='BASE_GLOBAL_V1'
     if not raw.is_dir():
         raise ValueError('Carpeta de fuentes inexistente: ' + str(raw))
     prefix = raw.relative_to(root / 'data/layer1_sources').as_posix()
@@ -640,6 +717,8 @@ def execution_approval(root, run, config, metadata, model_binding, target, confi
             return saved
     llm=scope['llm'];external=llm['provider']=='openai'
     summary=dict(run_id=run.name,provider=llm['provider'],model=llm['model'],project_count=len(scope['project_ids']),
+        evaluation_policy=config.get('evaluation_policy'),num_ctx=llm.get('num_ctx'),
+        project_ids=list(scope['project_ids']),
         sources=list(scope['sources']),contract=scope['contract'],stages=list(STAGES[:STAGES.index(target)+1]),
         destination='OpenAI API: '+llm.get('api',{}).get('base_url','https://api.openai.com/v1') if external else llm.get('endpoint'),
         budget_usd=llm.get('api',{}).get('budget_usd') if external else None,
@@ -669,7 +748,7 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
                      stage=None, through=None, resume=False, approve_build=False, authorize=False,
                      project_ids=None, notify=None, dataset=None, input_file=None, delivery=None, confirm=None,
                      limit=None, all_projects=False, seed=42, dry_run=False, selection_manifest=None,confirm_all=False,
-                     single_authorization=False):
+                     single_authorization=False,evaluation_mode=None,context_mode=None,knowledge_action=None):
     """Central reusable orchestration API. Layer checkpoints remain authoritative."""
     root = Path(root).resolve()
     sampling = limit is not None or all_projects or selection_manifest is not None
@@ -716,11 +795,28 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
         raise ValueError('Reanudar requiere --run-id')
     name = run_id or ('run_' + datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S_%f'))
     run = find_run(root, runs, name)
+    from layer4_evaluation.indicators import assessment_v3 as v3
+    stored_request=read(run_file(run,'execution.json')) if run_file(run,'execution.json').exists() else None
+    stored_state=read(run_file(run,'run.json')) if run_file(run,'run.json').exists() else None
+    if knowledge_action not in (None,'reuse','rebuild'):raise ValueError('Opcion de conocimiento BASE invalida')
+    if stored_state and knowledge_action is not None and knowledge_action!=stored_state.get('configuration',{}).get('base_knowledge_action'):
+        raise ValueError('Resume conserva el conocimiento y la opcion originales; crear otro run')
+    frozen=(stored_request or {}).get('evaluation_policy',(stored_state or {}).get('configuration',{}).get('evaluation_policy',{}))
+    policy=v3.evaluation_policy(evaluation_mode,context_mode,
+        base=source=='base' or (source is None and input_file is None and delivery is None and (project_ids is not None or sampling)),
+        configured=active_config.get('evaluation'),saved=frozen if stored_request is not None or stored_state is not None else None)
+    if policy:
+        active_config['evaluation_policy']=policy
+        if policy['context_mode'] in (v3.FULL_CONTEXT,v3.BASE_CONTEXT):
+            active_config['llm']=dict(active_config.get('llm',{}),num_ctx=24576)
+        elif policy['context_mode']==v3.RETRIEVED_CONTEXT:
+            active_config['llm']=dict(active_config.get('llm',{}),num_ctx=16384,context_margin_tokens=1024)
     from experiment_runtime import binding
-    model_binding = binding(root, run, active_config.get('llm'))
+    model_binding = binding(root, run, active_config.get('llm'),evaluation=policy)
     active_config = dict(active_config, llm=model_binding['llm'])
     current = None
     approval = None
+    evaluation_report={}
     target = stage or through or 'export'
     def quoted(value):
         return "'" + str(value).replace("'", "''") + "'"
@@ -779,7 +875,10 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
                     # Data settings stay frozen; LLM changes get their own review
                     # and pre-dispatch compatibility checks in prepare_evaluation.
                     selected_data = {k:v for k,v in selected.items() if k != 'llm'}
+                    if policy:selected_data['evaluation_policy']=policy
                     stored_data = {k:v for k,v in config.items() if k != 'llm'}
+                    for key in ('base_knowledge_action','base_knowledge_source'):
+                        if key in stored_data:selected_data[key]=stored_data[key]
                     if selected_raw.resolve() != raw.resolve() or not same_configuration(root, selected_data, stored_data):
                         raise ValueError('Fuentes/configuracion distintas; crear una ejecucion nueva')
                 dataset = state['dataset']
@@ -804,6 +903,11 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
                     raw = root / 'tests/fixtures' / dataset
                 else:
                     config, raw, runs = selected_configuration(root, config_path, source, input_file, delivery)
+                if policy:config['evaluation_policy']=policy
+                if config.get('knowledge_scope')=='BASE_GLOBAL_V1' and not dry_run:
+                    config['base_knowledge_action']=(initial.get('configuration',{}).get('base_knowledge_action','reuse') if registered else knowledge_action or 'reuse')
+                    if registered and initial.get('configuration',{}).get('base_knowledge_source'):
+                        config['base_knowledge_source']=initial['configuration']['base_knowledge_source']
                 if registered and (initial['raw_path'] != raw.relative_to(root).as_posix() or
                         not same_configuration(root,initial['configuration'],dict(config,llm=model_binding['llm']))):
                     raise ValueError('Fuentes/configuracion distintas del registro inicial')
@@ -819,6 +923,7 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
                     write(run_file(run,'model.binding.json'), model_binding)
                     write(run_file(run,'execution.json'), dict(through=target, project_ids=project_ids,
                         llm=model_binding['llm'], evaluation_contract=model_binding.get('contract'),
+                        **({'evaluation_policy':policy} if policy else {}),
                         source=source,input_file=input_file,delivery=delivery))
                     write(run_file(run,'run.json'), dict(status='REGISTERED',run_id=name,dataset=dataset or 'raw',
                         raw_path=raw.relative_to(root).as_posix(),configuration=dict(config,llm=model_binding['llm']),
@@ -852,6 +957,7 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
                     raise ValueError('Modalidad distinta de la ejecucion original')
             request = dict(through=target, project_ids=project_ids, selection=selection,
                 llm=model_binding['llm'], evaluation_contract=model_binding.get('contract'),
+                **({'evaluation_policy':policy} if policy else {}),
                 source=source,input_file=input_file,delivery=delivery)
             config['llm'] = model_binding['llm']
             if single_authorization and not dry_run and approval is None:
@@ -888,6 +994,22 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
                         raise ValueError('Contrato, fuentes o catalogo cambiaron tras la seleccion; no se inicia el procesamiento')
                 if sampling or dry_run or model_binding.get('contract'):
                     config['project_selection'] = metadata
+                if config.get('knowledge_scope')=='BASE_GLOBAL_V1':
+                    config.pop('processing_scope',None)
+            if not prepared and config.get('base_knowledge_action')=='reuse':
+                candidate=processing.reuse_global_base(root,run,raw,config,dataset,probe=True,require_graph=True)
+                if not candidate:
+                    message='No hay conocimiento global BASE compatible (fuentes, contratos, embeddings o grafo). Puede reconstruir con --knowledge-action rebuild.'
+                    if confirm is None or confirm('knowledge_rebuild',dict(message=message)) is not True:
+                        return progress('KNOWLEDGE_REBUILD_REQUIRED',message=message)
+                    config['base_knowledge_action']='rebuild'
+                else:config['base_knowledge_source']=candidate
+                # Persist the chosen immutable source before any expensive stage.
+                registered_state=read(run_file(run,'run.json'))
+                registered_state['configuration']=config
+                write(run_file(run,'run.json'),registered_state)
+            request['base_knowledge_action']=config.get('base_knowledge_action')
+            request['base_knowledge_source']=config.get('base_knowledge_source')
             sequence = [stage] if stage else list(STAGES[:STAGES.index(target) + 1])
             if not prepared:
                 files = preview.get('files', [])
@@ -899,7 +1021,7 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
                     records_by_domain={domain:sum(item.get('record_count', 0) for item in files if item['file'] in primary and item.get('domain') == domain)
                         for domain in sorted({item.get('domain', 'pending') for item in files if item['file'] in primary})},
                     requested_projects=project_ids, stages=sequence,
-                    note='Filas disponibles para lectura e indices. El ETL acota proyectos/produccion y conserva testigos de identidad: preprocess/scope.json. Evaluacion/Excel solo incluyen la seleccion. ARTICLE no evaluado; TERRITORIOS queda sin filas verificadas de este run.')
+                    note=('Conocimiento global BASE; la seleccion limita solo evaluacion/Excel. Relaciones con procedencia canonica; articulos no evaluados.' if config.get('knowledge_scope')=='BASE_GLOBAL_V1' else 'ETL acotado: preprocess/scope.json. Evaluacion/Excel solo incluyen la seleccion. ARTICLE no evaluado; TERRITORIOS sin filas verificadas.'))
                 request['input_summary'] = summary
                 progress('INPUT_SUMMARY', summary=summary)
                 if preview['status'] != 'READY_FOR_VALIDATION' or preview['discovery_status'] != 'READY_FOR_VALIDATION':
@@ -919,6 +1041,11 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
                 if approval:verify_execution_approval(root,approval)
                 if run_file(run,'stop.request.json').exists():
                     return progress('INTERRUPTED',message='Detencion solicitada; checkpoints conservados')
+                reused=read(run_file(run,'run.json')).get('global_reuse',{})
+                if current in ('knowledge','graphrag') and reused and (current=='knowledge' or reused.get('graph_reused')):
+                    if current=='graphrag':validated_graph(root,run)
+                    progress('STAGE_REUSED')
+                    continue
                 if resume and not registered and ((current=='preprocessing' and state['status'] in ('PREPROCESSED','PREPARED')) or
                         (current=='knowledge' and state['status']=='PREPARED')):
                     progress('STAGE_REUSED')
@@ -992,18 +1119,22 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
                         module = engine(root, run)
                         batches = [eligible[i:i+2] for i in range(0, len(eligible), 2)]
                         reviews, pending, authorized_batches = [], [], set()
-                        completed_projects=completed_indicators=0
+                        completed_projects=completed_indicators=processed_projects=0
+                        evaluation_partial=False
+                        batch_states={}
                         for batch in batches:
                             directory = module.BASE / batch_name(batch)
                             review_path = directory / 'review.txt'
                             reviewed = sha(review_path) if review_path.is_file() else None
                             result = evaluate(root, run, batch)
                             verified = module.verify_run(directory)
+                            batch_states[directory.name]=verified
                             project_states(verified)
                             if verified.get('blocking_errors',verified['errors']):
                                 raise ValueError('Evaluacion bloqueada: ' + '; '.join(verified['errors']))
                             if verified['status']=='COMPLETE':
                                 completed_projects+=len(verified['projects'])
+                                processed_projects+=len(verified['projects'])
                                 completed_indicators+=sum(len(p.get('rows',[])) for p in verified['projects'])
                             if verified['status'] != 'COMPLETE':
                                 if approval:
@@ -1034,17 +1165,33 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
                                     plan_sha256=sha(directory/'plan.json'),review_sha256=sha(directory/'review.txt')))
                             evaluate(root, run, batch, authorize=authorize or batch_name(batch) in authorized_batches, execute=True)
                             verified = module.verify_run(module.BASE / batch_name(batch))
+                            batch_states[batch_name(batch)]=verified
                             project_states(verified)
                             completed_projects+=sum(p.get('complete',False) for p in verified['projects'])
+                            processed_projects+=sum(p.get('processed',p.get('complete',False)) for p in verified['projects'])
+                            evaluation_partial=evaluation_partial or verified['status']!='COMPLETE'
                             completed_indicators+=sum(len(p.get('rows',[])) for p in verified['projects'])
                             if notify:
                                 progress('EVALUATION_PROGRESS',projects_in_batch=len(batch),
                                     projects_evaluated=completed_projects,total_projects=len(eligible),
+                                    projects_processed=processed_projects,projects_completed=completed_projects,
                                     indicators_completed=completed_indicators)
                             if verified.get('blocking_errors',verified['errors']):
                                 if (run_file(run, 'stop.request.json')).exists():
                                     return progress('INTERRUPTED',result=export(root,run))
                                 raise ValueError('Lote incompleto/bloqueado; consultar status antes de reanudar')
+                        projects_view=[p for batch in batch_states.values() for p in batch['projects']]
+                        decisions=[r['decision'] for p in projects_view for r in p['rows']]
+                        evaluation_report=dict(selected_projects=len(selected),processed_projects=processed_projects,
+                            completed_projects=completed_projects,expected_assessments=sum(len(p.get('selected',p['rows'])) for p in projects_view),
+                            valid_assessments=len(decisions),supported=decisions.count('SUPPORTED'),
+                            insufficient_evidence=decisions.count('INSUFFICIENT_EVIDENCE'),not_supported=decisions.count('NOT_SUPPORTED'),
+                            blocked_assessments=sum(len(set(p.get('blocked_indicators',{}))|set(p.get('context_limits',{}))) for p in projects_view),
+                            pending_assessments=sum(len(p.get('pending_indicators',[])) for p in projects_view),
+                            processing_complete=processed_projects==len(selected),results_available=bool(decisions))
+                        if target=='evaluation' and evaluation_partial:
+                            return progress('PARTIAL',**evaluation_report,
+                                message='Procesamiento finalizado con cobertura parcial; las evaluaciones validas se conservan.')
                     else:
                         module = engine(root, run)
                         directories = list(module.BASE.glob('batch_*'))
@@ -1067,6 +1214,7 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
                                 inference_calls=0, embeddings_created=0)
             return progress('COMPLETE', through=target, results=str(run / 'workspace/outputs'),
                             excel=str(run_file(run, 'resultado_indicadores.xlsx')) if target == 'export' else None,
+                            **(dict(result=result) if target=='export' else evaluation_report),
                             limitations=['Evaluacion PROJECT; ARTICLE pendiente. Exportacion sin puente territorial nuevo verificado.'])
         except KeyboardInterrupt:
             if any((run/'workspace/outputs/layer4').glob('batch_*')):

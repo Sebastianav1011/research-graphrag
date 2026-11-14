@@ -159,8 +159,8 @@ def test_four_runner_modes_use_same_scoped_processing(sandbox,mode):
         if mode=='file_projects':args['project_ids']=['P1']
     result=runner.execute_pipeline(root,run_id=mode,through='knowledge',**args)
     assert result['status']=='COMPLETE'
-    run=root/'outputs/runs'/mode
-    expected={'P1'} if mode in ('projects','file_projects') else {'P1','P2'}
+    run=runner.find_run(root,root/'outputs/runs',mode)
+    expected={'P1'} if mode=='file_projects' else {'P1','P2'}
     assert {p['source_project_id'] for p in rows(run,'proyectos')}==expected
     before=sha(run/'workspace/outputs/layer2/canonical/proyectos.parquet')
     runner.execute_pipeline(root,run_id=mode,resume=True,through='knowledge')
@@ -188,12 +188,12 @@ def test_only_unaffected_projects_are_evaluated_and_excel_stays_partial(system,m
     original=runner.knowledge
     def knowledge(root,run):
         original(root,run)
-        write(run/'run.json',read(run/'run.json')|{'scope_quarantine':{'affected_projects':{'002':['ART_SRC_BAD']}}})
+        write(runner.run_file(run,'run.json'),read(runner.run_file(run,'run.json'))|{'scope_quarantine':{'affected_projects':{'002':['ART_SRC_BAD']}}})
     monkeypatch.setattr(runner,'knowledge',knowledge)
     result=runner.execute_pipeline(system.root,project_ids=['001','002','003'],through='export',confirm=system.confirm)
     assert result['status']=='PARTIAL' and result['result']['pending_projects']==['002']
     assert [c for c in system.calls if isinstance(c,tuple)]==[('ollama',['001','003'])]
-    assert read(system.run()/'execution.json')['project_ids']==['001','002','003']
+    assert read(runner.run_file(system.run(),'execution.json'))['project_ids']==['001','002','003']
     runner.execute_pipeline(system.root,run_id=system.run().name,resume=True,confirm=system.confirm)
     assert len([c for c in system.calls if isinstance(c,tuple)])==1
 
@@ -202,7 +202,7 @@ def test_all_affected_projects_block_without_fake_classification(system,monkeypa
     original=runner.knowledge
     def knowledge(root,run):
         original(root,run)
-        write(run/'run.json',read(run/'run.json')|{'scope_quarantine':{'affected_projects':{'001':['ART_SRC_BAD']}}})
+        write(runner.run_file(run,'run.json'),read(runner.run_file(run,'run.json'))|{'scope_quarantine':{'affected_projects':{'001':['ART_SRC_BAD']}}})
     monkeypatch.setattr(runner,'knowledge',knowledge)
     monkeypatch.setattr(runner,'engine',lambda *a:pytest.fail('Blocked selections must not initialize the LLM engine'))
     result=runner.execute_pipeline(system.root,project_ids=['001'],through='export',confirm=system.confirm)

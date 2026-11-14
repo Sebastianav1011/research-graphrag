@@ -4,6 +4,7 @@
 - [Instalación](instalacion.md): plataformas, dependencias y recursos privados.
 - [Comparación experimental](OPENAI_EXPERIMENTS.md): claves, presupuesto, contratos y autorización.
 - [Almacenamiento](ALMACENAMIENTO.md): rutas, histórico, 72 horas, migración y recuperación.
+- [Auditoría de almacenamiento del 10 de noviembre](auditoria_almacenamiento_2026-11-10.md): inventario, conservación académica, retiradas recuperables y pendientes.
 - [Contrato compartido](status/validacion_contrato_tesis30.md): selección, hashes y alcance de la validación.
 - [Cierre de reorganización](status/almacenamiento_final.md): resultados y límites comprobados.
 

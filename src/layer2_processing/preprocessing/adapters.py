@@ -418,7 +418,7 @@ def source_registry(root, config):
         for field, aliases in fields.items():
             existing = mapping.get(field, [])
             mapping[field] = list(dict.fromkeys((existing if isinstance(existing, list) else [existing]) + aliases))
-    if config.get('project_selection'):
+    if config.get('project_selection') or config.get('knowledge_scope')=='BASE_GLOBAL_V1':
         # Institutional audit: id_investigador has many-to-many values against
         # id_empleado. It is not a verified alias of employee identity. Retain
         # its original value in lineage, never use it to bridge persons.
@@ -493,6 +493,31 @@ def column_kind(column):
     return 'potential_text_requires_authorization'
 
 
+def base_source(root,path,config):
+    return path.resolve().is_relative_to((root/'data/layer1_sources/base').resolve()) and config.get('documentary_source_policy')!='SELECTED_ONLY_V1'
+
+
+def base_valid_rows(domain,mapping,rows):
+    """Isolate unverifiable BASE identities; preserve original occurrence locators."""
+    from .normalize import identifier,doi,eid
+    fields=('source_project_id',) if domain=='proyectos' else ('source_article_id','eid','doi') if domain=='articulos' else ()
+    if fields and not any(f in mapping for f in fields):
+        raise ValueError('Columnas estructurales de identidad ausentes: '+', '.join(fields))
+    valid,rejected=[],[]
+    for number,values in rows:
+        identifiers=[]
+        for field in fields:
+            for column in mapping.get(field,[]):
+                value=clean(values.get(column))
+                normalized=doi(value) if field=='doi' else eid(value) if field=='eid' else identifier(value)
+                pattern=r'10\.\d{4,9}/\S+' if field=='doi' else r'2-s2\.0-\d+' if field=='eid' else r'[\w.:/-]+'
+                if normalized and re.fullmatch(pattern,normalized,re.I):identifiers.append(normalized)
+        if fields and not identifiers:
+            rejected.append(dict(row=number,reasons=['Identificador obligatorio ausente o sin identidad verificable: '+', '.join(fields)]))
+        else:valid.append((number,values))
+    return valid,rejected
+
+
 def discover_sources(root, config=None, folder=None):
     """Read-only preview; never canonicalizes, merges identities, indexes or calls LLM.
 
@@ -533,12 +558,20 @@ def discover_sources(root, config=None, folder=None):
             mapping = PROJECT_MAPPING.copy() if official else mapping_for(domain, headers, known[domain], override.get('mapping'))
             from .knowledge_fields import analyze_columns
             policy = config.get('text_columns', {}) | override.get('text_columns', {}) | {'auto_keywords': []}
+            tolerant=base_source(root,path,config)
+            if tolerant and domain=='proyectos':
+                policy['include']=list(dict.fromkeys(policy.get('include',[])+[c for c in ('justificacion','actividades_formacion') if c in headers]))
             mapping, extra, decisions, classification = analyze_columns(headers, rows, mapping,
                 known.get('knowledge_detection', {}), policy, select_text_columns)
             if official:
                 extra = PROJECT_EXTRA.copy()
                 from .knowledge_fields import describe_columns
                 classification = describe_columns(headers, rows, mapping, known.get('knowledge_detection', {}), extra)
+            isolated=[]
+            if tolerant:
+                rows,isolated=base_valid_rows(domain,mapping,rows)
+                accepted={n for n,_ in rows}
+                item['records']=[r for r in item['records'] if r['row'] in accepted]
             primary = override.get('primary_id') or next((f for f in IDENTIFIERS[domain] if f in mapping), None)
             if not primary or primary not in mapping:
                 item['diagnostics'].append('Identificador institucional principal ausente o ambiguo; configurar mapping/primary_id')
@@ -555,7 +588,8 @@ def discover_sources(root, config=None, folder=None):
                         relations=[dict(column=c['column'], namespace=ns, canonical_field=c['canonical_field'], resolution='requires_canonical_validation')
                             for c in classification for ns in c['identifier_namespaces']])
             required = ['source_project_id'] if official else required_fields(root, domain, override)
-            rejected = []
+            if tolerant and domain=='articulos':required=[]
+            rejected = list(isolated)
             for n, values in rows:
                 errors = []
                 for field in required + ([primary] if override.get('primary_id') else []):
@@ -583,10 +617,12 @@ def discover_sources(root, config=None, folder=None):
                 if previous:
                     item['diagnostics'].append(dict(code='REPEATED_ID_REQUIRES_CANONICAL_VALIDATION', row=n, previous=previous.copy()))
                 previous.append(dict(file=rel, sheet=sheet, row=n))
-            item['record_validation'] = dict(valid=len(rows)-len(rejected), rejected=len(rejected),
+            item['record_validation'] = dict(valid=item['record_count']-len(rejected), rejected=len(rejected),
                 rejected_rows=rejected, scope='structural_only_not_canonical_identity_acceptance')
-            if rejected:
+            if rejected and not tolerant:
                 raise ValueError('; '.join(reason for row in rejected for reason in row['reasons']))
+            if not item['record_validation']['valid']:raise ValueError('Ningun registro utilizable en la fuente')
+            if rejected:item['diagnostics'].append(dict(code='BASE_ROWS_EXCLUDED',count=len(rejected),rows=rejected))
             item['status'] = 'READY_FOR_VALIDATION'
             if domain in ('proyectos', 'articulos') and not extra and not any(f in mapping for f in PROJECT_FIELDS if f not in ('title','keywords')) and 'abstract' not in mapping:
                 item['diagnostics'].append('Sin texto sustantivo autorizado; revisar pending_authorization y configurar text_columns.include o authorized_categories antes de procesar')
@@ -709,6 +745,19 @@ def prepare_files(root, raw, run, config):
                 if not set(mapping) & identifiers:
                     raise ValueError('Identificador principal ambiguo o ausente; configurar mapping')
             policy = config.get('text_columns', {}) | override.get('text_columns', {})
+            tolerant=base_source(root,path,config)
+            if tolerant:
+                rows,isolated=base_valid_rows(domain,mapping,rows)
+                reported={r['row']:r for r in structural[rel].get('record_validation',{}).get('rejected_rows',[])}
+                reported.update({r['row']:r for r in isolated})
+                isolated=list(reported.values())
+                rows=[(n,v) for n,v in rows if n not in reported]
+                for rejected in isolated:
+                    events.append(dict(severity='WARNING',file=rel,row=rejected['row'],
+                        code='BASE_ROW_EXCLUDED',reason='; '.join(rejected['reasons'])))
+                if not rows:raise ValueError('Ningun registro utilizable en la fuente')
+                if domain=='proyectos':
+                    policy['include']=list(dict.fromkeys(policy.get('include',[])+[c for c in ('justificacion','actividades_formacion') if c in headers]))
             if 'incoming' in path.relative_to(root).parts:
                 policy = policy | {'auto_keywords': []}
             from .knowledge_fields import analyze_columns
@@ -730,6 +779,7 @@ def prepare_files(root, raw, run, config):
                     continue
             normalized, refs = [], []
             required = ['source_project_id'] if official else required_fields(root, domain, override)
+            if tolerant and domain=='articulos':required=[]
             for locator, original in rows:
                 row = {}
                 for field, cols in mapping.items():
@@ -784,6 +834,7 @@ def prepare_files(root, raw, run, config):
                 writer.writeheader()
                 writer.writerows(normalized)
             entry = dict(path=str(target), type='csv', delimiter=',', mapping={f: f for f in mapping})
+            if tolerant:entry['base_record_policy']='BASE_VALID_ROWS_V1'
             if official:
                 entry['project_contract'] = True
             # The proven identity resolver must see every alias, including conflicts.

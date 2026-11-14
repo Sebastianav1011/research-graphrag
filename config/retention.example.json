@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "keep_recent": 2,
+  "keep_per_family": {"academic": 2, "temporary": 1},
+  "document_cache_budget_bytes": 268435456,
+  "document_cache_max_files": 20000,
+  "pinned": [],
+  "reviewed": {},
+  "_usage": "Simulation by default. Pin bucket/id references; explicitly review closed_for_retention, family, profile and reason before apply. All unique evidence is archived. Never retire solely by age. Use a private policy for institutional run IDs."
+}

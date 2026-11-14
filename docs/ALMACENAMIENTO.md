@@ -135,3 +135,79 @@ Los resultados válidos persistidos no se repiten al reanudar el mismo alcance.
 `outputs/` completo es privado y está excluido de Git. Se comparte exclusivamente
 el código, configuración pública, documentación y el contrato expresamente autorizado;
 fuentes, catálogo operativo y pesos se obtienen por canal privado.
+
+## Retiro explícito de históricos y caché de documentos
+
+La regla de 72 horas anterior sigue siendo la del runtime. Para cerrar
+deliberadamente ensayos históricos reemplazados, usar el gestor administrativo
+separado: **simula por defecto**, preserva evidencia antes de reciclar y no cambia
+los sellos ni declara que una evaluación parcial haya terminado. No se importa
+desde el pipeline, para conservar sus fingerprints y mecanismo de reanudación.
+
+```powershell
+uv run python scripts/manage_run_retention.py
+uv run python scripts/manage_run_retention.py --policy config/retention.local.json
+```
+
+Copiar `config/retention.example.json` a una política local para futuros ensayos.
+`keep_recent` protege los más recientes por timestamp explícito; `pinned` acepta
+`local/ID` o `api/ID`; `keep_per_family` configura representantes por familia
+etiquetada y perfil (`academic`/`temporary`). Las referencias oficiales de Layers 1–3,
+los orígenes reutilizados por runs retenidos, procesos/locks activos, SQLite abierto,
+hardlinks y solicitudes API inciertas se protegen. Los límites proponen retención;
+no autorizan retirar contenido solo por edad o cantidad. Un run sin revisión se
+conserva. Los perfiles son etiquetas explícitas, no se deducen de nombres.
+
+Para autorizar el retiro de un ensayo ya revisado, su entrada en `reviewed` debe
+identificar `family`, `profile`, `reason` y `closed_for_retention: true`. Esto
+significa **no se pretende reanudar**, no significa evaluación completa. La política
+local de la limpieza del 11 de noviembre registra sus decisiones individuales;
+no se debe reutilizar a ciegas para runs nuevos.
+
+```powershell
+uv run python scripts/manage_run_retention.py --policy config/retention.local.json --apply --archive outputs/historico/compactados/NUEVO.zip --journal outputs/runs/.storage-events/NUEVO.json
+```
+
+Apply toma el lock del coordinador, vuelve a comprobar actividad/inventario,
+crea un ZIP sin sobrescribir, deduplica contenido por SHA-256, verifica todos los
+objetos y sus rutas y registra un journal durable antes de reciclar. Conserva
+configuraciones, respuestas, evaluaciones, errores, métricas, manifiestos y toda
+información única. No hay fallback de eliminación permanente. Modelos, publicaciones,
+fuentes y archivos fuera de `runs` no forman parte de este comando.
+
+La limpieza específica del 11 de noviembre añade omisiones revisadas por hash:
+cachés de documentos cuyos vectores ya están publicados e índices SQLite de búsqueda
+reconstruibles desde las tablas congeladas. No omite queues, ledgers ni sus WAL/SHM,
+respuestas o query caches. El ZIP y su índice conservan los manifiestos históricos
+originales **como evidencia**, con estado `HISTORICAL_NON_RESUMABLE` y un registro de
+omisiones; no afirman que esas rutas sigan disponibles para ejecución. Las 13
+referencias retenidas mantienen íntegros sus archivos y dependencias.
+
+```powershell
+uv run python scripts/manage_run_retention.py --verify --archive outputs/historico/compactados/evidencias_runs_2026-11-11.zip
+uv run python scripts/manage_run_retention.py --archive outputs/historico/compactados/evidencias_runs_2026-11-11.zip --extract-run local/run_20261108_154514_059252 --destination archives/evidencias100
+```
+
+La extracción exige un destino nuevo, fuera de runs. Sirve para inspección y análisis
+histórico, no autoriza reanudar. Para recuperar exactamente un workspace retirado,
+restaurar **toda su carpeta desde la Papelera** a la ruta indicada en el manifiesto
+de limpieza, sin sobrescribir una carpeta existente. Restaurar también sus orígenes
+reutilizados indicados en `reuse.json` cuando corresponda; no reescribir sus sellos.
+No vaciar la Papelera sin
+verificar primero que ya no se necesitan esas reanudaciones.
+
+La caché opcional global de documentos tiene límites configurables de bytes y número
+de archivos. Puede revisarse periódicamente o después de un experimento cerrado:
+
+```powershell
+uv run python scripts/manage_run_retention.py --prune-document-cache
+uv run python scripts/manage_run_retention.py --prune-document-cache --apply --journal outputs/runs/.storage-events/CACHE-NUEVO.json
+```
+
+Por defecto solo simula. El retiro requiere verificar hashes de pares JSON/NPY,
+payload numérico, dimensiones y cobertura en bundles publicados íntegros. Conserva
+todo el grupo si hay contenido desconocido, un vector único, un proceso activo o
+una publicación en curso. No considera `query_cache`: su falta puede impedir evaluar.
+Evita volver a materializar cachés opcionales si no se va a construir otra publicación.
+Para datasets/modelos, usar los mecanismos de reutilización verificada del pipeline;
+no crear hardlinks o mover pesos manualmente: sus rutas y hashes forman parte de los sellos.

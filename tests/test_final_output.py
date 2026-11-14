@@ -14,7 +14,7 @@ ROOT=Path(__file__).resolve().parents[1]
 def test_official_template_loads_from_foreign_working_directory(tmp_path,monkeypatch):
     monkeypatch.chdir(tmp_path)
     book=final.load_template()
-    assert book.sheetnames==['INDICADORES','TERRITORIOS']
+    assert book.sheetnames==['Proyectos','Artículos']
     for sheet in book:
         assert list(next(sheet.values))==final.SHEETS[sheet.title]
     book.close()
@@ -81,9 +81,9 @@ def test_historical_template_locator_preserves_original_bytes():
 
 def test_incompatible_columns_are_rejected_without_rewriting(tmp_path):
     target=final.template_path(tmp_path);target.parent.mkdir(parents=True)
-    book=final.load_template();book['TERRITORIOS']['A1']='columna_incorrecta';book.save(target);book.close()
+    book=final.load_template();book['Proyectos']['A1']='columna_incorrecta';book.save(target);book.close()
     before=final.s.sha(target)
-    with pytest.raises(ValueError,match='TERRITORIOS'):final.load_template(tmp_path)
+    with pytest.raises(ValueError,match='Proyectos'):final.load_template(tmp_path)
     assert final.s.sha(target)==before
 
 

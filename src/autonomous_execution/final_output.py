@@ -14,13 +14,11 @@ from layer2_processing.checkpoints import locate
 
 COLUMNS=['siap_id','investigador_id','indicador_id','estado_cumplimiento',
          'parrafo_evidencia','fuente_evidencia','ubicacion_evidencia','confianza','territorio']
-TEMPLATE=Path('data/templates/plantilla_resultado_final_indicadores_territorios.xlsx')
-SHEETS={
-    'INDICADORES':['id_proyecto','id_articulo','id_investigador','id_indicador',
-        'estado_cumplimiento','confianza','parrafo_evidencia','fuente_evidencia','ubicacion_evidencia'],
-    'TERRITORIOS':['id_proyecto','id_articulo','tipo_territorio_id','codigo_dane',
-        'fuente_evidencia','ubicacion_evidencia'],
-}
+from layer4_evaluation.thesis_output import (TEMPLATE, COLUMNS as THESIS_COLUMNS, SHEETS as THESIS_SHEETS,
+    DEFAULT_CONTRACT, POSITIVE_CONTRACT, ALL_CONTRACT, VALID_CONTRACT, GENERAL_COLUMNS)
+SHEETS={name:list(THESIS_COLUMNS) for name in THESIS_SHEETS}
+TERRITORY_SOURCE_COLUMNS=['id_proyecto','id_articulo','tipo_territorio_id','codigo_dane',
+    'fuente_evidencia','ubicacion_evidencia']
 
 
 def connect_readonly(path):
@@ -32,7 +30,7 @@ def template_path(root=None):
 
 
 def load_template(root=None):
-    """The user-supplied workbook is authoritative; never regenerate or replace it."""
+    """Validate the versioned thesis template; never replace its stored bytes."""
     from openpyxl import load_workbook
     path=template_path(root)
     book=load_workbook(path)
@@ -61,28 +59,10 @@ def style(sheet):
             sheet.row_dimensions[row[0].row].height=max(60,min(180,20+len(str(row[6].value or ''))*.18))
 
 
-def render(root,records,target,territories=()):
-    """Project validated data into the official workbook, preserving its headers/styles."""
-    book=load_template(root)
-    try:
-        sheet=book['INDICADORES']
-        for index,record in enumerate(records,2):
-            values=[record['siap_id'],None,record['investigador_id'],record['indicador_id'],
-                record['estado_cumplimiento'],record['confianza'],record['parrafo_evidencia'],
-                record['fuente_evidencia'],record['ubicacion_evidencia']]
-            for column,value in enumerate(values,1):sheet.cell(index,column,value)
-        sheet=book['TERRITORIOS']
-        for index,record in enumerate(territories,2):
-            if set(record)!=set(SHEETS['TERRITORIOS']):raise ValueError('Columnas territoriales incompatibles')
-            for column,name in enumerate(SHEETS['TERRITORIOS'],1):sheet.cell(index,column,record[name])
-        for sheet in book:
-            # The template includes formatted blank rows. Data always starts at 2.
-            last=(len(records) if sheet.title=='INDICADORES' else len(territories))+1
-            if sheet.max_row>last:sheet.delete_rows(last+1,sheet.max_row-last)
-            style(sheet)
-        temporary=Path(target).with_suffix('.pending.xlsx')
-        book.save(temporary);temporary.replace(target)
-    finally:book.close()
+def render(root,records,target,territories=(),*,contract=DEFAULT_CONTRACT):
+    """Keep unassessed ARTICLEs empty; project geography comes from its citations."""
+    from layer4_evaluation.thesis_output import render as render_thesis
+    render_thesis(root,target,records,contract=contract)
 
 
 def prepare_projection(root,run,projects):
@@ -136,7 +116,7 @@ def prepare_projection(root,run,projects):
         pid=relation['project_id']
         fields=[row['field_name'] for row in result['evidence'] if all(row[k]==relation[k] for k in ('project_id','territory_type','dane_code'))]
         names,locations=source_labels(inputs[pid],fields)
-        rows.append(dict(zip(SHEETS['TERRITORIOS'],[inputs[pid]['siap_id'],None,relation['territory_type'],relation['dane_code'],names,locations])))
+        rows.append(dict(zip(TERRITORY_SOURCE_COLUMNS,[inputs[pid]['siap_id'],None,relation['territory_type'],relation['dane_code'],names,locations])))
     path=directory/'territories.json'
     s.write(path,dict(rows=rows,result=result,quality=quality,reference=reference,field_adapters=field_adapters,
         project_inputs={pid:value['sha256'] for pid,value in projects.items()}))
@@ -183,8 +163,9 @@ def source_labels(project,fields):
     return '\n'.join(columns),'\n'.join(locations)
 
 
-def project_records(root,run,territorial_codes=None):
-    from .engine import result_row
+def project_records(root,run,territorial_codes=None,*,positive_only=False,output_contract=None):
+    from .engine import check_result_contract
+    from layer4_evaluation.live_execution import assessment_from_row
     from layer4_evaluation.live_execution import validate_context_evidence
     from layer4_evaluation.indicator_csv import TerritoryCodes
     resolve_codes=TerritoryCodes(root) if territorial_codes is not None else None
@@ -202,7 +183,7 @@ def project_records(root,run,territorial_codes=None):
     finally:db.close()
     expected=sum(map(len,manifest['project_indicators'].values())) if manifest.get('project_indicators') else len(manifest['projects'])*len(manifest['profiles'])
     if len(jobs)!=expected:raise ValueError('Cobertura original incompleta')
-    records=[];audit=[]
+    records=[];audit=[];export_exclusions=[]
     for job in jobs:
         pid,iid=job['pid'],job['iid']
         if pid not in manifest['projects'] or iid not in manifest['profiles'] or (
@@ -217,8 +198,13 @@ def project_records(root,run,territorial_codes=None):
                 raise ValueError('Resultado persistido alterado')
             bundle=s.read(result)
             if bundle.get('manifest_sha256')!=digest:raise ValueError('Resultado de otro manifiesto')
-            row=result_row(project,manifest['profiles'][iid],manifest['rubrics'][iid],bundle['wrapper'],manifest['llm']['provider'])
-            if row!=bundle['row']:raise ValueError('Decisión o confianza persistida incompatible')
+            check_result_contract(manifest,bundle)
+            row=bundle['row']
+            assessment=bundle['wrapper']['assessments'][0]
+            if (row.get('project_id')!=pid or row.get('indicator_id')!=iid or
+                    row.get('assessment_validation_status')!='VALID' or
+                    assessment_from_row(row)!={k:v for k,v in assessment.items() if k!='indicator_id'}):
+                raise ValueError('Decisión persistida incompatible con su recibo')
             for name,value in bundle.get('artifact_hashes',{}).items():
                 path=(directory/name).resolve()
                 if not path.is_relative_to(directory.resolve()) or s.sha(path)!=value:raise ValueError('Auditoría original alterada')
@@ -244,42 +230,92 @@ def project_records(root,run,territorial_codes=None):
         names,locations=source_labels(project,fields)
         # Only explicit, accepted territorial data can populate this optional field.
         territory=project.get('territory')
+        if output_contract in (ALL_CONTRACT,VALID_CONTRACT):
+            if output_contract==VALID_CONTRACT and job['status']!='PASS':
+                audit.append(dict(project_id=pid,indicator_id=iid,status=job['status'],decision=None,confidence=None))
+                continue
+            from layer4_evaluation.thesis_output import indicator_record
+            from layer4_evaluation.indicators.review import evidence_locations
+            records.append(indicator_record(project,iid,
+                row=row if job['status']=='PASS' else None,
+                status=job['status'],
+                locations=evidence_locations(project,bundle['wrapper']['assessments'][0]) if job['status']=='PASS' else (),
+                territory_codes=(territorial_codes or {}).get((project['siap_id'],iid),[])))
+            audit.append(dict(project_id=pid,indicator_id=iid,status=job['status'],decision=decision,confidence=score))
+            continue
+        if positive_only:
+            audit.append(dict(project_id=pid,indicator_id=iid,status=job['status'],decision=decision,confidence=score))
+            if job['status']=='PASS' and decision=='SUPPORTED':
+                from layer4_evaluation.thesis_output import positive_record
+                from layer4_evaluation.indicators.review import evidence_locations
+                assessment=bundle['wrapper']['assessments'][0]
+                try:
+                    records.append(positive_record(project,row,evidence_locations(project,assessment),
+                        (territorial_codes or {}).get((project['siap_id'],iid),[])))
+                except (ValueError,KeyError,TypeError) as exc:
+                    export_exclusions.append(dict(project_id=pid,indicator_id=iid,reason=str(exc)))
+            continue
         for researcher in researchers(root,run,project):
             records.append(dict(zip(COLUMNS,[project['siap_id'],researcher,iid,decision,paragraph,names,locations,score,territory])))
         audit.append(dict(project_id=pid,indicator_id=iid,status=job['status'],decision=decision,confidence=score))
-    return records,dict(manifest_sha256=digest,evaluations=audit,code_changed_since_inference=[
+    from collections import Counter
+    decisions=Counter(r['decision'] for r in audit if r['status']=='PASS')
+    by_project={pid:[r for r in audit if r['project_id']==pid] for pid in manifest['projects']}
+    processed=sum(bool(rows) and all(r['status'] in ('PASS','BLOCKED','UNCERTAIN') for r in rows) for rows in by_project.values())
+    summary=dict(selected_projects=len(by_project),processed_projects=processed,
+        completed_projects=sum(bool(rows) and all(r['status']=='PASS' for r in rows) for rows in by_project.values()),
+        expected_assessments=len(audit),valid_assessments=sum(decisions.values()),
+        supported=decisions['SUPPORTED'],insufficient_evidence=decisions['INSUFFICIENT_EVIDENCE'],not_supported=decisions['NOT_SUPPORTED'],
+        blocked_assessments=sum(r['status'] in ('BLOCKED','UNCERTAIN') for r in audit),
+        pending_assessments=sum(r['status'] not in ('PASS','BLOCKED','UNCERTAIN') for r in audit),
+        processing_complete=bool(audit) and processed==len(by_project),results_available=bool(decisions))
+    return records,dict(summary,export_exclusions=export_exclusions,manifest_sha256=digest,evaluations=audit,code_changed_since_inference=[
         name for name,h in manifest['code'].items() if not (root/name).is_file() or s.sha(root/name)!=h])
 
 
-def export(root,run):
+def export(root,run,*,output_contract=DEFAULT_CONTRACT):
     """New root-level projection only. Historical queue/manifests/logs stay intact."""
     root=Path(root).resolve();run=Path(run).resolve()
     if not run.is_relative_to(root/'outputs/runs'):raise ValueError('Run fuera de outputs/runs')
     from layer4_evaluation.indicator_csv import write_results
     codes_by_pair={}
-    records,audit=project_records(root,run,codes_by_pair)
+    if output_contract not in (ALL_CONTRACT,POSITIVE_CONTRACT,VALID_CONTRACT):raise ValueError('Contrato desconocido')
+    columns=GENERAL_COLUMNS if output_contract==VALID_CONTRACT else THESIS_COLUMNS
+    records,audit=project_records(root,run,codes_by_pair,positive_only=output_contract==POSITIVE_CONTRACT,
+        output_contract=output_contract)
     manifest=s.read(run/'autonomous/main/manifest.json')
     projection=manifest.get('final_projection')
     territories=[]
     if projection:
-        if projection!=dict(template=TEMPLATE.as_posix(),territories='territories.json',filename='resultado_final.xlsx'):
+        if (projection.get('template') not in (TEMPLATE.as_posix(),'data/templates/plantilla_resultado_final_indicadores_territorios.xlsx')
+                or projection.get('territories')!='territories.json' or projection.get('filename')!='resultado_final.xlsx'
+                or set(projection)!={'template','territories','filename'}):
             raise ValueError('Proyeccion final incompatible')
         path=run/'autonomous/main'/projection['territories']
         from run_paths import pinned_hash
         if pinned_hash(root,manifest['files'],path)!=s.sha(path):raise ValueError('Territorios fuera del manifiesto')
         territories=s.read(path)['rows']
     from run_paths import file_path
-    target=file_path(run,projection['filename'] if projection else 'resultado_final_indicadores.xlsx')
+    target=file_path(run,'resultado_indicadores.xlsx' if output_contract in (ALL_CONTRACT,VALID_CONTRACT) else projection['filename'] if projection else 'resultado_final_indicadores.xlsx')
     target.parent.mkdir(parents=True,exist_ok=True)
-    render(root,records,target,territories)
-    csv_result=write_results(run,COLUMNS,records,codes_by_pair)
-    audit.update(path=str(target),sha256=s.sha(target),rows=len(records),sheets=list(SHEETS),columns=SHEETS,
+    render(root,records,target,territories,contract=output_contract)
+    csv_result=write_results(run,columns,records,codes_by_pair)
+    audit.update(path=str(target),sha256=s.sha(target),rows=len(records),sheets=list(SHEETS),columns={name:columns for name in THESIS_SHEETS},
+        exported_rows=len(records),note=('Excel vacio: no hay evaluaciones SUPPORTED; las evaluaciones insuficientes y los errores se conservan en el recibo.'
+            if not audit['supported'] else 'Excel vacio: ningun SUPPORTED supero los controles de exportacion; consultar export_exclusions.' if not records
+            else 'Se exportaron los positivos verificados, incluidos los de proyectos incompletos.'),
+        output_contract=output_contract,positive_results_only=output_contract==POSITIVE_CONTRACT,
         template=str(TEMPLATE),template_sha256=s.sha(template_path(root)),
-        territory_rows=len(territories),missing_researcher_ids=sum(r['investigador_id'] is None for r in records),inference_calls=0,
+        territory_rows=sum(bool(r['territorio_region']) for r in records),inference_calls=0,
         csv=csv_result)
+    if output_contract==ALL_CONTRACT:audit['note']='Todos los indicadores seleccionados; decisiones, confianzas y estados técnicos persistidos.'
+    if output_contract==VALID_CONTRACT:audit['note']='Evaluaciones validas con sus confianzas originales; errores y limites de recuperacion solo en auditoria.'
     s.write(target.with_suffix('.receipt.json'),audit)
-    result=dict(status='PARTIAL' if any(r['status']!='PASS' for r in audit['evaluations']) else 'COMPLETE',
+    result=dict(status='PARTIAL' if audit['export_exclusions'] or any(r['status']!='PASS' for r in audit['evaluations']) else 'COMPLETE',
         path=str(target),rows=len(records),evaluations=len(audit['evaluations']),inference_calls=0,csv=csv_result)
+    result.update({k:audit[k] for k in ('selected_projects','processed_projects','completed_projects','expected_assessments',
+        'valid_assessments','supported','insufficient_evidence','not_supported','blocked_assessments','pending_assessments',
+        'processing_complete','results_available','exported_rows','note','export_exclusions')})
     from run_storage import archive_export
     return archive_export(root,run,result)
 
@@ -290,8 +326,11 @@ def status(root,run):
     counts=dict(Counter(r['status'] for r in audit['evaluations']))
     manifest=s.read(Path(run)/'autonomous/main/manifest.json')
     filename='resultado_final.xlsx' if manifest.get('final_projection') else 'resultado_final_indicadores.xlsx'
+    from run_paths import file_path
+    complete=file_path(Path(run),'resultado_indicadores.xlsx')
+    target=complete if complete.exists() else file_path(Path(run),filename)
     return dict(status='ARCHIVED_RESULTS',run_id=Path(run).name,counts=counts,
         indicators_total=len(audit['evaluations']),evaluated=counts.get('PASS',0),
         authorized=True,inference_allowed=False,code_drift=audit['code_changed_since_inference'],
         integrity='ORIGINAL_MANIFEST_INPUTS_AND_RESULTS_VERIFIED; pinned code required for inference',
-        final_export=str(Path(run)/filename))
+        final_export=str(target))

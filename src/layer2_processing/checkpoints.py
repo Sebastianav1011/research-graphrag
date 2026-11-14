@@ -120,12 +120,14 @@ def verify_expected(root,name,expected):
     if binding and path.is_file():
         current=hashlib.sha256(path.read_bytes()).hexdigest()
         # A split module also pins every implementation extracted from it.
-        for name, checksum in binding.get('related_sha256', {}).items():
-            related = root/name
-            if not related.is_file() or hashlib.sha256(related.read_bytes()).hexdigest()!=checksum:
-                raise ValueError('Fingerprint mismatch: '+name)
+        for related_name, checksum in binding.get('related_sha256', {}).items():
+            related = root/related_name
+            actual=hashlib.sha256(related.read_bytes()).hexdigest() if related.is_file() else 'MISSING'
+            if actual!=checksum:
+                raise ValueError(f'Fingerprint mismatch: {related_name}; expected={checksum}; actual={actual}')
         snapshots = binding.get('snapshots', [binding.get('snapshot')])
         for snapshot in snapshots:
             original = root/snapshot if snapshot else None
             if current==binding['after_sha256'] and original and original.is_file() and hashlib.sha256(original.read_bytes()).hexdigest()==expected:return
-    raise ValueError('Fingerprint mismatch: '+name)
+    actual=hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else 'MISSING'
+    raise ValueError(f'Fingerprint mismatch: {name}; expected={expected}; actual={actual}')

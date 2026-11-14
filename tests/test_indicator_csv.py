@@ -124,12 +124,16 @@ def test_autonomous_export_integration(tmp_path, monkeypatch):
     template = final.template_path(tmp_path)
     template.parent.mkdir(parents=True)
     template.write_bytes(final.template_path().read_bytes())
-    record = dict(zip(final.COLUMNS, ['0007', '001', 'I', 'SUPPORTED', 'Cita', 'Fuente', 'Fila', 90, None]))
-    def project_records(root, run, codes):
+    record = dict(zip(final.THESIS_COLUMNS, ['0007', 'I', 'SUPPORTED', 'Cita', 'Fuente', 'Fila', None, 90]))
+    def project_records(root, run, codes, **kwargs):
+        assert kwargs['output_contract']=='THESIS_ALL_INDICATORS_V1'
         codes['0007', 'I'] = ['05001']
-        return [record], dict(evaluations=[dict(status='PASS')])
+        return [record], dict(evaluations=[dict(status='PASS')],export_exclusions=[],
+            selected_projects=1,processed_projects=1,completed_projects=1,expected_assessments=1,
+            valid_assessments=1,supported=1,insufficient_evidence=0,not_supported=0,
+            blocked_assessments=0,pending_assessments=0,processing_complete=True,results_available=True)
     monkeypatch.setattr(final, 'project_records', project_records)
-    monkeypatch.setattr(final, 'render', lambda root, records, target, territories: target.write_bytes(b'fixture'))
     result = final.export(tmp_path, run)
     assert result['csv']['indicator_rows'] == result['csv']['territory_rows'] == 1
     assert 'territorio' not in read(run/'resultados/indicadores.csv')[0]
+    assert result['path'].endswith('resultado_indicadores.xlsx')

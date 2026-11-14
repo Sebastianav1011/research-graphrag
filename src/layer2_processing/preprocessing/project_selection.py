@@ -129,7 +129,8 @@ def validate_selection(root, run, metadata=None):
         if not (root / name).is_file() or sha(root / name) != fingerprint:
             errors.append('SELECTION_SOURCE_CHANGED:' + name)
     actual = [r['source_project_id'] for r in tables['proyectos']]
-    if len(actual) != metadata['requested_count'] or set(actual) != set(selected):
+    global_base=config.get('knowledge_scope')=='BASE_GLOBAL_V1'
+    if (not set(selected)<=set(actual) if global_base else len(actual) != metadata['requested_count'] or set(actual) != set(selected)):
         errors.append('PROJECT_COUNT_OR_SCOPE_MISMATCH')
     for name, rows in tables.items():
         keys = [tuple(json.dumps(row[k], sort_keys=True) for k in KEYS[name]) for row in rows]
@@ -140,6 +141,19 @@ def validate_selection(root, run, metadata=None):
         for row in tables[name]:
             if row[key] not in ids[target] or row['researcher_id'] not in ids['investigadores']:
                 errors.append('ORPHAN_RELATION:' + name)
+    if global_base:
+        membership=defaultdict(set)
+        for row in tables['proyecto_investigador']:membership[row['researcher_id']].add(row['project_id'])
+        report=metadata|dict(status='INVALID_SELECTION' if errors else 'VALIDATED_SELECTION',
+            knowledge_scope='BASE_GLOBAL_V1',evaluation_project_ids=selected,
+            counts={name:len(rows) for name,rows in tables.items()},
+            shared_researchers=sum(len(ids)>1 for ids in membership.values()),
+            verified_project_publication_relations=0,
+            warnings=[dict(code='GLOBAL_KNOWLEDGE_SELECTED_EVALUATIONS',
+                note='Shared authorship is relational context, not proof of project production.')],errors=errors)
+        write(run/'preprocess/selection_manifest.json',report)
+        if errors:raise ValueError('Validacion critica de seleccion: '+', '.join(errors))
+        return report
     scope = read(run / 'preprocess/scope.json')
     if set(scope['projects']) != set(selected):
         errors.append('INDIRECT_PROJECT_EXPANSION')

@@ -48,6 +48,10 @@ def batch(tmp_path):
                     if control.get('interrupt'):raise KeyboardInterrupt()
                     if control.get('bad_member') and len(calls)==1:
                         answer[other]['criteria']['C01']['judgment']='CLEAR__ACTIVITY_EXECUTED'
+                    if control.get('malformed_member') and len(calls)==1:
+                        answer[other].pop('criteria')
+                    if control.get('missing_member') and len(calls)==1:
+                        answer.pop(other)
                     return dict(model=settings['model'],done=True,done_reason='stop',prompt_eval_count=300,eval_count=250,message=dict(content=json.dumps(answer)))
             return Client()
     worker=b.BatchWorker(tmp_path,manifest,client_factory=Factory(),ram=lambda:99999,sleep=lambda _:None)
@@ -110,6 +114,32 @@ def test_one_invalid_member_preserves_valid_member_and_evaluates_only_remaining(
     assert len(e.calls[0]['indicators'])==2 and 'indicator' in e.calls[1]
     receipt=s.read(next((e.directory/'batch_receipts').rglob('*.json')))
     assert receipt['accepted']==[e.iid] and receipt['fallback']==[e.other]
+
+
+@pytest.mark.parametrize('failure',['malformed_member','missing_member'])
+def test_structural_member_failure_does_not_discard_valid_sibling(batch,failure):
+    e=batch;e.control[failure]=True;e.worker.loop()
+    result=monitor.snapshot(e.directory)
+    assert result['evaluated']==2 and len(e.calls)==2
+    assert e.calls[1]['indicator']['indicator_id']==e.other
+    receipt=s.read(next((e.directory/'batch_receipts').rglob('*.json')))
+    assert receipt['accepted']==[e.iid] and receipt['fallback']==[e.other]
+    protected={f:f.read_bytes() for f in (e.directory/'results').rglob('*.json')}
+    worker=b.BatchWorker(e.directory,e.manifest,client_factory=lambda _:pytest.fail('No repeat'))
+    worker.load_project=lambda pid:e.data;worker.loop()
+    assert all(f.read_bytes()==value for f,value in protected.items())
+
+
+def test_valid_batch_member_can_be_reused_despite_structural_sibling_error(batch):
+    import shutil
+    from autonomous_execution.preparation_integrity import reusable_result
+    e=batch;e.control['malformed_member']=True;e.worker.loop()
+    source=e.directory.parent/(e.directory.name+'_reuse')
+    shutil.copytree(e.directory,source/'autonomous/main')
+    db=s.connect(source/'autonomous/main')
+    job=dict(db.execute('SELECT * FROM jobs WHERE iid=?',(e.iid,)).fetchone());db.close()
+    bundle,files=reusable_result(source.parent,source,e.manifest,job,e.data)
+    assert bundle['row']['assessment_validation_status']=='VALID' and files
 
 
 def test_shared_clarification_receipt_is_reusable_without_inference(batch):

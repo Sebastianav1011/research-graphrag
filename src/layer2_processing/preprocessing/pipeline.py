@@ -211,7 +211,8 @@ def run(root, sources_path="config/sources.yaml", settings_path="config/layer1.y
         datasets.update(relations)
         events.extend(issues)
         for domain, rows in datasets.items():
-            validator = Draft202012Validator(logical_schema(domain), format_checker=FormatChecker())
+            validator = Draft202012Validator(logical_schema(domain,allow_missing_title=domain=='articulos' and
+                any(r.get('_spec',{}).get('base_record_policy')=='BASE_VALID_ROWS_V1' for r in valid['articulos'])), format_checker=FormatChecker())
             seen_keys = set()
             for row in rows:
                 validator.validate(row)

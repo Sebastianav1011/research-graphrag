@@ -9,7 +9,7 @@ import shutil
 import threading
 import time
 
-from jsonschema import Draft202012Validator
+from jsonschema import Draft202012Validator, ValidationError
 from layer4_evaluation.indicators import assessment_v3 as v3, context_budget as cb
 from layer4_evaluation.indicators.ollama_provider import OllamaAssessmentProvider, OllamaError, create_client
 from layer4_evaluation.indicators.selection import canonical_hash
@@ -84,6 +84,21 @@ def result_row(project, profile, rubric, wrapper, provider='ollama'):
     return row
 
 
+def check_result_contract(manifest,bundle):
+    """A matching numeric score cannot make another assessment contract reusable."""
+    contracts={v3.VERSION:(v3.CONFIDENCE_VERSION,v3.K_VERSION),
+               v3.SK_VERSION:(v3.SK_CONFIDENCE_VERSION,v3.SK_K_VERSION)}
+    version=manifest.get('schema_version',v3.VERSION)
+    expected=contracts.get(version)
+    row=bundle.get('row',{})
+    assessments=bundle.get('wrapper',{}).get('assessments',[])
+    if (expected is None or manifest.get('confidence_version',expected[0])!=expected[0] or
+            not assessments or any(a.get('assessment_version')!=version for a in assessments) or
+            row.get('assessment_version')!=version or row.get('confidence_version')!=expected[0] or
+            row.get('conceptual_coverage_version')!=expected[1]):
+        raise ScopeError('RESULT_CONTRACT_INCOMPATIBLE')
+
+
 class Worker:
     def __init__(self, directory, manifest, stop=None, client_factory=None, ram=None, sleep=None):
         self.directory, self.manifest = Path(directory), manifest
@@ -149,6 +164,7 @@ class Worker:
         semantic_attempted=False
         previous_source=None
         budget_checks=[]
+        attempted_requests=set()
         for attempt in range(1,attempts+1):
             if self.stop.is_set():
                 raise JobError('STOP_REQUESTED')
@@ -206,6 +222,7 @@ class Worker:
             original=self.db.execute('SELECT * FROM steps WHERE pid=? AND iid=? AND name=? AND attempt=?',
                 (pid,iid,name,attempt)).fetchone()
             native_dir=out/'transport'/pid/'attempt_1'
+            signature=canonical_hash(dict(prompt=request['prompt'],schema=schema,settings=settings))
             def decoded(value):
                 if adapter is not None:return adapter(value)
                 if 'repair_contract' not in request:return value
@@ -262,6 +279,7 @@ class Worker:
                         self.db.execute("UPDATE steps SET status='PASS' WHERE pid=? AND iid=? AND name=? AND attempt=?",(pid,iid,name,attempt))
                         return accepted(value)
                     last=str(call['exit_status'])
+                    attempted_requests.add(signature)
                     repair=call.get('validation_issues',[])
                     remember(call)
                     if last in ('TIMEOUT','INTERRUPTED','SERVER_UNAVAILABLE','INFERENCE_ERROR'):
@@ -274,6 +292,10 @@ class Worker:
                     continue
                 if (out/'dispatch.claim.json').exists():
                     raise JobError('UNCERTAIN_OUTCOME')
+            if (self.manifest['llm']['provider']=='ollama' and
+                    last in ('TOKEN_LIMIT','CONTEXT_EXHAUSTED','CONTEXT_TOO_LONG') and
+                    signature in attempted_requests):
+                raise JobError(last)
             available_ram=self.ram()
             if available_ram < self.policy['min_free_ram_mb']:
                 raise JobError('RESOURCE_RAM_FLOOR')
@@ -315,6 +337,7 @@ class Worker:
                 settings=settings,client=client,runtime=runtime,wrapper_validator=validate,max_indicators=1,
                 execution_id=self.manifest['execution_id'],output_adapter=adapter)
             error=None
+            attempted_requests.add(signature)
             try:
                 provider.evaluate(project,[profile])
             except OllamaError as exc:
@@ -359,7 +382,7 @@ class Worker:
         except ScopeError:
             raise
         except JobError as exc:
-            if exc.code not in ('INCOMPLETE_RESPONSE','INVALID_ASSESSMENT','CONTEXT_TOO_LONG','CONTEXT_EXHAUSTED','STATIC_CONTEXT_TOO_LONG','MODEL_CONTEXT_CAP','NO_EVIDENCE_FITS','EVIDENCE_COVERAGE_BLOCKED'):
+            if exc.code not in ('INCOMPLETE_RESPONSE','TOKEN_LIMIT','INVALID_ASSESSMENT','CONTEXT_TOO_LONG','CONTEXT_EXHAUSTED','STATIC_CONTEXT_TOO_LONG','MODEL_CONTEXT_CAP','NO_EVIDENCE_FITS','EVIDENCE_COVERAGE_BLOCKED'):
                 raise
         # Shards retain every original criterion, with exact IDs and the same sources.
         criteria=rubric['criteria'];size=self.policy['criteria_per_shard']
@@ -433,6 +456,7 @@ class Worker:
         # Revalidate a durable receipt before skipping inference, even after restart.
         if bundle.get('manifest_sha256')!=s.sha(self.directory/'manifest.json'):
             raise ScopeError('RESULT_FROM_ANOTHER_MANIFEST')
+        check_result_contract(self.manifest,bundle)
         profile=self.manifest['profiles'][job['iid']];rubric=self.manifest['rubrics'][job['iid']]
         row=result_row(data['project'],profile,rubric,bundle['wrapper'],self.manifest['llm']['provider'])
         if row!=bundle['row']:
@@ -494,6 +518,15 @@ class Worker:
                     self.db.execute('UPDATE jobs SET status=?,error=?,updated=? WHERE pid=? AND iid=?',(state,exc.code,s.now(),job['pid'],job['iid']))
                     s.event(self.db,'paused',exc.code,job['pid'],job['iid'])
                     self.stop.set()
+                except (AssessmentValidationError,ValidationError) as exc:
+                    # Known assessment failures belong to this pair. Source,
+                    # runtime and checkpoint integrity errors retain their gates.
+                    self.db.execute("UPDATE jobs SET status='BLOCKED',error='INVALID_ASSESSMENT',updated=? WHERE pid=? AND iid=?",
+                        (s.now(),job['pid'],job['iid']))
+                    s.write(self.directory/'diagnostics'/job['pid']/job['iid']/'validation.json',
+                        dict(error='INVALID_ASSESSMENT',issues=getattr(exc,'issues',[]),
+                            schema_path=list(getattr(exc,'absolute_schema_path',[]))))
+                    s.event(self.db,'evaluation','INVALID_ASSESSMENT',job['pid'],job['iid'])
                 except KeyboardInterrupt:
                     self.stop.set();raise
                 except Exception:
@@ -508,7 +541,8 @@ class Worker:
                         from .monitor import snapshot
                         state=snapshot(self.directory)
                         print(f"[GraphRAG] {state['evaluated']}/{state['indicators_total']} indicadores válidos "
-                              f"({state['progress_percent']} %); proyectos completos {state['projects_completed']}/{state['projects_total']}; "
+                              f"({state['progress_percent']} %); proyectos procesados {state['projects_processed']}/{state['projects_total']}; "
+                              f"completamente evaluados {state['projects_completed']}; "
                               f"actual {job['pid']}; bloqueados {state['blocked']}; llamadas {state['calls']}",flush=True)
                         self.last_console_progress=time.monotonic()
                     gc.collect()

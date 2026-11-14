@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import shutil
 import zipfile
+from copy import deepcopy
 
 import openpyxl
 import pyarrow.parquet as pq
@@ -10,13 +11,122 @@ import pytest
 
 from scripts import pipeline_coordinator as runner
 from layer2_processing.preprocessing.adapters import prepare_files, read, sha, tabular
+from tests.layer5_experiment.test_assessment_v3 import case,sk_case
 
 SOURCE = Path(__file__).resolve().parents[1]
+
+
+def export_fixture(run,ids,monkeypatch):
+    """Only persisted export inputs: no preprocessing, graphs or evaluation."""
+    import pyarrow as pa
+    target=run/'workspace/outputs/layer2/canonical/proyectos.parquet'
+    target.parent.mkdir(parents=True)
+    pq.write_table(pa.Table.from_pylist([dict(source_project_id=pid) for pid in ids]),target)
+    monkeypatch.setattr(runner,'check',lambda *args:None)
+
+
+@pytest.mark.parametrize('layout,positives',[
+    ([(48,0,0)],5), ([(47,1,0)],3), ([(47,1,0)],0), ([(45,3,0)],5),
+    ([(48,0,0),(46,2,0),(47,1,0),(47,1,0),(47,1,0)],5),
+    ([(12,2,34)],5), ([(48,0,0)],0), ([(48,0,0)],48),
+])
+def test_indicator_coverage_exports_all_indicators_independently(sandbox,monkeypatch,sk_case,layout,positives,contract='THESIS_ALL_INDICATORS_V1'):
+    """48 frozen synthetic rubrics; real S/K validation, evidence gates and Excel."""
+    from types import SimpleNamespace
+    from layer4_evaluation import live_execution as live
+    from layer4_evaluation.indicators import assessment_v3 as v3
+    from layer4_evaluation.indicators.selection import canonical_hash
+    from layer4_evaluation.indicators.review import evidence_locations
+    from layer4_evaluation.thesis_output import TEMPLATE,COLUMNS,SHEETS
+    root,raw,config=sandbox
+    ids=[f'{n:06d}' for n in range(len(layout))]
+    (raw/'projects.json').write_text(json.dumps([project(pid) for pid in ids]),encoding='utf-8')
+    run=root/'outputs/runs/coverage';export_fixture(run,ids,monkeypatch)
+    profiles={};rubrics={}
+    for n in range(48):
+        iid=f'I{n:02d}';profile=deepcopy(sk_case['profile']);profile['indicator_id']=iid
+        rubric=deepcopy(sk_case['rubric']);rubric.update(indicator_id=iid,profile_sha256=canonical_hash(profile))
+        rubric.pop('rubric_sha256');rubric['rubric_sha256']=canonical_hash(rubric)
+        profiles[iid]=profile;rubrics[iid]=rubric
+    projects=[];states=[];errors=[]
+    for pid,(valid,blocked,pending) in zip(ids,layout):
+        assert valid+blocked+pending==48
+        p=dict(project_id='PROJ_'+pid,siap_id=pid,fields=sk_case['fields'],field_provenance={
+            'methodology':dict(section_id='SECTION_'+pid,raw_sources=[dict(record_source=str(raw/'projects.json'),
+                source_row=1,field_mapping={'methodology':'metodologia'},original_values={'methodology':sk_case['fields']['methodology']})])})
+        projects.append(p);rows=[]
+        for n,iid in enumerate(profiles):
+            if n>=valid:break
+            a=deepcopy(sk_case['assessment'])
+            if n>=positives:
+                a.update(decision='INSUFFICIENT_EVIDENCE',support_strength=0,evidence=[])
+                for c in a['criterion_assessments']:c.update(support='NOT_DEMONSTRATED',coverage=0,evidence_indices=[])
+                a['strength_rubric']={k:([] if k=='evidence_indices' else 'Sin respaldo suficiente.' if k=='explanation' else 0) for k in a['strength_rubric']}
+            assert not v3.validate(p['fields'],profiles[iid],a,rubrics[iid])
+            rows.append(v3.indicator_row(p,profiles[iid],a,rubrics[iid]))
+        failures={iid:'BLOCKED_ERROR' for iid in list(profiles)[valid:valid+blocked]}
+        errors.extend(p['project_id']+': '+iid+' BLOCKED_ERROR' for iid in failures)
+        states.append(dict(project_id=p['project_id'],selected=list(profiles),rows=rows,
+            complete=valid==48,blocked_indicators=failures))
+    plan=dict(projects=projects,profiles=profiles,rubrics=rubrics)
+    directory=run/'layer5_results/batch_fixture';directory.mkdir(parents=True)
+    module=SimpleNamespace(BASE=directory.parent,check=lambda _:plan,
+        verify_run=lambda _:dict(projects=states,errors=errors),v3=v3,
+        assessment_from_row=live.assessment_from_row,evidence_locations=evidence_locations)
+    monkeypatch.setattr(runner,'engine',lambda *a:module)
+    monkeypatch.setattr(runner,'validated_graph',lambda *a:{})
+    target=root/TEMPLATE;target.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(SOURCE/TEMPLATE,target)
+    original=deepcopy(states);result=runner.export(root,run,output_contract=contract)
+    general=contract=='THESIS_VALID_ASSESSMENTS_V2'
+    expected=sum(v for v,b,p in layout) if general else 48*len(layout)
+    assert states==original  # No score/result rewriting on partial export.
+    assert result['expected_assessments']==48*len(layout)
+    assert result['valid_assessments']==sum(v for v,b,p in layout)
+    assert result['blocked_assessments']==sum(b for v,b,p in layout)
+    assert result['pending_assessments']==sum(p for v,b,p in layout)
+    assert result['processed_projects']==sum(p==0 for v,b,p in layout)
+    assert result['completed_projects']==sum(v==48 for v,b,p in layout)
+    assert result['supported']==positives*len(layout)
+    assert result['exported_rows']==expected
+    assert result['output_contract']==contract
+    assert result['insufficient_evidence']==result['valid_assessments']-result['supported']
+    assert result['status']==('COMPLETE' if all(v==48 for v,b,p in layout) else 'PARTIAL')
+    persisted=read(Path(result['valid_results']))
+    assert persisted['assessments']==[dict(row,siap_id=p['siap_id']) for p,state in zip(projects,original) for row in state['rows']]
+    assert len(persisted['assessments'])==result['valid_assessments']
+    coverage=read(Path(result['indicator_statuses']))['indicators']
+    assert len(coverage)==48*len(layout)
+    assert all(c['decision'] is None for c in coverage if c['status']!='VALID')
+    assert result['export_exclusions']==[]
+    assert result['csv']['indicator_rows']==expected
+    book=openpyxl.load_workbook(result['excel'],read_only=True)
+    try:
+        assert book.sheetnames==SHEETS
+        values=list(book['Proyectos'].values)
+        assert values[0]==tuple(c for c in COLUMNS if not general or c!='territorio_region') and len(values)-1==expected
+        assert len({row[:2] for row in values[1:]})==len(values)-1
+        assert sum(row[-1] is None for row in values[1:])==(0 if general else sum(b+p for v,b,p in layout))
+        assert sum(row[-1]==0 for row in values[1:])==result['insufficient_evidence']
+        assert all(row[3] and row[4]=='metodologia' and 'section_id=' in row[5] for row in values[1:] if row[2]=='SUPPORTED')
+        assert all(row[3:]==(None,)*5 for row in values[1:] if row[2] in ('BLOCKED_ERROR','PENDING'))
+    finally:book.close()
+    if not positives:
+        saved=read(runner.run_file(run,'export.json'))
+        assert 'todos los indicadores' in saved['note']
+        assert saved['export_exclusions']==[] and saved['excel_sha256']==sha(Path(saved['excel']))
+
+
+def test_valid_general_export_keeps_partial_zero_and_audits_blocked_and_pending(sandbox,monkeypatch,sk_case):
+    test_indicator_coverage_exports_all_indicators_independently(sandbox,monkeypatch,sk_case,
+        [(2,1,45)],1,contract='THESIS_VALID_ASSESSMENTS_V2')
 
 
 @pytest.fixture
 def sandbox(tmp_path):
     root = tmp_path / 'isolated repo with spaces'
+    from layer4_evaluation.thesis_output import TEMPLATE
+    (root/TEMPLATE).parent.mkdir(parents=True)
+    shutil.copyfile(SOURCE/TEMPLATE,root/TEMPLATE)
     shutil.copytree(SOURCE / 'src', root / 'src', ignore=shutil.ignore_patterns('__pycache__'), dirs_exist_ok=True)
     for name in ('sources.example.yaml', 'layer1.yaml', 'layer2.yaml', 'layer3.yaml', 'pipeline_manual.json'):
         destination = root / 'config' / name
@@ -63,8 +173,9 @@ def test_prepare_graph_boundary_and_empty_export(sandbox):
     export = runner.export(root, run)
     assert export['relationships'] == 0 and export['status'] == 'PARTIAL'
     book = openpyxl.load_workbook(export['excel'])
-    assert book.sheetnames == ['RESULTADO_INDICADORES', 'TERRITORIOS']
-    assert list(next(book.worksheets[0].values)) == runner.COLUMNS
+    from layer4_evaluation.thesis_output import SHEETS,COLUMNS as thesis_columns
+    assert book.sheetnames == SHEETS
+    assert list(next(book.worksheets[0].values)) == thesis_columns
     assert book.worksheets[0].max_row == 1
     book.close()
     assert not (root / 'outputs/layer2/canonical').exists() and not (root / 'outputs/layer2/knowledge').exists()
@@ -213,7 +324,8 @@ def test_real_stage_wiring_with_injected_test_embeddings(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize('blocked', [False, True])
-def test_export_keeps_partial_evidence_and_original_numeric_score(sandbox, monkeypatch, blocked):
+@pytest.mark.parametrize('decision',['SUPPORTED','INSUFFICIENT_EVIDENCE'])
+def test_export_keeps_partial_evidence_and_original_numeric_score(sandbox, monkeypatch, blocked, decision):
     """Real V3 validation/arithmetic on an existing synthetic fixture; no model call."""
     import importlib.util
     from types import SimpleNamespace
@@ -222,21 +334,22 @@ def test_export_keeps_partial_evidence_and_original_numeric_score(sandbox, monke
     root, raw, config = sandbox
     (raw / 'project.json').write_text(json.dumps(project()), encoding='utf-8')
     run = root / 'outputs/runs/export'
-    runner.prepare(root, run, raw, 'prueba_en_vivo', config)
+    export_fixture(run,['000701'],monkeypatch)
     spec = importlib.util.spec_from_file_location('existing_v3_test_fixture', SOURCE / 'tests/layer5_experiment/test_assessment_v3.py')
     fixture = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(fixture)
     case = fixture.case.__wrapped__()
     assessment = case['assessment']
-    assessment.update(decision='INSUFFICIENT_EVIDENCE', support_strength=1)
-    assessment['criterion_assessments'][0]['support'] = 'PARTIAL'
-    assessment['criterion_assessments'][1].update(support='NOT_DEMONSTRATED', evidence_indices=[])
+    if decision=='INSUFFICIENT_EVIDENCE':
+        assessment.update(decision=decision, support_strength=1)
+        assessment['criterion_assessments'][0]['support'] = 'PARTIAL'
+        assessment['criterion_assessments'][1].update(support='NOT_DEMONSTRATED', evidence_indices=[])
     p = dict(project_id='PROJ_000701', siap_id='000701', fields=case['fields'],
         field_provenance={'methodology': dict(section_id='TEST_SECTION', raw_sources=[dict(record_source=str(raw / 'project.json'), source_row=1,
             field_mapping={'methodology': 'methodology'}, original_values={'methodology': case['fields']['methodology']})])})
     assert not v3.validate(p['fields'], case['profile'], assessment, case['rubric'])
     row = v3.indicator_row(p, case['profile'], assessment, case['rubric'])
-    assert row['confidence_raw_score'] < 50
+    if decision=='INSUFFICIENT_EVIDENCE':assert row['confidence_raw_score'] < 50
     directory = run / 'layer5_results/batch_fixture'
     directory.mkdir(parents=True)
     plan = dict(projects=[p], profiles={'SYNTH_I': case['profile']}, rubrics={'SYNTH_I': case['rubric']})
@@ -249,27 +362,38 @@ def test_export_keeps_partial_evidence_and_original_numeric_score(sandbox, monke
         evidence_locations=evidence_locations, SUBSTANTIVE={'summary', 'methodology', 'objectives', 'expected_results'})
     monkeypatch.setattr(runner, 'engine', lambda r, d: engine)
     monkeypatch.setattr(runner, 'validated_graph', lambda r, d: {})
+    from layer4_evaluation.thesis_output import TEMPLATE
+    template=root/TEMPLATE;template.parent.mkdir(parents=True,exist_ok=True)
+    shutil.copyfile(SOURCE/TEMPLATE,template)
     result = runner.export(root, run)
-    assert result['relationships'] == 1 and result['status'] == ('PARTIAL' if blocked else 'COMPLETE')
+    assert result['relationships'] == 1+int(blocked) and result['status'] == ('PARTIAL' if blocked else 'COMPLETE')
     assert result['valid_assessments']==1
     assert read(Path(result['valid_results']))['assessments']==[dict(row,siap_id='000701')]
+    coverage=read(Path(result['indicator_statuses']))['indicators']
+    assert next(c for c in coverage if c['indicator_id']=='SYNTH_I')['decision']==decision
     assert bool(result['blocked_indicators'])==blocked
     if blocked:
         assert result['blocked_indicators'][0]['status']=='BLOCKED_ERROR'
+        assert result['blocked_indicators'][0]['decision'] is None
         assert not result['blocked_indicators'][0]['project_complete']
     import csv
     with (run/'resultados/indicadores.csv').open(encoding='utf-8-sig',newline='') as stream:
         exported = list(csv.DictReader(stream,delimiter=';'))
-    assert len(exported)==1
-    assert exported[0]['estado_cumplimiento']==row['decision']
-    assert float(exported[0]['confianza'])==row['confidence_raw_score']
-    assert 'territorio' not in exported[0]
+    assert len(exported)==1+int(blocked)
+    valid=next(r for r in exported if r['indicador_id']=='SYNTH_I')
+    assert valid['estado_cumplimiento']==row['decision']
+    assert float(valid['confianza'])==row['confidence_raw_score']
+    assert valid['fuente_evidencia']=='methodology'
     assert (run/'resultados/indicadores_territorios.csv').is_file()
     book = openpyxl.load_workbook(result['excel'])
-    cells = list(book.worksheets[0].rows)[1]
-    assert cells[0].value == '000701' and cells[0].data_type == 's'
-    assert cells[5].value == row['confidence_raw_score'] and cells[5].data_type == 'n'
-    assert len(cells) == 6 and list(next(book.worksheets[0].values)) == runner.COLUMNS
+    assert book.sheetnames==['Proyectos','Artículos']
+    assert list(next(book.worksheets[0].values))==runner.COLUMNS
+    assert list(next(book.worksheets[1].values))==runner.COLUMNS
+    if decision in ('SUPPORTED','INSUFFICIENT_EVIDENCE'):
+        cells = next(r for r in list(book.worksheets[0].rows)[1:] if r[1].value=='SYNTH_I')
+        assert cells[0].value == '000701' and cells[0].data_type == 's'
+        assert cells[7].value == row['confidence_raw_score'] and cells[7].data_type == 'n'
+        assert len(cells)==8
     book.close()
 
 

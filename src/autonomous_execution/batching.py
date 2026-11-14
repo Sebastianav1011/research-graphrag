@@ -22,26 +22,27 @@ def transport_schema(items):
     def obj(props):return dict(type='object',properties=props,required=list(props),additionalProperties=False)
     definitions={};props={}
     for item in items:
-        individual=m.schema(item['rubric'],item['evidence']);criteria={}
+        individual=m.schema(item['rubric'],item['evidence'],version=item.get('assessment_version',m.v3.VERSION));criteria={}
         for cid,contract in individual['properties']['criteria']['properties'].items():
             key='C'+canonical_hash(contract)
             definitions[key]=contract;criteria[cid]={'$ref':'#/$defs/'+key}
-        props[item['iid']]=obj(dict(criteria=obj(criteria),conclusion=individual['properties']['conclusion'],why=individual['properties']['why']))
+        props[item['iid']]=obj(individual['properties']|dict(criteria=obj(criteria)))
     return obj(props)|{'$defs':definitions}
 
 
 def item_for(data,manifest,iid,settings):
     rubric=manifest['rubrics'][iid];profile=manifest['profiles'][iid];evidence=m.registry(data,iid)
+    version=manifest.get('schema_version',m.v3.VERSION)
     def factory(request,_):
         if manifest.get('batching',{}).get('tokenizer'):request['tokenizer_budget']=manifest['batching']['tokenizer']
         indicator=deepcopy(request['payload']['indicators'][0])
         if indicator.get('key_elements')==[c['criterion'] for c in rubric['criteria']]:indicator.pop('key_elements')
         request['semantic_input']=dict(indicator=indicator,evidence=[dict(id=k,field=v['field'],text=v['text']) for k,v in evidence.items()])
-        request['prompt']=m.INSTRUCTIONS+'INPUT_JSON:\n'+cb.compact(request['semantic_input'])
+        request['prompt']=(m.SK_INSTRUCTIONS if version==m.v3.SK_VERSION else m.INSTRUCTIONS)+'INPUT_JSON:\n'+cb.compact(request['semantic_input'])
         request['evidence_registry']=evidence
     # Identical preserved GraphRAG intervals and provenance, no shortening for batching.
-    request=pack(data,profile,rubric,settings,transport_schema([dict(iid=iid,rubric=rubric,evidence=evidence)]),preserve=True,prompt_factory=factory)
-    return dict(iid=iid,profile=profile,rubric=rubric,evidence=evidence,request=request)
+    request=pack(data,profile,rubric,settings,transport_schema([dict(iid=iid,rubric=rubric,evidence=evidence,assessment_version=version)]),preserve=True,prompt_factory=factory)
+    return dict(iid=iid,profile=profile,rubric=rubric,evidence=evidence,request=request,assessment_version=version)
 
 
 def request_for(items,settings):
@@ -50,9 +51,14 @@ def request_for(items,settings):
         evidence=list(evidence.values()),evidence_ids_per_indicator={item['iid']:list(item['evidence']) for item in items})
     schema=transport_schema(items)
     request=deepcopy(items[0]['request'])
-    prompt=INSTRUCTIONS+cb.compact(payload)
+    semantic=m.SK_INSTRUCTIONS if items[0].get('assessment_version')==m.v3.SK_VERSION else m.INSTRUCTIONS
+    prompt=INSTRUCTIONS.replace(m.INSTRUCTIONS,semantic,1)+cb.compact(payload)
+    if items[0].get('assessment_version') == m.v3.SK_VERSION:
+        prompt = prompt.replace(
+            'NOT_SUPPORTED solo si TODOS los criterios carecen de soporte pertinente.',
+            'INSUFFICIENT_EVIDENCE__0 solo si TODOS los criterios carecen de soporte pertinente.')
     if len(items)==1:
-        prompt=m.INSTRUCTIONS+'Envuelve la respuesta bajo la clave '+items[0]['iid']+'.\nINPUT_JSON:\n'+cb.compact(items[0]['request']['semantic_input'])
+        prompt=semantic+'Envuelve la respuesta bajo la clave '+items[0]['iid']+'.\nINPUT_JSON:\n'+cb.compact(items[0]['request']['semantic_input'])
     request.update(prompt=prompt,batch_version=VERSION,
                    batch_indicators=[i['iid'] for i in items],semantic_input=payload)
     request['context_budget']=cb.estimate(request['prompt'],schema,settings,tokenizer=request.get('tokenizer_budget'))
@@ -60,8 +66,9 @@ def request_for(items,settings):
 
 
 def validate_item(data,item,answer):
-    Draft202012Validator(m.schema(item['rubric'],item['evidence'])).validate(answer)
-    wrapper=m.assemble(data['project'],item['iid'],item['rubric'],item['evidence'],answer)
+    version=item.get('assessment_version',m.v3.VERSION)
+    Draft202012Validator(m.schema(item['rubric'],item['evidence'],version=version)).validate(answer)
+    wrapper=m.assemble(data['project'],item['iid'],item['rubric'],item['evidence'],answer,version=version)
     gate(data['project'],item['profile'],item['rubric'],item['request'],wrapper)
     return dict(wrapper=wrapper,row=result_row(data['project'],item['profile'],item['rubric'],wrapper),
         request=item['request'],semantic_answer=answer,evidence_registry=item['evidence'])
@@ -179,18 +186,19 @@ class BatchWorker(m.MinimalWorker):
                 sent['messages'][0]['content']!=request['prompt'] or sent['format']!=schema or
                 identity(call['runtime'])!=identity(self.manifest['runtime'])):
             raise ScopeError('BATCH_TRANSPORT_CHANGED')
-        if not Draft202012Validator(schema).is_valid(raw):return super().evaluate(data,iid,0)
         # No incomplete/context-exhausted response can enter this path.
-        if not isinstance(raw,dict) or set(raw)!={i['iid'] for i in items}:
+        # A malformed or missing member cannot discard valid sibling answers.
+        # Each present member still passes its full individual schema and gates.
+        if not isinstance(raw,dict) or set(raw)-{i['iid'] for i in items}:
             return super().evaluate(data,iid,0)
         artifacts={f.relative_to(self.directory).as_posix():s.sha(f) for f in native.parents[2].rglob('*') if f.is_file()}
         accepted={};errors={}
         for item in items:
             member=item['iid']
-            try:bundle=validate_item(data,item,raw[member])
+            try:bundle=validate_item(data,item,raw.get(member))
             except (ValidationError,AssessmentValidationError,JobError,KeyError,TypeError,ValueError) as exc:
                 errors[member]=str(exc)
-                prior=dict(manifest_sha256=s.sha(self.directory/'manifest.json'),answer=raw[member],
+                prior=dict(manifest_sha256=s.sha(self.directory/'manifest.json'),answer=raw.get(member),
                     issues=getattr(exc,'issues',[]),request=item['request'],artifact_hashes=artifacts,
                     shared_call=dict(owner_indicator=iid,step=name,members=[i['iid'] for i in items]))
                 s.write(self.directory/'batch_fallback'/pid/(member+'.json'),prior)

@@ -33,6 +33,10 @@ def project_file(system, relative, ids):
 @pytest.fixture
 def system(tmp_path, monkeypatch):
     root = tmp_path/'repo'
+    import shutil
+    from layer4_evaluation.thesis_output import TEMPLATE
+    (root/TEMPLATE).parent.mkdir(parents=True)
+    shutil.copyfile(Path(__file__).resolve().parents[1]/TEMPLATE,root/TEMPLATE)
     intake = root/'data/layer1_sources'
     base = intake/'base/descriptores-limpio.json'
     write(base, [dict(id=f'{i:03d}', title='Synthetic fixture', summary='Original synthetic document') for i in range(1, 11)])
@@ -79,7 +83,7 @@ def system(tmp_path, monkeypatch):
         def verify(directory):
             done=directory.name in completed
             return dict(status='COMPLETE' if done else 'PARTIAL',errors=[],projects=[
-                dict(project_id=p['project_id'],complete=done,rows=[dict(indicator_id='TEST',confidence_raw_score=50,decision='SUPPORTED')] if done else [])
+                dict(project_id=p['project_id'],complete=done,blocked_indicators={},rows=[dict(indicator_id='TEST',confidence_raw_score=50,decision='SUPPORTED',assessment_validation_status='VALID',confidence_status='COMPUTED',evidence_explanation='Synthetic explanation')] if done else [])
                 for p in check(directory)['projects']])
         def execute(args):
             directory=folder/args.run
@@ -101,7 +105,8 @@ def system(tmp_path, monkeypatch):
                 field_provenance={'summary':{'raw_sources':[dict(record_source=str(base),source_row=1,field_mapping={'summary':'summary'})]}})
                 for identity in selected]
             write(folder/'plan.json',dict(projects=docs,profiles={'TEST':{}},rubrics={'TEST':{}},
-                maximum_calls=3*len(selected),runtime={'provider':'ollama','model':'mock'}))
+                maximum_calls=3*len(selected),runtime={'provider':'ollama','model':'mock'},
+                evaluation_policy=read(runner.run_file(run,'execution.json')).get('evaluation_policy',{})))
             (folder/'review.txt').write_text(json.dumps(selected),encoding='utf-8')
         return folder.name
     monkeypatch.setattr(runner, 'prepare_evaluation', plan)
@@ -119,7 +124,8 @@ def test_one_command_three_projects_exports_only_requested(system):
     assert [c for c in system.calls if isinstance(c,tuple)]==[('ollama',['001','002']),('ollama',['003'])]
     assert [kind for kind,_ in system.permissions]==['build','llm','llm']
     book=openpyxl.load_workbook(result['excel'],read_only=True)
-    assert book.sheetnames==['RESULTADO_INDICADORES','TERRITORIOS']
+    from layer4_evaluation.thesis_output import SHEETS
+    assert book.sheetnames==SHEETS
     assert {row[0] for row in list(book.worksheets[0].values)[1:]}=={'001','002','003'}
     assert book.worksheets[1].max_row==1
     book.close()
@@ -169,6 +175,48 @@ def test_denied_review_can_resume_without_repeating_valid_calls(system):
     assert result['status']=='COMPLETE'
     runner.execute_pipeline(system.root,run_id='selection',resume=True,confirm=system.confirm)
     assert len([call for call in system.calls if isinstance(call,tuple)])==1
+
+
+def test_resume_reuses_completed_stages_and_pass_without_export_side_effects(system):
+    first=runner.execute_pipeline(system.root,run_id='checkpoint_only',project_ids=['001','002','003'],
+        through='evaluation',confirm=system.confirm,notify=system.events.append)
+    assert first['status']=='COMPLETE'
+    calls=list(system.calls)
+    protected={p:p.read_bytes() for p in (system.run()/'workspace/outputs/layer4').rglob('*') if p.is_file()}
+    for _ in range(2):
+        result=runner.execute_pipeline(system.root,run_id='checkpoint_only',resume=True,through='evaluation',
+            confirm=system.confirm,notify=system.events.append)
+        assert result['status']=='COMPLETE' and system.calls==calls
+        assert all(p.read_bytes()==content for p,content in protected.items())
+    assert sum(event['status']=='STAGE_REUSED' for event in system.events)==6
+
+
+def test_individual_batch_errors_report_all_processed_projects_and_partial_run(system,monkeypatch):
+    engine=system.engine
+    def isolated(root,run):
+        module=engine(root,run);verify=module.verify_run
+        def status(directory):
+            state=verify(directory);state['blocking_errors']=[]
+            for p in state['projects']:
+                p.update(selected=['TEST'],blocked_indicators={},pending_indicators=[])
+                if p['complete']:
+                    p['processed']=True
+                    if p['project_id']!='PROJ_001':
+                        p.update(complete=False,selected=['TEST','BAD'],blocked_indicators={'BAD':'BLOCKED_ERROR'})
+                        state['errors'].append(p['project_id']+': BLOCKED_ERROR')
+            if state['errors']:state['status']='PARTIAL'
+            return state
+        module.verify_run=status
+        return module
+    monkeypatch.setattr(runner,'engine',isolated)
+    result=runner.execute_pipeline(system.root,project_ids=['001','002','003','004','005'],through='evaluation',
+        confirm=system.confirm,notify=system.events.append)
+    assert result['status']=='PARTIAL' and result['selected_projects']==5
+    assert result['processed_projects']==5 and result['completed_projects']==1
+    assert result['valid_assessments']==5 and result['blocked_assessments']==4 and result['pending_assessments']==0
+    assert result['processing_complete'] and result['results_available']
+    progress=[e for e in system.events if e['status']=='EVALUATION_PROGRESS'][-1]
+    assert progress['projects_processed']==5 and progress['projects_completed']==1
 
 
 def test_scope_rejects_unknown_project_before_graph(system):
@@ -321,3 +369,74 @@ def test_truthy_text_is_not_authorization(system):
     result=runner.execute_pipeline(system.root,project_ids=['001'],through='export',confirm=lambda *a:'no')
     assert result['status']=='BUILD_APPROVAL_REQUIRED'
     assert 'graphrag' not in system.calls
+
+
+def test_reuse_skips_build_stages_and_resume_keeps_original_reference(system,monkeypatch):
+    probes=[]
+    def reuse(*a,**kw):probes.append(kw);return 'outputs/runs/global-original'
+    monkeypatch.setattr(runner.processing,'reuse_global_base',reuse)
+    original=runner.prepare
+    def prepare(root,run,raw,dataset,config,through):
+        original(root,run,raw,dataset,config,through)
+        path=runner.run_file(run,'run.json');value=read(path)
+        value.update(status='PREPARED',global_reuse={'source_run':'global-original','graph_reused':True})
+        write(path,value)
+    monkeypatch.setattr(runner,'prepare',prepare)
+    result=runner.execute_pipeline(system.root,source='base',project_ids=['001'],through='knowledge',run_id='reuse')
+    assert result['status']=='COMPLETE' and system.calls==['preprocessing']
+    run=system.run();saved=read(runner.run_file(run,'execution.json'))
+    assert saved['base_knowledge_source']=='outputs/runs/global-original' and saved['project_ids']==['001']
+    monkeypatch.setattr(runner.processing,'reuse_global_base',lambda *a,**kw:pytest.fail('Resume must not search for another knowledge base'))
+    assert runner.execute_pipeline(system.root,run_id='reuse',resume=True,through='knowledge')['status']=='COMPLETE'
+    assert read(runner.run_file(run,'execution.json'))['base_knowledge_source']==saved['base_knowledge_source']
+    with pytest.raises(ValueError,match='Resume conserva'):
+        runner.execute_pipeline(system.root,run_id='reuse',resume=True,knowledge_action='rebuild')
+
+
+def test_missing_compatible_knowledge_offers_rebuild_without_processing(system,monkeypatch):
+    monkeypatch.setattr(runner.processing,'reuse_global_base',lambda *a,**kw:False)
+    offered=[]
+    result=runner.execute_pipeline(system.root,source='base',project_ids=['001'],through='knowledge',
+        confirm=lambda kind,summary:offered.append(kind) or False)
+    assert result['status']=='KNOWLEDGE_REBUILD_REQUIRED'
+    assert offered==['knowledge_rebuild'] and system.calls==[]
+
+
+@pytest.mark.parametrize('mode',['prospective','demonstrated'])
+@pytest.mark.parametrize('context',['full-descriptor','graphrag'])
+def test_execution_freezes_independent_modes_and_refuses_incompatible_resume(system,mode,context):
+    from layer4_evaluation.indicators import assessment_v3 as v3
+    result=runner.execute_pipeline(system.root,source='base',project_ids=['001'],run_id='modes',through='knowledge',
+        evaluation_mode=mode,context_mode=context)
+    run=system.run();execution=read(runner.run_file(run,'execution.json'));state=read(runner.run_file(run,'run.json'))
+    policy=execution['evaluation_policy'];v3.verify_evaluation_policy(policy)
+    assert policy['evaluation_mode']=={'prospective':v3.PROSPECTIVE,'demonstrated':v3.DEMONSTRATED}[mode]
+    assert policy['context_mode']=={'full-descriptor':v3.FULL_CONTEXT,'graphrag':v3.GRAPHRAG_CONTEXT}[context]
+    assert state['configuration']['evaluation_policy']==policy
+    assert read(runner.run_file(run,'model.binding.json'))['evaluation_policy']==policy
+    assert execution['llm']['num_ctx']==(24576 if context=='full-descriptor' else 8192)
+    before={p.relative_to(run):sha(p) for p in run.rglob('*') if p.is_file()}
+    calls=list(system.calls)
+    with pytest.raises(ValueError,match='Modos incompatibles'):
+        runner.execute_pipeline(system.root,run_id='modes',resume=True,evaluation_mode='demonstrated' if mode=='prospective' else 'prospective')
+    assert all(sha(run/p)==value for p,value in before.items()) and system.calls==calls
+    runner.execute_pipeline(system.root,run_id='modes',resume=True,through='knowledge')
+    assert read(runner.run_file(run,'execution.json'))['evaluation_policy']==policy
+
+
+def test_base_defaults_to_prospective_full_but_incoming_does_not(system):
+    from layer4_evaluation.indicators import assessment_v3 as v3
+    runner.execute_pipeline(system.root,source='base',project_ids=['001'],run_id='base-modes',through='knowledge')
+    assert read(runner.run_file(system.run(),'execution.json'))['evaluation_policy']['evaluation_mode']==v3.PROSPECTIVE
+    policy=v3.evaluation_policy(base=False)
+    assert policy['evaluation_mode']==v3.DEMONSTRATED and policy['context_mode']==v3.GRAPHRAG_CONTEXT
+    assert v3.evaluation_policy(saved={})=={}  # Historical checkpoints are not migrated.
+
+
+def test_modes_can_be_selected_in_existing_configuration(system):
+    from layer4_evaluation.indicators import assessment_v3 as v3
+    path=system.root/'config/pipeline_manual.json';config=read(path)
+    config['evaluation']=dict(mode='demonstrated',context_mode='full-descriptor');write(path,config)
+    runner.execute_pipeline(system.root,source='base',project_ids=['001'],run_id='configured-modes',through='knowledge')
+    policy=read(runner.run_file(system.run(),'execution.json'))['evaluation_policy']
+    assert policy['evaluation_mode']==v3.DEMONSTRATED and policy['context_mode']==v3.FULL_CONTEXT

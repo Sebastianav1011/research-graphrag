@@ -167,3 +167,165 @@ API: `schemas`, `make_rubric_input`, `rubric_response_schema`, `validate_rubric_
 y `audit_catalog`. `write_contracts(check=True)` contrasta los tres schemas nuevos en
 `schemas/layer4_assessment_v3/` sin reescribirlos. Se reutiliza `CodexCliAssessmentProvider`; el schema de transporte
 excluye uniqueItems y la validación normativa comprueba unicidad en Python.
+
+## Confianza SK para nuevas evaluaciones (2026-11-12)
+
+La CLI autónoma compacta y la preparación manual usan `ASSESSMENT_V3_SK_V1`,
+`EVIDENCE_CONFIDENCE_SK_V1` y `CRITERIA_COVERAGE_SK_V1_REQUIRED_GATE`.
+`assessment_v3.schemas(version=SK_VERSION)` genera el contrato en los artefactos
+de cada ejecución; los schemas V3 históricos y sus cálculos anteriores se conservan.
+
+S es la media normalizada de cuatro juicios de Qwen: relación directa, especificidad
+documental, claridad y adecuación temporal. Cada dimensión tiene niveles 0..4
+anclados en `SK_INSTRUCTIONS`, referencias verificadas y una justificación que debe
+explicar las cuatro dimensiones. `S = suma(niveles)/16`. Una cita o SUPPORTED no
+asigna notas máximas. El 4 temporal exige la etapa que pide el catálogo: intención,
+resultado esperado, actividad realizada y resultado demostrado no son equivalentes;
+un diseño documentado puede bastar cuando ese sea el requisito institucional.
+
+Cada criterio conserva soporte, referencias y explicación, y añade `coverage`:
+0 sin respaldo, 1 indicio indirecto, 2 parcial sustancial, 3 casi completo con brecha
+explícita, 4 completo. NOT_DEMONSTRATED exige 0, PARTIAL 1..3 y CLEAR 4.
+K parte de la media de REQUIRED y del mejor criterio de cada grupo ALTERNATIVE,
+divididos por 4. COMPLEMENTARY no participa. Si hay REQUIRED, K se limita además
+al menor grado obligatorio normalizado: los demás criterios no compensan su ausencia.
+Los roles y condiciones proceden de la rúbrica congelada; no se inventan requisitos.
+
+`CONFIDENCE = 100 * (0.55*S + 0.45*K)`, con Decimal y redondeo HALF_UP a dos decimales.
+S y K están en [0,1]; confianza en [0,100], sin techo artificial. Es respaldo
+documental, no probabilidad calibrada. BGE-M3 no aporta un sumando ni multiplicador.
+El 86.25 repetido anterior resulta de `S=3/4` y `K=1`, impuesto por los juicios
+discretos y los gates de SUPPORTED. Ahora S tiene cuatro dimensiones y PARTIAL
+tres grados; coincidencias numéricas legítimas siguen siendo posibles.
+
+Los estados de cumplimiento SK son SUPPORTED e INSUFFICIENT_EVIDENCE. Este último
+admite support_strength 0, 1 o 2. Cero exige todos los criterios NOT_DEMONSTRATED,
+coverage=0 y dimensiones de fuerza=0; admite citas contextuales verificadas sin
+atribuirles soporte. Fuerza positiva conserva las referencias y validaciones SK.
+Una evaluación válida, incluso insuficiente, recibe confianza. Un inválido recibe
+NULL. La nota entera support_strength se conserva para los gates y no calcula S.
+
+NOT_SUPPORTED se admite como alias de entrada para compatibilidad. Solo un
+assessment SK válido con ese alias se proyecta como INSUFFICIENT_EVIDENCE en la
+fila interna; la respuesta original, fuerza, criterios y recibos se conservan.
+El adaptador compacto conserva también semantic_answer con el código recibido.
+No se reclasifican contradicciones ni se reescriben filas o checkpoints existentes.
+V1, V2 y V3 histórico conservan sus contratos, decisiones y cálculos anteriores.
+
+Las nuevas respuestas guardan los juicios de S y K internamente y usan las columnas
+de exportación existentes. Una respuesta antigua carece de estos juicios: no se
+recalcula ni se migra automáticamente. Resume exige hashes/contrato compatibles;
+no se omiten fingerprints para aceptar código nuevo sobre checkpoints históricos.
+La importación a un manifiesto nuevo SK rechaza confianza de otra versión.
+
+## Estados y evidencias: revisión de 2026-11-13
+
+### Comportamiento anterior y definitivo
+
+La LLM asigna el juicio semántico. Python verifica su coherencia, no lo deduce de
+palabras, porcentajes, similitud ni de la nota de confianza.
+
+| Caso | Antes de esta etapa | Contrato SK actual |
+|---|---|---|
+| Evidencia suficiente | SUPPORTED, fuerza 3–4; REQUIRED CLEAR y una alternativa CLEAR por grupo; cita sustantiva temporalmente compatible | Igual |
+| Respaldo débil o parcial | INSUFFICIENT_EVIDENCE, fuerza 1–2; referencias verificables para criterios positivos | Igual; COMPUTED incluso con K parcial o cero |
+| Análisis completado sin respaldo | NOT_SUPPORTED, fuerza 0 y ningún criterio positivo | INSUFFICIENT_EVIDENCE, fuerza 0; S=K=0 y confianza 0 |
+| Juicio indispensable ausente o ambiguo | REVIEW_REQUIRED del transporte compacto, aclaración y eventual bloqueo | Sigue siendo incidencia interna, sin evaluación calculable ni confianza |
+| Error técnico, esquema o cita inválida | INVALID_ASSESSMENT u otro código técnico; trabajo bloqueado; proyección diagnóstica REVIEW_REQUIRED | Igual separación técnica, confianza NULL; nunca imputación de cero |
+
+V3 y SK ya computaban confianza en todos los assessments válidos; la restricción
+NOT_APPLICABLE a negativos pertenece al contrato histórico V1. El defecto activo
+era rechazar INSUFFICIENT_EVIDENCE con fuerza 0 como INCONSISTENT_DECISION. Eso
+podía terminar en bloqueo y REVIEW_REQUIRED aunque describiera ausencia de respaldo.
+
+REVIEW_REQUIRED tiene usos distintos que no son decisiones de cumplimiento:
+`minimal.schema/assemble` recibe un juicio de criterio o conclusión explícitamente
+ambiguo; tras una aclaración no resuelta se conserva CLARIFICATION_UNRESOLVED.
+`final_output.project_records` lo usa como marcador en la proyección diagnóstica
+de cualquier job distinto de PASS, siempre con confianza NULL y status en audit.
+`lifecycle.prepare`, preparación de controles, recuperación y revisión de políticas
+lo usan antes de autorización, sin evaluación ni score. `experiment.execute`
+marca FINISHED_REVIEW_REQUIRED al terminar un lote experimental, incluso con
+filas válidas; tampoco es un gate para calcular confianza. Esos estados
+técnicos no sustituyen un assessment válido con evidencia parcial.
+
+La salida final vigente de tesis sigue publicando exclusivamente SUPPORTED VALID;
+parciales, ceros, pendientes y errores permanecen en estructuras y diagnósticos
+existentes. No se modifica el filtro de publicación, plantilla, hojas ni columnas.
+
+### Procedencia de los errores y correcciones seguras
+
+- INVALID_ASSESSMENT es un código de Python que agrupa JSON, schema, semántica
+  o evidencia inválida. El contenido incoherente puede proceder de la LLM; una
+  excepción interna del validador también se distingue en validation.json/issues.
+- EVIDENCE_INDEX_OUT_OF_RANGE lo detecta Python sobre índices generados por la
+  LLM. En el caso histórico documentado había dos citas y referencias [1,2,3]:
+  solo 0 y 1 existían. No se pueden reasignar 2 y 3 con seguridad, ni inferir una
+  intención base uno; se conserva el rechazo y su diagnóstico específico.
+- QUOTE_NOT_IN_SENT_GRAPHRAG_CONTEXT lo detecta Python aunque una cita exista en
+  campos completos si no pertenece al contexto enviado. También podía rechazar
+  cambios meramente NFC/whitespace que el validador normativo ya admitía. Ahora
+  ambos usan la misma normalización conservadora en el transporte textual.
+  Se preservan mayúsculas, acentos y puntuación; no se aceptan paráfrasis, elipsis
+  añadidas ni texto no enviado. Los originales y recibos no se modifican.
+- Se reutilizan los IDs existentes: F de fragmentos enviados y E del registro
+  compacto ligado a proyecto, campo, intervalo y hash. La LLM selecciona IDs y
+  etapa; Python recupera el texto original y construye índices base cero.
+  El registro compacto verifica intervalo y hash contra el campo original.
+- En transporte por referencias, repetir exactamente (fragment_id,stage) se
+  deduplica sin cambiar juicios, cobertura, etapas ni fuerza. Etapas diferentes
+  permanecen separadas. El adaptador compacto deduplica también IDs de fuerza
+  repetidos. Los índices numéricos inválidos o duplicados del contrato
+  normativo siguen rechazándose; no se eliminan citas falsas para salvar un score.
+- Un registro de fragmentos con IDs duplicados se rechaza por ambigüedad. Los IDs
+  desconocidos se rechazan; los errores de strength_rubric apuntan ahora a su ruta
+  real y no a un criterio inexistente. Todo diagnóstico usa estructuras existentes.
+- Un registro vacío admite únicamente arrays vacíos de referencias, con schema
+  válido (sin enum vacío). Esto permite validar una respuesta sintética completada
+  sin evidencia; no convierte bloqueos previos de contexto o transporte en análisis.
+
+Las correcciones no prueban que una cita verdadera implique el criterio: pertinencia,
+atribución y etapa siguen siendo juicios semánticos contrastables. Esta etapa solo
+usa mocks y controles sintéticos, sin validar calidad con modelos reales. No se
+ejecuta recuperación ni migración sobre resultados históricos.
+
+### Archivos de esta etapa y verificación
+
+Se editaron únicamente estos archivos existentes, conservando sus cambios previos:
+
+- `src/layer4_evaluation/indicators/assessment_v3.py`
+- `src/layer4_evaluation/indicators/evidence_references.py`
+- `src/layer4_evaluation/indicators/context_budget.py`
+- `src/layer4_evaluation/indicators/ollama_provider.py`
+- `src/layer4_evaluation/indicators/validation_diagnostics.py`
+- `src/layer4_evaluation/live_execution.py`
+- `src/autonomous_execution/minimal.py`
+- `src/autonomous_execution/batching.py`
+- `tests/layer5_experiment/test_assessment_v3.py`
+- `tests/test_evidence_references.py`
+- `tests/test_assessment_recovery.py`
+- `docs/contracts/layer4_assessment_v3_contract.md`
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests/layer5_experiment/test_assessment_v3.py tests/test_evidence_references.py tests/test_assessment_recovery.py tests/test_thesis_output.py -q
+```
+
+Resultado final: **148 passed**. Casos suficientes, débiles, parciales, sin respaldo,
+citas contextuales sin soporte, cero/NULL, alias conservado, índices incorrectos,
+citas falsas, normalización, IDs desconocidos/ambiguos/repetidos, etapas distintas,
+registro vacío, mocks de timeout/JSON/esquema/error interno, aclaración acotada y
+reanudación sintética. Incluye esquema y render de las ocho columnas vigentes de
+tesis. `git diff --check` pasó. Temporales administrados fuera de outputs.
+
+Una ejecución ampliada anterior, incluyendo `test_context_budget.py` y
+`test_ollama_provider.py`, dio **170 passed, 9 failed**. Ocho fallos corresponden
+a expectativas/fixtures de contexto 4096 frente al default existente 8192 y uno a
+esperar «detenida» donde la reanudación devuelve UNCERTAIN_OUTCOME. No se cambian
+configuración ni reanudación de producción para satisfacer esas expectativas.
+La fixture de recuperación sí toma su reserva del contexto configurado, para
+alcanzar el fallo de evidencia que pretende verificar. No se afirma que toda la
+suite general esté verde.
+
+No se invocaron modelos ni endpoints reales, no se ejecutaron proyectos reales,
+no se cambiaron preprocessing, knowledge, GraphRAG o BGE-M3, no se crearon módulos,
+ni se modificaron resultados/checkpoints históricos o el Excel institucional.

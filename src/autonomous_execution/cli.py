@@ -8,6 +8,11 @@ from . import lifecycle as l, store as s
 
 def dispatch(root,args,coordinator):
     root=Path(root).resolve()
+    # The advanced adaptive manifest protocol remains historically compatible.
+    # New orthogonal modes use the current run/resume per-indicator pipeline.
+    if (getattr(args,'evaluation_mode',None) not in (None,'demonstrated') or
+            getattr(args,'context_mode',None) not in (None,'graphrag')):
+        raise ValueError('Los modos prospectivo/descriptor completo se seleccionan con run y se conservan con resume; prepare/start mantiene el protocolo adaptativo historico')
     reuse=getattr(args,'reuse_run',None)
     if reuse:
         if args.command!='prepare' or not args.autonomous or not args.run_id or any((args.source,args.input_file,
@@ -52,7 +57,7 @@ def dispatch(root,args,coordinator):
                 raise ValueError('Seleccion explicita requerida: --limit N o --all')
             coordinator.execute_pipeline(root,config_path=args.config,source=args.source,run_id=name,
                 through='knowledge',project_ids=ids,input_file=args.input_file,delivery=args.delivery,confirm=None,
-                confirm_all=getattr(args,'confirm_all',False),**sampling)
+                confirm_all=getattr(args,'confirm_all',False),evaluation_mode='demonstrated',context_mode='graphrag',**sampling)
             if not run_file(run,'run.json').exists():
                 return dict(status='REVIEW_REQUIRED',note='Toda la base requiere --confirm-all; no se inicio preparacion')
         else:
