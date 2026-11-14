@@ -107,7 +107,11 @@ def check(directory):
         require(set(plan['context_requests'])=={p['project_id'] for p in plan['projects']}, 'Cobertura de proyectos/contextos incompleta')
         for p in plan['projects']:
             requests=plan['context_requests'][p['project_id']]
-            require(set(requests)==set(plan['profiles']), 'Cobertura de los 48 indicadores incompleta')
+            selection=plan.get('indicator_selection')
+            if selection is not None:
+                require(selection==sorted(set(selection)) and selection and set(selection)<=set(plan['profiles']),
+                    'Seleccion de indicadores invalida')
+            require(set(requests)==set(selection or plan['profiles']), 'Cobertura de los indicadores seleccionados incompleta' if selection else 'Cobertura de los 48 indicadores incompleta')
             for iid, request in requests.items():
                 if policy:
                     require(request.get('evaluation_mode')==policy['evaluation_mode'] and
@@ -157,7 +161,7 @@ def verify_run(directory,*,recover=False):
     for p in plan['projects']:
         bounded = plan.get('request_protocol') == CONTEXT_VERSION
         pid=p['project_id'];state=dict(project_id=pid,siap_id=p['siap_id'],discovery_complete=bounded,
-            selected=sorted(plan['profiles']) if bounded else [],rows=[],complete=False,reused=False,blocked_indicators={},retryable_indicators=[])
+            selected=sorted(plan.get('indicator_selection') or plan['profiles']) if bounded else [],rows=[],complete=False,reused=False,blocked_indicators={},retryable_indicators=[])
         failed_messages = {}
         if bounded:
             state['context_limits'] = {iid:r['context_selection']['status'] for iid,r in plan['context_requests'][pid].items()

@@ -205,7 +205,7 @@ def persisted_records(root,run,*,contract=DEFAULT_CONTRACT):
             pid=p['siap_id']
             if pid not in selection or pid in projects:raise ValueError('Proyecto ajeno o ambiguo')
             projects[pid]=p
-            expected.update((pid,iid) for iid in profiles)
+            expected.update((pid,iid) for iid in plan.get('indicator_selection') or profiles)
             for call in sorted((directory/'calls'/p['project_id']).glob('*')):
                 if not (call/'verification.json').exists():continue
                 cp=read(call/'plan.json');receipt=read(call/'verification.json')

@@ -143,7 +143,7 @@ def rebudget(prompt, schema, settings, budget):
 
 
 def make_request(project, profile, rubric, fields, *, evidence_references=False, evidence_units=None,
-                 assessment_version=v3.VERSION, evaluation_mode=None, context_mode=None):
+                 assessment_version=v3.VERSION, evaluation_mode=None, context_mode=None, prompt_version=None):
     # Keep the frozen criterion explanations verbatim. Provenance/basis and
     # hashes remain in the sealed plan, without duplicating them in each prompt.
     v3.check_rubric(profile, rubric)
@@ -173,6 +173,9 @@ def make_request(project, profile, rubric, fields, *, evidence_references=False,
             for fragment in refs.fragments({unit['field']:unit['text']}):
                 fragments.append(fragment | dict(fragment_id=f'F{len(fragments):03d}'))
         payload['project'] = dict(project_id=project['project_id'], fragments=fragments)
+        if prompt_version == v3.PROSPECTIVE_PROMPT_V3 and (project['fields'].get('title') or '').strip():
+            # A4: identification context only; never a fragment, never citable.
+            payload['project']['title'] = project['fields']['title']
         for criterion in criteria:
             criterion['compatible_stages'] = sorted(v3.TEMPORAL[criterion['temporal_requirement']])
         protocol['evidence_protocol'] = refs.VERSION
@@ -186,6 +189,12 @@ def make_request(project, profile, rubric, fields, *, evidence_references=False,
         instructions = instructions.replace('ASSESSMENT_V3', v3.SK_VERSION) + v3.SK_INSTRUCTIONS
         protocol['assessment_version'] = assessment_version
         protocol['coverage_policy']=v3.PARTIAL_COVERAGE
+        if prompt_version == v3.PROSPECTIVE_PROMPT_V3:
+            # A3: one temporal scale per mode (replaced, not appended) and S/K
+            # coherence stated exactly as the existing validators enforce it.
+            if evaluation_mode != v3.PROSPECTIVE or not evidence_references or v3.SK_TEMPORAL_SCALE not in instructions:
+                raise ValueError('Prompt V3 requiere modo prospectivo, referencias y la escala SK vigente')
+            instructions = instructions.replace(v3.SK_TEMPORAL_SCALE, v3.PROSPECTIVE_TEMPORAL_SCALE) + v3.SK_COHERENCE
         instructions+='\nReconoce respaldo parcial pertinente: no confundas REQUIRED incompleto con ausencia de evidencia en los otros criterios. Usa PARTIAL y coverage 1..3 cuando sus citas lo justifiquen; conserva NOT_DEMONSTRATED y cero si no hay respaldo. S valora la evidencia disponible, no exige cumplimiento completo. REQUIRED sigue siendo obligatorio para SUPPORTED; una confianza positiva no determina esa decision.\n'
     elif assessment_version != v3.VERSION:
         raise ValueError('Unknown confidence assessment contract')
@@ -198,7 +207,16 @@ def make_request(project, profile, rubric, fields, *, evidence_references=False,
     if context_mode is not None:protocol['context_mode']=context_mode
     if context_mode==v3.RETRIEVED_CONTEXT:
         instructions+='\nSolo se suministra un subconjunto recuperado, no el descriptor completo. La falta de respaldo en estos fragmentos no demuestra ausencia documental ni incumplimiento; explica los limites de cobertura. No inventes evidencia externa.\n'
-    prompt = CRITERION_INSTRUCTIONS + instructions + '\n' + note + '\nINPUT_JSON:\n' + compact(payload)
+    criterion_instructions = CRITERION_INSTRUCTIONS
+    if prompt_version == v3.PROSPECTIVE_PROMPT_V3:
+        if criterion_instructions.count(v3.DEMONSTRATED_STAGE_LINE) != 1:
+            raise ValueError('Instrucciones de criterio inesperadas para el prompt V3')
+        criterion_instructions = criterion_instructions.replace(v3.DEMONSTRATED_STAGE_LINE, v3.PROSPECTIVE_STAGE_LINE)
+        note += ' ' + v3.TITLE_NOTE
+        protocol['prompt_version'] = prompt_version
+    elif prompt_version not in (None, 'PROSPECTIVE_SK_PROMPT_V2_PARTIAL', 'DEMONSTRATED_SK_PROMPT_V2_PARTIAL'):
+        raise ValueError('Version de prompt desconocida')
+    prompt = criterion_instructions + instructions + '\n' + note + '\nINPUT_JSON:\n' + compact(payload)
     return dict(project_id=project['project_id'], input_version=VERSION, payload=payload, prompt=prompt, **protocol)
 
 
@@ -260,7 +278,7 @@ def original_chunk(chunk, section, offsets):
 @timed('recuperacion')
 def prepare_contexts(projects, profiles, rubrics, settings, candidates, chunks, sections, *, evidence_references=False,
                      assessment_version=v3.VERSION, evaluation_mode=None, context_mode=None,relational_contexts=None,
-                     tokenizer=None):
+                     tokenizer=None, prompt_version=None):
     """Select only published GraphRAG hits, preserving original chunk boundaries.
 
     ``tokenizer`` is the pinned, hash-verified Qwen tokenizer descriptor. When
@@ -296,7 +314,7 @@ def prepare_contexts(projects, profiles, rubrics, settings, candidates, chunks, 
             def build(fields, evidence_units=None):
                 return make_request(project, profile, rubrics[iid], fields, evidence_references=evidence_references,
                     evidence_units=evidence_units if evidence_references else None, assessment_version=assessment_version,
-                    evaluation_mode=evaluation_mode,context_mode=context_mode)
+                    evaluation_mode=evaluation_mode,context_mode=context_mode,prompt_version=prompt_version)
             def budget_for(request):
                 from .evidence_references import response_schema
                 return estimate(request['prompt'], response_schema(request, project['fields']), settings,

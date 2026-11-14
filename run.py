@@ -170,6 +170,16 @@ def confirm_action(kind, summary):
         return False
 
 
+def selected_indicators(args):
+    """Optional subset of catalog indicator IDs for the main flow (exact, order kept)."""
+    if getattr(args,'indicators',None) is None:
+        return None
+    ids=[value.strip() for value in args.indicators.split(',')]
+    if not ids or any(not value for value in ids) or len(ids)!=len(set(ids)):
+        raise ValueError('--indicators requiere IDs de indicador unicos y no vacios, separados por comas')
+    return ids
+
+
 def selected_projects(args):
     if args.projects is not None and args.project_id:
         raise ValueError('Usar --projects o --project-id, no ambos')
@@ -307,7 +317,7 @@ def dispatch_pipeline(args):
             through=args.through, project_ids=selected_projects(args), input_file=args.input_file, delivery=args.delivery,
             limit=args.limit, all_projects=args.all_projects, seed=args.seed, dry_run=args.dry_run,
             selection_manifest=args.selection_manifest, approve_build=args.approve_build, authorize=args.authorize_llm,
-            confirm_all=args.confirm_all,
+            confirm_all=args.confirm_all,indicator_ids=selected_indicators(args),
             single_authorization=True,
             evaluation_mode=args.evaluation_mode,context_mode=args.context_mode,knowledge_action=args.knowledge_action,
             interactive=not args.non_interactive)
@@ -333,7 +343,7 @@ def dispatch_pipeline(args):
     return execute_with_console(engine, config_path=args.config, source=args.source,
             run_id=args.run_id, stage=args.stage if args.command == 'stage' else None,
             through=args.through, resume=args.command == 'resume', approve_build=args.approve_build,
-            authorize=args.authorize_llm, project_ids=selected_projects(args),
+            authorize=args.authorize_llm, project_ids=selected_projects(args),indicator_ids=selected_indicators(args),
             input_file=args.input_file, delivery=args.delivery,
             single_authorization=True,
             evaluation_mode=args.evaluation_mode,context_mode=args.context_mode,knowledge_action=args.knowledge_action,
@@ -391,7 +401,7 @@ def parser():
     result.add_argument('--batch-size', type=int, choices=(1,2,3), help='prepare autonomo: maximo de indicadores por llamada (1 por defecto); 2/3 habilitan lotes experimentales')
     result.add_argument('--policy', default='config/autonomous.json', help='Politica para prepare; despues queda congelada')
     result.add_argument('--reuse-run', help='En prepare autonomo: reutiliza un run autorizado validado, sin inferencias')
-    result.add_argument('--indicators', help='Solo depuracion/regresion: seleccion manual; omitir en el flujo normal de descubrimiento automatico')
+    result.add_argument('--indicators', help='run/resume: subconjunto de indicadores del catalogo (IDs separados por comas, p. ej. DIV-04,POL-01,AMB-01) para una validacion acotada; queda congelado en el run. En prepare --autonomous conserva su uso de depuracion')
     result.add_argument('--manifest-sha256', help='Hash del manifiesto revisado; obligatorio para authorize')
     result.add_argument('--partial', action='store_true', help='Exportacion explicitamente incompleta del modo autonomo')
     result.add_argument('--background', action='store_true', help='Inicia el worker autonomo autorizado en segundo plano, sin ventana')

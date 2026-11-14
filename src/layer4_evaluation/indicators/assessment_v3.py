@@ -121,6 +121,40 @@ la formula 100*(0.55*S+0.45*K); no emitas porcentajes ni probabilidades de exito
 '''
 
 
+# PROSPECTIVE_SK_PROMPT_V3_CONSISTENT (audit A3/A4). Applied only to new prospective
+# policies; V2 prompts of existing plans are reproduced unchanged. Rubrics, rationale,
+# validators and the confidence formula are untouched: these texts only remove
+# instructions that contradicted the prospective mode and the existing validators.
+PROSPECTIVE_PROMPT_V3 = 'PROSPECTIVE_SK_PROMPT_V3_CONSISTENT'
+SK_TEMPORAL_SCALE = '''temporal_alignment: 0 sin soporte; 1 intencion cuando se exige realizacion; 2 resultado esperado
+o etapa insuficiente; 3 etapa requerida afirmada con incertidumbre; 4 etapa exigida demostrada.
+Diseno o mecanismo vigente puede alcanzar 4 si eso exige el catalogo; no exige impacto adicional.
+Si exige resultados logrados, objetivos, expectativas o actividades solas no alcanzan 4.
+'''
+PROSPECTIVE_TEMPORAL_SCALE = '''temporal_alignment (modo prospectivo, frente a la etapa efectiva de cada criterio): 0 sin fragmento
+citado; 1 intencion vaga o general; 2 la etapa citada es inferior a la exigida; 3 etapa exigida con alguna
+incertidumbre; 4 accion, producto, mecanismo o resultado concreto previsto de este proyecto que satisface la etapa
+efectiva. Una propuesta concreta puede alcanzar 4; eso no demuestra ejecucion ni impacto.
+'''
+SK_COHERENCE = '''COHERENCIA S/K OBLIGATORIA: strength_rubric valora solo fragmentos citados en criterios CLEAR o PARTIAL.
+Si ningun criterio tiene evidence_refs: support_strength, cada coverage y las cuatro dimensiones valen 0 y
+strength_rubric.evidence_refs queda vacio; no puntues etapa, claridad ni afinidad sin una cita.
+Si algun criterio es CLEAR o PARTIAL con cita: support_strength y al menos una dimension son mayores que 0 y
+strength_rubric.evidence_refs incluye esas citas.
+'''
+DEMONSTRATED_STAGE_LINE = '''Diseno o mecanismo se juzgan en su etapa admitida; EXECUTED_ACTIVITY exige actividad realizada;
+DEMONSTRATED_RESULT exige resultado alcanzado; impacto exige respaldo del impacto atribuible, no una intencion.
+'''
+PROSPECTIVE_STAGE_LINE = '''Diseno, mecanismo, actividad o resultado previstos se juzgan frente a la temporalidad efectiva de cada
+criterio; un impacto previsto exige un mecanismo concreto del proyecto, no una intencion general.
+'''
+TITLE_NOTE = ('project.title identifica el proyecto; es contexto, no evidencia: no es un fragmento F, '
+              'no puede citarse y no basta para ningun criterio.')
+assert SK_TEMPORAL_SCALE in SK_INSTRUCTIONS
+PROMPT_V3_TEXTS = [SK_TEMPORAL_SCALE, PROSPECTIVE_TEMPORAL_SCALE, SK_COHERENCE, DEMONSTRATED_STAGE_LINE,
+                   PROSPECTIVE_STAGE_LINE, TITLE_NOTE]
+
+
 def evaluation_policy(mode=None, context=None, *, base=False, configured=None, saved=None):
     """Resolve new-run defaults or enforce the exact frozen/legacy policy."""
     configured=configured or {}
@@ -142,9 +176,10 @@ def evaluation_policy(mode=None, context=None, *, base=False, configured=None, s
         raise ValueError('BASE requiere retrieved-graph sin descriptor completo; crear un run nuevo con ese contexto')
     if context not in contexts:raise ValueError('Modo de contexto desconocido')
     value=dict(version=MODE_VERSION,evaluation_mode=mode,context_mode=contexts[context],
-        instructions_version='PROSPECTIVE_SK_PROMPT_V2_PARTIAL' if mode==PROSPECTIVE else 'DEMONSTRATED_SK_PROMPT_V2_PARTIAL',
+        instructions_version=PROSPECTIVE_PROMPT_V3 if mode==PROSPECTIVE else 'DEMONSTRATED_SK_PROMPT_V2_PARTIAL',
         supported_meaning='PLANNED_CONTRIBUTION_SUPPORTED' if mode==PROSPECTIVE else 'CATALOG_REQUIRED_STAGE_SUPPORTED',
-        instructions_sha256=canonical_hash([SK_INSTRUCTIONS,PROSPECTIVE_INSTRUCTIONS if mode==PROSPECTIVE else '',PARTIAL_COVERAGE]),
+        instructions_sha256=canonical_hash([SK_INSTRUCTIONS,PROSPECTIVE_INSTRUCTIONS,PARTIAL_COVERAGE,PROMPT_V3_TEXTS]
+            if mode==PROSPECTIVE else [SK_INSTRUCTIONS,'',PARTIAL_COVERAGE]),
         confidence_version=SK_CONFIDENCE_VERSION)
     value['sha256']=canonical_hash(value)
     return value

@@ -56,6 +56,10 @@ def repo(tmp_path, monkeypatch):
         if read(Path(folder) / '_manifest.json')['knowledge_manifest_sha256'] != knowledge_hash:
             raise ValueError('Publicacion de otro conocimiento')
 
+    # Import first: modules that bind these names at import time must capture the
+    # real functions, so reverting the patches cannot leak fakes into later tests.
+    import layer3_graphrag.pipeline, layer3_graphrag.configuration, layer3_graphrag.validate_inputs  # noqa: F401
+    import layer3_graphrag.embeddings, layer3_graphrag.manifest  # noqa: F401
     monkeypatch.setattr(processing, 'check', fake_check)
     monkeypatch.setattr('layer3_graphrag.manifest.validate_publication', fake_publication)
     monkeypatch.setattr('layer3_graphrag.configuration.load_config', lambda ws: ({'embeddings': {}}, None))

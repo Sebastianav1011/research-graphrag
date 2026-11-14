@@ -265,9 +265,12 @@ def prepare_evaluation(root, run, selected):
     module = engine(root, run)
     batch = batch_name(selected)
     directory = module.BASE / batch
+    wanted=requested.get('indicator_ids')
     if directory.exists():
         if read(directory/'plan.json').get('evaluation_policy',{})!=policy:
             raise ValueError('Modos incompatibles con el lote; crear un run nuevo')
+        if read(directory/'plan.json').get('indicator_selection')!=(sorted(wanted) if wanted else None):
+            raise ValueError('Seleccion de indicadores incompatible con el lote; crear un run nuevo')
         previous = module.check(directory)
         if previous.get('runtime', {}).get('provider') != provider_config['provider']:
             raise ValueError('Lote historico o proveedor/configuracion distinta: no reutilizar respuestas Codex como Qwen; crear otra ejecucion')
@@ -300,6 +303,12 @@ def prepare_evaluation(root, run, selected):
     catalog_ids = {r['indicator_id'] for r in pq.read_table(workspace / 'outputs/layer2/canonical/indicadores.parquet').to_pylist()}
     if catalog_ids != set(settings['profiles']):
         raise ValueError('Catalogo GraphRAG y los 48 perfiles V3.3 no tienen los mismos IDs')
+    # Optional subset: the sealed catalog stays complete in the plan; only the
+    # selected indicators are retrieved, packed, dispatched and exported.
+    if wanted:
+        unknown=sorted(set(wanted)-set(settings['profiles']))
+        if unknown:raise ValueError('Indicadores fuera del catalogo: '+', '.join(unknown))
+    selected_profiles={iid:settings['profiles'][iid] for iid in sorted(wanted)} if wanted else settings['profiles']
     directory.mkdir(parents=True)
     inputs = []
     for p in chosen:
@@ -315,6 +324,10 @@ def prepare_evaluation(root, run, selected):
     review = dict(projects=inputs, llm=provider_config,
         warnings=['Una solicitud por indicador, con fragmentos originales recuperados por GraphRAG. Se revisan los 48 indicadores.',
                   'Presupuesto aproximado de entrada incluye esquema; las omisiones y limitaciones constan en context_selection.json. No se truncan citas.'], inference_performed=False)
+    if wanted:
+        review['warnings'][0]=review['warnings'][0].replace('Se revisan los 48 indicadores.',
+            'Validacion acotada: solo se revisan los indicadores seleccionados '+', '.join(sorted(wanted))+'; el catalogo sellado conserva los 48.')
+        review['indicator_selection']=sorted(wanted)
     relational_contexts=None
     if policy.get('context_mode') in (v3.FULL_CONTEXT,v3.BASE_CONTEXT):
         source_chunks,scoped_candidates=[],[]
@@ -333,17 +346,19 @@ def prepare_evaluation(root, run, selected):
             from layer4_evaluation.indicators.scoped_retrieval import project_relations
             relational_contexts=project_relations(workspace,inputs)
         # Keep existing cached retrieval unchanged in fragment mode.
-        scoped_candidates,retrieval_report=from_published_cache(workspace,inputs,settings['profiles'],source_chunks,
+        scoped_candidates,retrieval_report=from_published_cache(workspace,inputs,selected_profiles,source_chunks,
             **({'relational_contexts':relational_contexts} if relational_contexts is not None else {}))
     # Retrieved contexts are budgeted with the pinned, hash-verified Qwen
     # tokenizer; RUNTIME_DRIFT is enforced by the transport before each call.
     tokenizer=pinned_tokenizer(root) if policy.get('context_mode')==v3.RETRIEVED_CONTEXT else None
-    requests, context_report = prepare_contexts(inputs, settings['profiles'], settings['rubrics'], provider_config,
+    requests, context_report = prepare_contexts(inputs, selected_profiles, settings['rubrics'], provider_config,
         scoped_candidates,source_chunks,sections,
         evidence_references=True, assessment_version=v3.SK_VERSION,
         evaluation_mode=policy.get('evaluation_mode'),context_mode=policy.get('context_mode'),
         relational_contexts=relational_contexts,
-        **({'tokenizer':tokenizer} if tokenizer is not None else {}))
+        **({'tokenizer':tokenizer} if tokenizer is not None else {}),
+        # Prompt text follows the run's sealed policy version (V2 plans stay V2).
+        **({'prompt_version':policy['instructions_version']} if policy.get('instructions_version')==v3.PROSPECTIVE_PROMPT_V3 else {}))
     context_report['project_scoped_retrieval']=retrieval_report
     write(directory / 'context_selection.json', context_report)
     review['context_selection'] = context_report
@@ -380,9 +395,10 @@ def prepare_evaluation(root, run, selected):
         corrective_retries=2,
         token_limit_retries=provider_config['token_limit_retries'] if provider_config['provider']=='ollama' else 0,
         runtime=dict(provider=provider_config['provider'], configuration=provider_config), requested_model=provider_config['model'],
-        maximum_calls=len(settings['profiles']) * len(inputs), total_token_reservation_cap=170000 * len(inputs), timeout_seconds=provider_config['timeout_seconds'],
+        maximum_calls=len(selected_profiles) * len(inputs), total_token_reservation_cap=170000 * len(inputs), timeout_seconds=provider_config['timeout_seconds'],
         source_hashes=source_hashes, territories=[], run_id=run.name)
     if policy:plan.update(evaluation_policy=policy,catalog_derivation=derivation)
+    if wanted:plan['indicator_selection']=sorted(wanted)
     if policy.get('context_mode') in (v3.FULL_CONTEXT,v3.BASE_CONTEXT):
         resources=read(root/'config/autonomous.json') if (root/'config/autonomous.json').exists() else {}
         plan['resource_policy']=dict(min_free_ram_mb=resources.get('min_free_ram_mb',1536),
@@ -448,7 +464,7 @@ def export(root, run, *, offline=False, output_contract=None):
         plan, state = module.check(directory), module.verify_run(directory)
         if plan.get('evaluation_policy',{})!=request.get('evaluation_policy',{}):
             raise ValueError('No mezclar modos de evaluacion/contexto en una exportacion')
-        indicator_ids.update(plan['profiles'])
+        indicator_ids.update(plan.get('indicator_selection') or plan['profiles'])
         errors.extend(state['errors'])
         for s in state['projects']:
             p = next(p for p in plan['projects'] if p['project_id'] == s['project_id'])
@@ -797,7 +813,8 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
                      stage=None, through=None, resume=False, approve_build=False, authorize=False,
                      project_ids=None, notify=None, dataset=None, input_file=None, delivery=None, confirm=None,
                      limit=None, all_projects=False, seed=42, dry_run=False, selection_manifest=None,confirm_all=False,
-                     single_authorization=False,evaluation_mode=None,context_mode=None,knowledge_action=None):
+                     single_authorization=False,evaluation_mode=None,context_mode=None,knowledge_action=None,
+                     indicator_ids=None):
     """Central reusable orchestration API. Layer checkpoints remain authoritative."""
     root = Path(root).resolve()
     sampling = limit is not None or all_projects or selection_manifest is not None
@@ -973,7 +990,8 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
                     write(run_file(run,'execution.json'), dict(through=target, project_ids=project_ids,
                         llm=model_binding['llm'], evaluation_contract=model_binding.get('contract'),
                         **({'evaluation_policy':policy} if policy else {}),
-                        source=source,input_file=input_file,delivery=delivery))
+                        source=source,input_file=input_file,delivery=delivery,
+                        **({'indicator_ids':list(indicator_ids)} if indicator_ids is not None else {})))
                     write(run_file(run,'run.json'), dict(status='REGISTERED',run_id=name,dataset=dataset or 'raw',
                         raw_path=raw.relative_to(root).as_posix(),configuration=dict(config,llm=model_binding['llm']),
                         started_at=datetime.now(timezone.utc).isoformat()))
@@ -994,6 +1012,14 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
             if saved_ids is not None and project_ids is not None and project_ids != saved_ids:
                 raise ValueError('Seleccion de proyectos distinta; reanudar los lotes originales')
             project_ids = saved_ids if project_ids is None else project_ids
+            # Optional indicator subset: frozen like the project selection.
+            if indicator_ids is not None and (not indicator_ids or len(indicator_ids)!=len(set(indicator_ids))
+                    or any(not isinstance(i,str) or not i.strip() for i in indicator_ids)):
+                raise ValueError('Seleccion de indicadores vacia o duplicada')
+            saved_indicators = previous_request.get('indicator_ids')
+            if (resume or previous_request) and indicator_ids is not None and indicator_ids != saved_indicators:
+                raise ValueError('Seleccion de indicadores distinta; reanudar con la seleccion original o crear otro run')
+            indicator_ids = saved_indicators if indicator_ids is None else indicator_ids
             selection = previous_request.get('selection') or dict(
                 mode='file' if input_file is not None else 'delivery' if delivery is not None else 'projects' if project_ids is not None else 'source',
                 files=config.get('selected_input_paths', []))
@@ -1007,7 +1033,8 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
             request = dict(through=target, project_ids=project_ids, selection=selection,
                 llm=model_binding['llm'], evaluation_contract=model_binding.get('contract'),
                 **({'evaluation_policy':policy} if policy else {}),
-                source=source,input_file=input_file,delivery=delivery)
+                source=source,input_file=input_file,delivery=delivery,
+                **({'indicator_ids':list(indicator_ids)} if indicator_ids is not None else {}))
             config['llm'] = model_binding['llm']
             if single_authorization and not dry_run and approval is None:
                 from layer2_processing.preprocessing.project_selection import select
