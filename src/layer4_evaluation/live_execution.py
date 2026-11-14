@@ -22,7 +22,7 @@ from layer4_evaluation.indicators import assessment_v3 as v3, global_discovery_v
 
 from layer4_evaluation.indicators.ollama_provider import (
     OllamaClient, OllamaAssessmentProvider, context_guard, configuration as llm_configuration, create_client,
-    CORRECTION_VERSION, corrective_request)
+    CORRECTION_VERSION, TARGETED_CORRECTION_VERSION, corrective_request, targeted_baseline, scope_issues)
 
 from layer4_evaluation.indicators.experiment_inputs import read, sha256, verify_hashes
 
@@ -218,7 +218,7 @@ def verify_run(directory,*,recover=False):
                 retries=plan.get('token_limit_retries',0) if bounded else 0
                 corrective = cp.get('corrective_retries', 0)
                 require(type(corrective) is int and 0 <= corrective <= 2 and
-                    (not corrective or cp.get('correction_version') == (refs.VERSION if refs.active(request) else CORRECTION_VERSION)), 'Reintentos correctivos incompatibles')
+                    (not corrective or cp.get('correction_version') == (plan.get('correction_protocol', refs.VERSION) if refs.active(request) else CORRECTION_VERSION)), 'Reintentos correctivos incompatibles')
                 retries=max(retries,corrective)
                 require(1 <= len(record['calls']) <= retries+1,'Numero de llamadas fuera del limite')
                 attempt_request=request
@@ -227,7 +227,13 @@ def verify_run(directory,*,recover=False):
                         previous=record['calls'][index-1]
                         require(index<=corrective and not any(i.get('category')=='INTERNAL_VALIDATION_ERROR'
                             for i in previous['validation_issues']), 'Reintento correctivo no permitido')
-                        attempt_request=corrective_request(request,expected_schema,plan['runtime']['configuration'],previous['validation_issues'])
+                        prior=None
+                        if cp.get('correction_version')==TARGETED_CORRECTION_VERSION:
+                            runs=out/cp['phase']/('ollama_runs' if local else 'codex_runs')/pid
+                            prior,_=targeted_baseline([runs/('attempt_'+str(n+1)) for n in range(index)],
+                                [c['validation_issues'] for c in record['calls'][:index]])
+                        attempt_request=corrective_request(request,expected_schema,plan['runtime']['configuration'],previous['validation_issues'],
+                            prior,cp.get('correction_version'))
                     attempt=out/cp['phase']/('ollama_runs' if local else 'codex_runs')/pid/('attempt_'+str(index+1))
                     require(read(attempt/'call.json')==call and call['retry']==index,'Metadatos nativos/reintento diferentes')
                     require(index==len(record['calls'])-1 or call['exit_status']=='TOKEN_LIMIT' or
@@ -286,6 +292,12 @@ def verify_run(directory,*,recover=False):
                         refs.materialize(request,parsed)==record['wrapper'],'Respuesta original/recuperada difieren')
                     require(native['usage_observations'][0]==dict(input_tokens=body.get('prompt_eval_count'),
                         output_tokens=body.get('eval_count')),'Metricas originales/recuperadas difieren')
+                if refs.active(request) and cp.get('correction_version')==TARGETED_CORRECTION_VERSION and len(record['calls'])>1:
+                    runs=out/cp['phase']/('ollama_runs' if local else 'codex_runs')/pid
+                    baseline,flagged=targeted_baseline([runs/('attempt_'+str(n+1)) for n in range(len(record['calls'])-1)],
+                        [c['validation_issues'] for c in record['calls'][:-1]])
+                    require(baseline is None or not scope_issues(baseline,flagged,read(attempt/'selection.json')),
+                        'Correccion dirigida modifico juicios no senalados')
                 if refs.active(request):
                     selection=read(attempt/'selection.json')
                     from jsonschema import Draft202012Validator
@@ -353,7 +365,7 @@ def call_request(plan, project, call_plan):
     request=request_for(plan,project,call_plan['phase'],call_plan['indicator_ids'])
     if call_plan.get('correction_version'):
         if refs.active(request):
-            require(call_plan['correction_version']==refs.VERSION, 'Version correctiva incompatible')
+            require(call_plan['correction_version']==plan.get('correction_protocol', refs.VERSION), 'Version correctiva incompatible')
         else:
             require(call_plan['correction_version']==CORRECTION_VERSION, 'Version correctiva incompatible')
             request=corrective_request(request,v3.schemas(project['fields'])['assessment_batch'],plan['runtime']['configuration'])
@@ -485,7 +497,7 @@ def execute(args):
                 execution_id=plan['execution_id'],maximum_new_calls=1+retries,max_retries=retries,timeout_seconds=plan['timeout_seconds'],reservation=reservation,estimated_tokens=estimate)
             if plan.get('evaluation_policy'):cp['evaluation_policy_sha256']=plan['evaluation_policy']['sha256']
             if correction:
-                cp.update(correction_version=refs.VERSION if refs.active(request) else CORRECTION_VERSION,corrective_retries=corrective_retries)
+                cp.update(correction_version=plan.get('correction_protocol', refs.VERSION) if refs.active(request) else CORRECTION_VERSION,corrective_retries=corrective_retries)
             write(out/'plan.json',cp);write(out/'schema.json',schema)
             call_auth=dict(authorized=True,project_ids=[p['project_id']],phase=phase,indicator_ids=ids,plan_sha256=sha256(out/'plan.json'),
                 request_sha256=cp['request_sha256'],token_budget=reservation,maximum_new_calls=1+retries,max_retries=retries,
@@ -510,7 +522,7 @@ def execute(args):
             provider = OllamaAssessmentProvider(out/phase/'ollama_runs', out/'schema.json', lambda p,i:request,
                 settings=settings, client=client, runtime=runtime, wrapper_validator=gate,
                 execution_id=plan['execution_id'], max_retries=0, max_indicators=3, token_limit_retries=token_retries,
-                corrective_retries=corrective_retries if correction else 0)
+                corrective_retries=corrective_retries if correction else 0, correction_version=cp.get('correction_version'))
             error = None
             try:
                 provider.evaluate(dict(project_id=p['project_id'], fields=p['fields']),

@@ -113,7 +113,149 @@ Respeta IDs y temporalidad de rubrica. Devuelve JSON completo corregido.
 '''
 
 
-def corrective_request(request, schema, settings, issues=None):
+# Targeted correction for reference transport. The previous protocol only named
+# the failed rule, so the model re-judged every criterion blind and discarded
+# valid partial evidence. V2 names the exact fields, shows the previous
+# judgments (from the persisted selection.json) and asks to fix only them.
+TARGETED_CORRECTION_VERSION = 'TARGETED_REFERENCE_CORRECTION_V2'
+TARGETED_CORRECTION = '''REFERENCE_CORRECTION_V2:
+Tu respuesta anterior fue rechazada SOLO por las inconsistencias de ERRORES; no es un juicio sobre la evidencia.
+RESPUESTA_ANTERIOR resume tus juicios previos (referencias en formato fragment_id:stage).
+Corrige unicamente los campos senalados y la decision o fuerza que dependan de ellos. Conserva los
+demas criterios con su support, coverage, evidence_refs y razonamiento.
+No subas coverage ni conviertas un criterio en CLEAR para cuadrar el JSON: si el respaldo que justificaste
+es menor, baja support o coverage. Puedes reducir el soporte de un criterio senalado solo si su fragmento no
+respalda lo afirmado, explicando por que. No elimines referencias validas para evitar el error.
+evidence_refs usa objetos {fragment_id,stage}, nunca indices ni citas. Devuelve el JSON completo.
+'''
+TARGETED_RULES = {
+    'SK_CRITERION:COVERAGE_SUPPORT_MISMATCH': 'support y coverage deben concordar: NOT_DEMONSTRATED=0; '
+        'PARTIAL=1, 2 o 3; CLEAR=4. Si la cobertura justificada es menor que 4, usa PARTIAL con esa cobertura.',
+    'SK_STRENGTH:ZERO_ANCHOR_MISMATCH': 'support_strength=0 si y solo si las cuatro dimensiones de strength_rubric '
+        'son 0. Con criterios PARTIAL/CLEAR referenciados usa valores positivos; sin ninguno, todo en 0.',
+    'SK_STRENGTH:POSITIVE_REQUIRES_EVIDENCE': 'Dimensiones de fuerza positivas exigen strength_rubric.evidence_refs '
+        'tomadas de criterios PARTIAL/CLEAR; sin criterios positivos, las dimensiones deben ser 0.',
+    'V3_POSITIVE_STRENGTH:REQUIRES_EVIDENCE': 'support_strength>0 exige algun criterio PARTIAL/CLEAR con evidence_refs; '
+        'si ningun criterio tiene respaldo, support_strength=0.',
+    'SK_STRENGTH:UNVERIFIABLE_CRITERION_REFERENCE': 'strength_rubric.evidence_refs solo repite referencias '
+        'de criterios PARTIAL/CLEAR.',
+    'TARGETED_CORRECTION:UNFLAGGED_CRITERION_CHANGED': 'Ese criterio no tenia error: restaura exactamente su '
+        'support, coverage y evidence_refs de RESPUESTA_ANTERIOR.',
+    'TARGETED_CORRECTION:FLAGGED_CRITERION_INCREASED': 'Al corregir no puedes aumentar support ni coverage '
+        'respecto de RESPUESTA_ANTERIOR; si no concuerdan, baja el que exceda tu justificacion.',
+}
+TARGETED_DETAIL_KEYS = ('category', 'path', 'rule', 'criterion_id', 'criterion_ids', 'support', 'coverage',
+    'allowed_coverage', 'previous_support', 'previous_coverage', 'support_strength', 'strength_total',
+    'positive_criterion_ids', 'evidence_indices', 'evidence_count', 'temporal_requirement', 'observed_stages',
+    'missing_fields')
+SUPPORT_ORDER = {'NOT_DEMONSTRATED': 0, 'PARTIAL': 1, 'CLEAR': 2}
+
+
+def correction_scope(baseline, issues):
+    """Criterion IDs a targeted correction may lower; None leaves the attempt unrestricted.
+
+    Restricted only when every criterion-level error names its criterion. Global
+    errors (strength, decision) leave all criteria fixed: the first complete
+    judgment stands and only the dependent decision/strength may change.
+    """
+    if not isinstance(baseline, dict) or not baseline.get('assessments'):
+        return None
+    criteria = baseline['assessments'][0].get('criterion_assessments', [])
+    flagged = set()
+    for issue in issues or []:
+        rule = issue.get('rule', '')
+        if issue.get('category') in ('INVALID_JSON', 'INTERNAL_VALIDATION_ERROR') or rule.startswith('V3_CRITERIA:'):
+            return None
+        ids = [issue['criterion_id']] if issue.get('criterion_id') else list(issue.get('criterion_ids') or [])
+        match = re.match(r'\$\.criterion_assessments\[(\d+)\]', issue.get('path', ''))
+        if match and int(match[1]) < len(criteria):
+            ids.append(criteria[int(match[1])].get('criterion_id'))
+        if not ids and rule.startswith(('V3_CRITERION:', 'SK_CRITERION:')):
+            return None
+        flagged.update(ids)
+    return sorted(flagged)
+
+
+def scope_issues(baseline, flagged, selection):
+    """Deterministic correction contract checked against the persisted first judgment."""
+    if flagged is None:
+        return []
+    previous = {c['criterion_id']: c for c in baseline['assessments'][0]['criterion_assessments']}
+    refs = lambda c: sorted((r['fragment_id'], r['stage']) for r in c.get('evidence_refs', []))
+    issues = []
+    for index, item in enumerate(selection['assessments'][0]['criterion_assessments']):
+        before = previous.get(item['criterion_id'])
+        if before is None:
+            continue
+        detail = dict(category='INVALID_FIELD_VALUE', path=f'$.criterion_assessments[{index}]',
+            criterion_id=item['criterion_id'], support=item['support'], coverage=item.get('coverage'),
+            previous_support=before['support'], previous_coverage=before.get('coverage'))
+        if item['criterion_id'] in flagged:
+            if (SUPPORT_ORDER[item['support']] > SUPPORT_ORDER[before['support']] or
+                    (item.get('coverage') or 0) > (before.get('coverage') or 0)):
+                issues.append(dict(detail, rule='TARGETED_CORRECTION:FLAGGED_CRITERION_INCREASED'))
+        elif (item['support'], item.get('coverage'), refs(item)) != (before['support'], before.get('coverage'), refs(before)):
+            issues.append(dict(detail, rule='TARGETED_CORRECTION:UNFLAGGED_CRITERION_CHANGED'))
+    return issues
+
+
+def previous_judgments(selection, flagged=(), explanations=True):
+    """Compact, deterministic summary of the model's own previous reference selection."""
+    if not isinstance(selection, dict) or not selection.get('assessments'):
+        return None
+    item = selection['assessments'][0]
+    refs = lambda values: [f"{r.get('fragment_id')}:{r.get('stage')}" for r in values or []]
+    criteria = []
+    for c in item.get('criterion_assessments', []):
+        entry = dict(criterion_id=c.get('criterion_id'), support=c.get('support'),
+                     coverage=c.get('coverage'), evidence_refs=refs(c.get('evidence_refs')))
+        if explanations and c.get('criterion_id') in flagged:
+            entry['explanation'] = (c.get('explanation') or '')[:300]
+        criteria.append(entry)
+    strength = item.get('strength_rubric') or {}
+    return dict(decision=item.get('decision'), support_strength=item.get('support_strength'),
+        criteria=criteria, strength_rubric=dict({k: strength.get(k) for k in
+            ('directness', 'specificity', 'clarity', 'temporal_alignment')}, evidence_refs=refs(strength.get('evidence_refs'))))
+
+
+def targeted_baseline(attempt_directories, attempt_issues):
+    """(first persisted selection, its correction scope) for one evaluation's attempts."""
+    for directory, issues in zip(attempt_directories, attempt_issues):
+        path = Path(directory) / 'selection.json'
+        if path.exists():
+            baseline = strict_json(path.read_text(encoding='utf-8'))
+            return baseline, correction_scope(baseline, issues)
+    return None, None
+
+
+def _targeted_prompt(prefix, marker, payload, issues, previous, schema, settings, budget):
+    from .context_budget import rebudget
+    details = []
+    for issue in issues or []:
+        detail = {k: issue[k] for k in TARGETED_DETAIL_KEYS if k in issue}
+        if 'path' in detail:
+            detail['path'] = detail['path'].replace('.evidence_indices', '.evidence_refs')
+        details.append(detail)
+    rules = {d['rule']: TARGETED_RULES[d['rule']] for d in details if d.get('rule') in TARGETED_RULES}
+    flagged = {d['criterion_id'] for d in details if 'criterion_id' in d}
+    ladder = [(len(details), True), (len(details), False)]
+    ladder += [(count, False) for count in range(len(details) - 1, 0, -1)]
+    ladder += [(len(details), None), (max(len(details), 1), None)]
+    prompt = None
+    for count, explain in ladder:
+        summary = previous_judgments(previous, flagged, explain) if explain is not None else None
+        prompt = (prefix + '\n' + TARGETED_CORRECTION + 'ERRORES: '
+            + json.dumps(details[:count], ensure_ascii=False, separators=(',', ':'))
+            + (f'\nOtros errores pendientes: {len(details)-count}' if count < len(details) else '')
+            + ('\nREGLAS: ' + json.dumps(rules, ensure_ascii=False, separators=(',', ':')) if rules else '')
+            + ('\nRESPUESTA_ANTERIOR: ' + json.dumps(summary, ensure_ascii=False, separators=(',', ':')) if summary else '')
+            + '\n' + marker + payload)
+        if rebudget(prompt, schema, settings, budget)['fits']:
+            break
+    return prompt
+
+
+def corrective_request(request, schema, settings, issues=None, previous=None, version=None):
     """Keep the exact evidence payload; budget and fingerprint the actual prompt."""
     from .context_budget import rebudget
     revised = dict(request)
@@ -122,7 +264,11 @@ def corrective_request(request, schema, settings, issues=None):
         raise ValueError('Solicitud correctiva sin INPUT_JSON')
     prefix = prefix.split('\nCORRECTIVE_JSON_RULES:\n', 1)[0]
     from .evidence_references import active
-    if active(request):
+    if active(request) and version == TARGETED_CORRECTION_VERSION:
+        prefix = prefix.split('\nREFERENCE_CORRECTION_V2:\n', 1)[0]
+        revised['prompt'] = _targeted_prompt(prefix, marker, payload, issues, previous, schema, settings,
+                                             request.get('context_budget'))
+    elif active(request):
         # Versioned separately from legacy literal prompts: old call hashes can
         # still be reconstructed byte for byte.
         prefix = prefix.split('\nREFERENCE_CORRECTION:\n', 1)[0]
@@ -273,7 +419,7 @@ class OllamaAssessmentProvider:
     def __init__(self, run_directory, schema_path, input_factory, *, settings=None, client=None,
                  runtime=None, timeout=None, model=None, max_retries=0, max_indicators=3,
                  wrapper_validator=None, execution_id=None, stop_on_uncertain=True, output_adapter=None,
-                 token_limit_retries=0, corrective_retries=0):
+                 token_limit_retries=0, corrective_retries=0, correction_version=None):
         options = dict(settings or {})
         if timeout is not None:
             options['timeout_seconds'] = timeout
@@ -286,6 +432,7 @@ class OllamaAssessmentProvider:
         if type(corrective_retries) is not int or not 0 <= corrective_retries <= 2:
             raise ValueError('Maximo dos reintentos correctivos')
         self.corrective_retries = corrective_retries
+        self.correction_version = correction_version
         if max_retries != 0 or max_indicators not in (1, 2, 3, 5) or not stop_on_uncertain:
             raise ValueError('Ollama requiere ejecucion secuencial sin reintentos automaticos')
         self.directory, self.schema = Path(run_directory), Path(schema_path)
@@ -303,6 +450,7 @@ class OllamaAssessmentProvider:
         retries = max(self.token_limit_retries, self.corrective_retries)
         output = self.settings['num_predict']
         request = self.input_factory(project, indicators)
+        first, self.scope = len(self.calls), None
         for attempt in range(retries + 1):
             try:
                 return self._evaluate_once(project, indicators, attempt=attempt, output=output, request=request)
@@ -312,9 +460,17 @@ class OllamaAssessmentProvider:
                 if exc.code == 'INVALID_ASSESSMENT' and attempt < self.corrective_retries:
                     if any(i.get('category') == 'INTERNAL_VALIDATION_ERROR' for i in self.calls[-1]['validation_issues']):
                         raise
+                    previous = None
+                    if self.correction_version == TARGETED_CORRECTION_VERSION:
+                        # The first complete judgment of this evaluation is the
+                        # baseline for every corrective attempt (also on replay).
+                        previous, flagged = targeted_baseline(
+                            [self.directory.parent / c['working_directory'] for c in self.calls[first:]],
+                            [c['validation_issues'] for c in self.calls[first:]])
+                        self.scope = (previous, flagged) if previous is not None and flagged is not None else None
                     revised = corrective_request(self.input_factory(project, indicators),
                         strict_json(self.schema.read_text(encoding='utf-8')), self.settings,
-                        self.calls[-1]['validation_issues'])
+                        self.calls[-1]['validation_issues'], previous, self.correction_version)
                     revised_output = output
                     if revised.get('evidence_protocol') and revised['context_budget']['fits']:
                         # A previous token-limit retry may have raised the output
@@ -406,10 +562,18 @@ class OllamaAssessmentProvider:
             Draft202012Validator(schema).validate(parsed)
             validation_stage = 'semantic'
             from .evidence_references import active, materialize
+            scoped = []
             if active(request):
                 save('selection.json', parsed)
-                parsed = materialize(request, parsed)
-            self.wrapper_validator(parsed, project['project_id'], [i['indicator_id'] for i in indicators])
+                scoped = scope_issues(*self.scope, parsed) if getattr(self, 'scope', None) else []
+            try:
+                if active(request):
+                    parsed = materialize(request, parsed)
+                self.wrapper_validator(parsed, project['project_id'], [i['indicator_id'] for i in indicators])
+            except AssessmentValidationError as exc:
+                raise AssessmentValidationError(exc.issues + scoped) if scoped else exc
+            if scoped:
+                raise AssessmentValidationError(scoped)
             save('response.json', parsed)
             self.last_output = parsed
         except OllamaError as exc:

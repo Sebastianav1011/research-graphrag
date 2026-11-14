@@ -612,3 +612,89 @@ def test_active_autonomous_adapter_uses_sk_and_recovers_synthetic_response(tmp_p
         assert len(calls) == (2 if mode=='clarification' else 1)
     finally:
         worker.close()
+
+
+def test_targeted_correction_names_exact_fields_and_keeps_previous_judgments(sk_case, corpus):
+    """TARGETED_REFERENCE_CORRECTION_V2: fix only the inconsistent field, never force CLEAR."""
+    from layer4_evaluation.indicators.validation_diagnostics import semantic_issues
+    p,r,f,a=[sk_case[k] for k in ('profile','rubric','fields','assessment')]
+    clear=next(i for i,c in enumerate(a['criterion_assessments']) if c['support']=='CLEAR')
+    a['criterion_assessments'][clear]['coverage']=2
+    errors=v3.validate(f,p,a,r)
+    assert 'SK_CRITERION:COVERAGE_SUPPORT_MISMATCH' in errors
+    issues=semantic_issues(errors,a,p['indicator_id'],r,f)
+    mismatch=[i for i in issues if i['rule']=='SK_CRITERION:COVERAGE_SUPPORT_MISMATCH']
+    cid=a['criterion_assessments'][clear]['criterion_id']
+    assert mismatch==[dict(category='INVALID_FIELD_VALUE',rule='SK_CRITERION:COVERAGE_SUPPORT_MISMATCH',
+        path=f'$.criterion_assessments[{clear}].coverage',indicator_id=p['indicator_id'],criterion_id=cid,
+        support='CLEAR',coverage=2,allowed_coverage=[4])]
+    request=pack(corpus)['TEST_PROJECT']['I00']
+    schema=refs.response_schema(request,corpus.project['fields'])
+    previous=selection(sk_case)
+    revised=transport.corrective_request(request,schema,corpus.settings,mismatch,previous,
+        transport.TARGETED_CORRECTION_VERSION)
+    prompt=revised['prompt']
+    assert revised['context_budget']['fits'] and revised['payload']==request['payload']
+    assert 'REFERENCE_CORRECTION_V2:' in prompt and 'RESPUESTA_ANTERIOR:' in prompt
+    assert '"criterion_id":"'+cid+'"' in prompt and '"allowed_coverage":[4]' in prompt
+    assert 'No subas coverage' in prompt and 'usa PARTIAL con esa cobertura' in prompt
+    assert 'F000:DESIGN_DOCUMENTED' in prompt
+    # Correcting twice never stacks instructions; the legacy protocol is unchanged.
+    again=transport.corrective_request(dict(request,prompt=prompt),schema,corpus.settings,mismatch,previous,
+        transport.TARGETED_CORRECTION_VERSION)
+    assert again['prompt'].count('REFERENCE_CORRECTION_V2:')==1
+    legacy=transport.corrective_request(request,schema,corpus.settings,mismatch)
+    assert 'REFERENCE_CORRECTION:' in legacy['prompt'] and 'RESPUESTA_ANTERIOR' not in legacy['prompt']
+
+
+def test_targeted_correction_is_replayed_from_persisted_selection(live_run, corpus, sample, monkeypatch):
+    directory, client = live_run
+    corpus.hits = corpus.hits[:1]
+    requests = pack(corpus)
+    install_plan(directory, corpus, requests)
+    plan = read(directory/'plan.json')
+    plan.update(isolate_indicator_errors=True, corrective_retries=2, token_limit_retries=2,
+        correction_protocol=transport.TARGETED_CORRECTION_VERSION, maximum_calls=9, total_token_reservation_cap=9*8192,
+        budgets=dict(assessment_reservation=3*8192, assessment_postcall_review_threshold=3*8192))
+    write(directory/'plan.json', plan)
+    manifest=read(directory/'manifest.json');manifest['plan_sha256']=sha(directory/'plan.json');write(directory/'manifest.json',manifest)
+    client.inspect.return_value=runtime(corpus.settings)
+    monkeypatch.setattr(live,'create_client',lambda _:client)
+    attempts=[]
+    def reply(method,path,payload):
+        prompt=payload['messages'][0]['content']
+        attempts.append(prompt)
+        value=selection(sample)
+        if len(attempts)==1:
+            value['assessments'][0]['criterion_assessments'][0]['evidence_refs']=[]
+        return response(value)|dict(model=corpus.settings['model'])
+    client.request.side_effect=reply
+    live.execute(SimpleNamespace(run='batch_test',authorize=True))
+    assert len(attempts)==2
+    assert 'REFERENCE_CORRECTION_V2:' not in attempts[0]
+    assert 'REFERENCE_CORRECTION_V2:' in attempts[1] and 'RESPUESTA_ANTERIOR:' in attempts[1]
+    state=live.verify_run(directory)  # Rebuilds the corrective prompt byte for byte.
+    assert not state['blocking_errors'] and len(state['projects'][0]['rows'])==1
+
+
+def test_targeted_correction_scope_preserves_unflagged_and_never_raises_flagged():
+    ref=lambda f:[dict(fragment_id=f,stage='DESIGN_DOCUMENTED')]
+    def answer(*criteria):
+        return dict(project_id='P',assessments=[dict(indicator_id='I',criterion_assessments=[
+            dict(criterion_id=c,support=s,coverage=k,evidence_refs=r,explanation='x') for c,s,k,r in criteria])])
+    first=answer(('C01','NOT_DEMONSTRATED',0,[]),('C02','PARTIAL',1,ref('F013')),('C04','CLEAR',2,ref('F015')))
+    issues=[dict(category='INVALID_FIELD_VALUE',rule='SK_CRITERION:COVERAGE_SUPPORT_MISMATCH',
+        path='$.criterion_assessments[2].coverage',criterion_id='C04',support='CLEAR',coverage=2,allowed_coverage=[4])]
+    flagged=transport.correction_scope(first,issues)
+    assert flagged==['C04']
+    rules=lambda a:[i['rule'].split(':')[1]+':'+i['criterion_id'] for i in transport.scope_issues(first,flagged,a)]
+    # Lowering the flagged criterion to its justified coverage is the intended repair.
+    assert rules(answer(('C01','NOT_DEMONSTRATED',0,[]),('C02','PARTIAL',1,ref('F013')),('C04','PARTIAL',2,ref('F015'))))==[]
+    assert rules(answer(('C01','NOT_DEMONSTRATED',0,[]),('C02','PARTIAL',1,ref('F013')),('C04','NOT_DEMONSTRATED',0,[])))==[]
+    # Forcing CLEAR/coverage upward or silently discarding unflagged evidence is rejected.
+    assert rules(answer(('C01','NOT_DEMONSTRATED',0,[]),('C02','PARTIAL',1,ref('F013')),('C04','CLEAR',4,ref('F015'))))==['FLAGGED_CRITERION_INCREASED:C04']
+    assert rules(answer(('C01','NOT_DEMONSTRATED',0,[]),('C02','NOT_DEMONSTRATED',0,[]),('C04','PARTIAL',2,ref('F015'))))==['UNFLAGGED_CRITERION_CHANGED:C02']
+    # Global strength errors keep every criterion fixed; unresolved criterion errors stay unrestricted.
+    assert transport.correction_scope(first,[dict(rule='SK_STRENGTH:ZERO_ANCHOR_MISMATCH',path='$')])==[]
+    assert transport.correction_scope(first,[dict(rule='SK_CRITERION:JUSTIFICATION_REQUIRED',path='$')]) is None
+    assert transport.scope_issues(first,None,answer(('C01','CLEAR',4,ref('F001'))))==[]

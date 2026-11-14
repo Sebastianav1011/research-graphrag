@@ -27,6 +27,7 @@ from layer2_processing.pipeline import check, same_configuration, layer_config, 
 
 ROOT = Path(__file__).resolve().parents[1]
 from layer4_evaluation.thesis_output import COLUMNS
+from layer4_evaluation.indicators.ollama_provider import TARGETED_CORRECTION_VERSION
 TERRITORY_COLUMNS = ['siap_id', 'territory_type', 'territory_code', 'code_system']
 
 
@@ -392,7 +393,7 @@ def prepare_evaluation(root, run, selected):
         coverage_policy=v3.PARTIAL_COVERAGE,
         request_protocol=context_version, context_requests=requests,
         isolate_indicator_errors=True,
-        corrective_retries=2,
+        corrective_retries=2, correction_protocol=TARGETED_CORRECTION_VERSION,
         token_limit_retries=provider_config['token_limit_retries'] if provider_config['provider']=='ollama' else 0,
         runtime=dict(provider=provider_config['provider'], configuration=provider_config), requested_model=provider_config['model'],
         maximum_calls=len(selected_profiles) * len(inputs), total_token_reservation_cap=170000 * len(inputs), timeout_seconds=provider_config['timeout_seconds'],

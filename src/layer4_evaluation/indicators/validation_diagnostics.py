@@ -49,7 +49,26 @@ def semantic_issues(errors, assessment, indicator_id, rubric=None, project_field
                         path=f'$.criterion_assessments[{index}].evidence_indices',
                         indicator_id=indicator_id, criterion_id=criterion['criterion_id']))
             continue
+        if code == 'SK_CRITERION:COVERAGE_SUPPORT_MISMATCH':
+            # Name the exact criteria and values; never suggest a direction.
+            allowed = {'CLEAR': [4], 'PARTIAL': [1, 2, 3], 'NOT_DEMONSTRATED': [0]}
+            found = False
+            for index, item in enumerate(assessment.get('criterion_assessments', [])):
+                if item.get('support') in allowed and item.get('coverage') not in allowed[item['support']]:
+                    found = True
+                    issues.append(dict(category=category, rule=code, path=f'$.criterion_assessments[{index}].coverage',
+                        indicator_id=indicator_id, criterion_id=item.get('criterion_id'), support=item['support'],
+                        coverage=item.get('coverage'), allowed_coverage=allowed[item['support']]))
+            if found:
+                continue
         issue = dict(category=category, rule=code, path=path, indicator_id=indicator_id)
+        if code.startswith('SK_STRENGTH:') or code == 'V3_POSITIVE_STRENGTH:REQUIRES_EVIDENCE':
+            strength = assessment.get('strength_rubric') or {}
+            dims = [strength.get(k) for k in ('directness', 'specificity', 'clarity', 'temporal_alignment')]
+            issue.update(support_strength=assessment.get('support_strength'),
+                strength_total=sum(v for v in dims if type(v) is int),
+                positive_criterion_ids=[c.get('criterion_id') for c in assessment.get('criterion_assessments', [])
+                                        if c.get('support') != 'NOT_DEMONSTRATED'])
         if code == 'V3_POSITIVE_STRENGTH:REQUIRES_EVIDENCE':
             issue.update(path='$.support_strength',
                 correction_hint='La fuerza positiva requiere referencias literales. Reevalua decision y criterios; '
