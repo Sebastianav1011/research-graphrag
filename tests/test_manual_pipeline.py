@@ -467,3 +467,27 @@ def test_historical_publications_intact():
         'outputs/layer4/final/candidatos/resultado_capa4_demo_30_ampliado.xlsx': 'd75379384c042025b607dbc80c3bc6f6cd780ea689948732bc51dd7ba78ca64e',
     }
     assert all(sha(SOURCE / path) == fingerprint for path, fingerprint in expected.items())
+
+
+def test_new_base_real_preprocessing_writes_shared_staging_and_resumes(sandbox):
+    from knowledge_store import knowledge_root, shared_root, run_state
+    root, raw, original = sandbox
+    source = raw / 'tiny-base.json'
+    source.write_text(json.dumps(project()), encoding='utf-8')
+    source_before = source.read_bytes()
+    config = dict(original, knowledge_scope='BASE_GLOBAL_V1', base_knowledge_action='rebuild')
+    run = root / 'outputs/runs/local/new_shared_base'
+    result = runner.prepare(root, run, raw, 'prueba_en_vivo', config, through='preprocessing')
+    assert result['status'] == 'PREPROCESSED' and result['counts']['proyectos'] == 1
+    stage = knowledge_root(run)
+    assert stage.parent == shared_root(root) / 'staging'
+    assert not (run / 'workspace').exists()
+    table = stage / 'workspace/outputs/layer2/canonical/proyectos.parquet'
+    assert pq.read_table(table).to_pylist()[0]['source_project_id'] == '000701'
+    sealed_before = {p.relative_to(stage).as_posix(): sha(p) for p in stage.rglob('*') if p.is_file()}
+    assert runner.check(root, run)['status'] == 'PREPROCESSED'
+    again = runner.prepare(root, run, raw, 'prueba_en_vivo', config, through='preprocessing')
+    assert again['status'] == 'ALREADY_PREPARED' and knowledge_root(run) == stage
+    assert {p.relative_to(stage).as_posix(): sha(p) for p in stage.rglob('*') if p.is_file()} == sealed_before
+    assert run_state(run)['knowledge_build'] == stage.relative_to(root).as_posix()
+    assert source.read_bytes() == source_before and not (shared_root(root) / 'active.json').exists()

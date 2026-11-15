@@ -158,7 +158,8 @@ def build(root,run):
     state=coordinator.check(root,run);execution=s.read(run_file(run, 'execution.json'))
     selected=coordinator.scope_projects(root,run,execution['selection'],execution.get('project_ids'))
     data,_=catalog(root)
-    workspace=run/'workspace';config,_=load_config(workspace)
+    from knowledge_store import knowledge_workspace
+    workspace=knowledge_workspace(run);config,_=load_config(workspace)
     settings=admission_settings(config)
     coordinator.graph(root,run,build=True)
     snapshot=validate_inputs(workspace,config)

@@ -12,8 +12,9 @@ files under ``outputs/shared/base``:
 
 Evaluation runs store ``knowledge_ref`` (version id + manifest SHA-256) and read
 the artifacts where they are; activating another version later never changes
-what an earlier run references. Registration never moves, copies or edits the
-artifacts it describes, so historical runs and their hashes stay intact.
+what an earlier run references. Historical registrations stay in place. New
+builders are prepared under shared staging and published by atomic rename only
+after verification; their manifests point directly to the final shared location.
 """
 from datetime import datetime, timezone
 import hashlib
@@ -124,9 +125,16 @@ def describe(root, builder):
     ident = identity(state, _read(run_file(builder, 'raw_manifest.json')))
     parts = components(builder)
     fingerprint = digest(ident)
-    return dict(schema=VERSION_SCHEMA, version_id=fingerprint[:16] + '-' + parts['publication']['manifest_sha256'][:8],
+    manifest = dict(schema=VERSION_SCHEMA, version_id=fingerprint[:16] + '-' + parts['publication']['manifest_sha256'][:8],
         fingerprint=fingerprint, identity=ident, components=parts, location=builder.relative_to(root).as_posix(),
         storage='IN_PLACE_SEALED_CHECKPOINT', builder_run_id=state['run_id'])
+    if builder.is_relative_to(shared_root(root)):
+        # New versions bind every actual artifact byte, including preprocessing
+        # and query caches. No change to legacy IDs or manifests is necessary.
+        inventory_sha = digest(_inventory(builder))
+        manifest.update(storage='SHARED_SEALED_CHECKPOINT', artifact_inventory_sha256=inventory_sha,
+            version_id=fingerprint[:16] + '-' + inventory_sha[:8])
+    return manifest
 
 
 def _valid_id(version_id):
@@ -168,9 +176,11 @@ def verify(root, manifest, *, deep=True):
         current = describe(root, builder)
     except (OSError, KeyError) as exc:
         raise KnowledgeUnavailable(f'Version {manifest["version_id"]} ilegible: {exc}') from exc
-    for key in ('fingerprint', 'identity', 'components', 'version_id', 'location'):
+    for key in ('fingerprint', 'identity', 'components', 'version_id', 'location', 'storage'):
         if current[key] != manifest[key]:
             raise KnowledgeUnavailable(f'Version {manifest["version_id"]} alterada: {key}')
+    if manifest.get('artifact_inventory_sha256') != current.get('artifact_inventory_sha256'):
+        raise KnowledgeUnavailable('Inventario completo de BASE alterado')
     from layer3_graphrag.manifest import validate_publication
     workspace = builder / 'workspace'
     validate_publication(workspace / 'outputs/layer3/publication', manifest['components']['knowledge']['manifest_sha256'])
@@ -187,19 +197,81 @@ def verify(root, manifest, *, deep=True):
     return manifest
 
 
-def register(root, builder, *, activate=False, when=None):
-    """Register (idempotently) a verified checkpoint in place; never copies or edits it."""
-    manifest = describe(root, builder)
-    target = manifest_path(root, manifest['version_id'])
-    if target.is_file():
-        existing, _ = load_version(root, manifest['version_id'])
-        if {k: v for k, v in existing.items() if k != 'registered_at'} != manifest:
-            raise ValueError('Ya existe otra version con el mismo identificador')
-        manifest = existing
+def _inventory(folder):
+    folder = Path(folder)
+    for path in [folder, *folder.rglob('*')]:
+        if path.is_symlink() or (hasattr(path, 'is_junction') and path.is_junction()):
+            raise KnowledgeUnavailable('Almacenamiento compartido contiene enlaces')
+    return {p.relative_to(folder).as_posix(): _sha(p) for p in sorted(Path(folder).rglob('*')) if p.is_file()}
+
+
+def _stage(root, builder):
+    return Path(builder).resolve().parent == shared_root(Path(root).resolve()) / 'staging'
+
+
+def _promotion(root, builder):
+    """Durable publication intent, also used after rename interrupted the caller."""
+    return Path(builder).with_name(Path(builder).name + '.promotion.json')
+
+
+def _publish_staged(root, builder, *, when=None):
+    root, builder = Path(root).resolve(), Path(builder).resolve()
+    journal = _promotion(root, builder)
+    if journal.is_file():
+        pending = _read(journal)
+        manifest = pending['manifest']
+        target = shared_root(root) / 'versions' / _valid_id(manifest['version_id']) / 'artifacts'
+        if (pending.get('schema') != 'SHARED_BASE_PUBLICATION_V1' or
+                manifest.get('location') != target.relative_to(root).as_posix() or
+                digest(manifest) != pending.get('manifest_digest')):
+            raise KnowledgeUnavailable('Recibo de publicacion invalido')
+        source = builder if builder.is_dir() else target
+        verify(root, dict(manifest, location=source.relative_to(root).as_posix()))
     else:
-        manifest = dict(manifest, registered_at=when or datetime.now(timezone.utc).isoformat())
-        verify(root, manifest, deep=True)
-        _atomic_write(target, manifest)
+        manifest = describe(root, builder)
+        verify(root, manifest)
+        target = shared_root(root) / 'versions' / manifest['version_id'] / 'artifacts'
+        manifest = dict(manifest, location=target.relative_to(root).as_posix(),
+            registered_at=when or datetime.now(timezone.utc).isoformat())
+        pending = dict(schema='SHARED_BASE_PUBLICATION_V1', manifest=manifest, manifest_digest=digest(manifest))
+        # Never relocate an existing version or replace its pinned manifest.
+        existing = manifest_path(root, manifest['version_id'])
+        if existing.exists() or target.exists():
+            raise KnowledgeUnavailable('La version ya existe; no sobrescribir ni relocalizar')
+        _atomic_write(journal, pending)
+    if builder.is_dir():
+        if target.resolve() != target:
+            raise KnowledgeUnavailable('Destino compartido redirigido')
+        if target.exists():
+            raise KnowledgeUnavailable('Destino compartido existente; conservar ambos checkpoints')
+        target.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(builder, target)
+    verify(root, manifest)
+    path = manifest_path(root, manifest['version_id'])
+    if path.exists():
+        if _read(path) != manifest:
+            raise KnowledgeUnavailable('Manifiesto existente distinto; no sobrescribir')
+    else:
+        _atomic_write(path, manifest)
+    return manifest
+
+
+def register(root, builder, *, activate=False, when=None):
+    """Register legacy in place; publish only new shared staging builders."""
+    if _stage(root, builder):
+        manifest = _publish_staged(root, builder, when=when)
+    else:
+        manifest = describe(root, builder)
+        target = manifest_path(root, manifest['version_id'])
+        if target.is_file():
+            existing, _ = load_version(root, manifest['version_id'])
+            if {k: v for k, v in existing.items() if k != 'registered_at'} != manifest:
+                raise ValueError('Ya existe otra version con el mismo identificador')
+            manifest = existing
+        else:
+            manifest = dict(manifest, registered_at=when or datetime.now(timezone.utc).isoformat())
+            verify(root, manifest)
+            _atomic_write(target, manifest)
     if activate:
         activate_version(root, manifest['version_id'], when=when)
     return manifest
@@ -215,6 +287,8 @@ def activate_version(root, version_id, *, when=None):
     manifest, manifest_sha = load_version(root, version_id)
     verify(root, manifest, deep=True)
     previous = read_active(root)
+    if previous and previous['version_id'] == version_id and previous['manifest_sha256'] == manifest_sha:
+        return previous
     pointer = dict(schema=VERSION_SCHEMA, version_id=version_id, manifest_sha256=manifest_sha,
         fingerprint=manifest['fingerprint'], activated_at=when or datetime.now(timezone.utc).isoformat(),
         previous=None if previous is None else {k: previous[k] for k in ('version_id', 'manifest_sha256')})
@@ -285,7 +359,26 @@ def knowledge_root(run):
     """Directory holding the knowledge checkpoint a run uses (cheap: manifest pin only)."""
     from run_paths import repo_of
     run = Path(run)
-    ref = run_state(run).get('knowledge_ref')
+    state = run_state(run)
+    if state.get('knowledge_build'):
+        root = repo_of(run)
+        path = (root / state['knowledge_build']).resolve()
+        if path.parent != shared_root(root).resolve() / 'staging':
+            raise ValueError('Checkpoint de construccion fuera de shared/staging')
+        promotion = _promotion(root, path)
+        if promotion.is_file():
+            pending = _read(promotion)
+            manifest = pending['manifest']
+            expected = shared_root(root) / 'versions' / _valid_id(manifest['version_id']) / 'artifacts'
+            if (pending.get('schema') != 'SHARED_BASE_PUBLICATION_V1' or
+                    digest(manifest) != pending.get('manifest_digest') or
+                    manifest.get('location') != expected.relative_to(root).as_posix()):
+                raise KnowledgeUnavailable('Recibo de publicacion invalido')
+            if not path.exists() and expected.is_dir():
+                verify(root, manifest, deep=False)
+                return expected
+        return path
+    ref = state.get('knowledge_ref')
     if not ref:
         return run  # Legacy runs own (or hold a copy of) their knowledge.
     root = repo_of(run)
@@ -329,6 +422,7 @@ def status(root):
     for path in sorted(folder.glob('*/manifest.json')) if folder.is_dir() else []:
         manifest = _read(path)
         versions.append(dict(version_id=manifest['version_id'], location=manifest['location'],
+            physical_location=location(root, manifest).relative_to(Path(root).resolve()).as_posix(),
             builder_run_id=manifest.get('builder_run_id'), registered_at=manifest.get('registered_at'),
             active=bool(active) and active['version_id'] == manifest['version_id']))
     return dict(shared_root=SHARED, active=active, versions=versions)

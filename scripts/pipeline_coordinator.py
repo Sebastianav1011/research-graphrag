@@ -1,6 +1,6 @@
 """CLI orchestration; existing layer implementations operate inside a private root."""
 from run_paths import file_path as run_file
-from knowledge_store import knowledge_workspace, evaluation_dir
+from knowledge_store import knowledge_workspace, knowledge_root, evaluation_dir
 import argparse
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -88,13 +88,14 @@ def graph_configuration(root, run):
     """Bind GraphRAG to a prepared knowledge checkpoint without building embeddings."""
     if read(run_file(run, 'run.json')).get('knowledge_ref'):
         return  # Shared versions are sealed with their own GraphRAG configuration.
-    workspace = run / 'workspace'
+    builder = knowledge_root(run)
+    workspace = builder / 'workspace'
     if not (workspace / 'config/layer3.yaml').exists():
         layer3 = yaml.safe_load(layer_config(root, 4).read_text(encoding='utf-8'))
         layer3['readiness']['approved_layer2_manifest_sha256'] = sha(workspace / 'outputs/layer2/knowledge/_manifest.json')
         layer3['execution']['allow_real_build'] = False
         (workspace / 'config/layer3.yaml').write_text(yaml.safe_dump(layer3), encoding='utf-8')
-        seal(run)
+        seal(builder)
 
 
 @timed('preparacion')
@@ -149,17 +150,30 @@ def validated_graph(root, run):
 
 
 def register_built_knowledge(root, run, request):
-    """After a complete, verified BASE build: register it in place and activate it.
+    """Publish a complete BASE builder, then pin its evaluation and activate it.
 
     The previous active version stays active until this point; a failure during
-    the build never reaches here. Nothing is copied or moved.
+    the build never reaches here. New shared staging is renamed to its final
+    version; existing historical builders keep their original storage.
     """
     import knowledge_store
     state = read(run_file(run, 'run.json'))
-    if (state.get('configuration', {}).get('knowledge_scope') != 'BASE_GLOBAL_V1' or state.get('knowledge_ref')
+    if state.get('knowledge_ref') and state.get('knowledge_activation_pending'):
+        manifest = knowledge_store.load_version(root, state['knowledge_ref']['version_id'])[0]
+    elif (state.get('configuration', {}).get('knowledge_scope') != 'BASE_GLOBAL_V1' or state.get('knowledge_ref')
             or state.get('global_reuse')):
         return None
-    manifest = knowledge_store.register(root, run, activate=True)
+    else:
+        builder = root / state['knowledge_build'] if state.get('knowledge_build') else knowledge_root(run)
+        manifest = knowledge_store.register(root, builder)
+        if state.get('knowledge_build'):
+            _, checksum = knowledge_store.load_version(root, manifest['version_id'])
+            state.pop('knowledge_build')
+            state.update(knowledge_ref=knowledge_store.reference(manifest, checksum), knowledge_activation_pending=True)
+            write(run_file(run, 'run.json'), state)
+    knowledge_store.activate_version(root, manifest['version_id'])
+    if state.pop('knowledge_activation_pending', None):
+        write(run_file(run, 'run.json'), state)
     request['knowledge_version'] = dict(version_id=manifest['version_id'], fingerprint=manifest['fingerprint'],
         location=manifest['location'], storage=manifest['storage'])
     write(run_file(run, 'execution.json'), request)
@@ -1125,7 +1139,10 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
                 reused=current_state.get('global_reuse',{})
                 if current in ('knowledge','graphrag') and (current_state.get('knowledge_ref') or
                         reused and (current=='knowledge' or reused.get('graph_reused'))):
-                    if current=='graphrag':validated_graph(root,run)
+                    if current=='graphrag':
+                        validated_graph(root,run)
+                        if current_state.get('knowledge_activation_pending'):
+                            register_built_knowledge(root, run, request)
                     progress('STAGE_REUSED')
                     continue
                 if resume and not registered and ((current=='preprocessing' and state['status'] in ('PREPROCESSED','PREPARED')) or

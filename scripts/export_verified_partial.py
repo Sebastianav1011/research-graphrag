@@ -20,6 +20,7 @@ sys.path[:0] = [str(ROOT/'src'), str(ROOT)]
 from layer4_evaluation import live_execution as live
 from scripts import pipeline_coordinator as coordinator
 from run_paths import file_path
+from knowledge_store import evaluation_dir
 
 HEADERS = ['ID del proyecto','ID interno del proyecto','Indicador','Nombre del indicador',
     'Estado de cumplimiento','Párrafo de evidencia o justificación','Fuente o columna de origen',
@@ -37,7 +38,7 @@ def digest(path):
 def collect(root, run):
     coordinator.check(root, run)
     return [dict(directory=str(d),state=live.verify_run(d))
-        for d in sorted((run/'workspace/outputs/layer4').glob('batch_*'))]
+        for d in sorted(evaluation_dir(run).glob('batch_*'))]
 
 
 def write_exports(root, run, verified):

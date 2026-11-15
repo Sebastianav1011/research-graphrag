@@ -1,5 +1,6 @@
 """Preparation, one explicit manifest authorization, persistent queues and export."""
 from run_paths import file_path as run_file
+from knowledge_store import knowledge_workspace, evaluation_dir
 from concurrent.futures import ThreadPoolExecutor
 import getpass
 import json
@@ -84,7 +85,7 @@ def verify_graph(run):
     from layer3_graphrag.configuration import load_config
     from layer3_graphrag.embeddings import create_provider, embedding_config_hash
     from layer3_graphrag.manifest import validate_publication
-    workspace=Path(run)/'workspace'
+    workspace=knowledge_workspace(run)
     config,_=load_config(workspace)
     provider=create_provider(config['embeddings'])  # Lazy adapter; no encode/_load call.
     manifest=validate_publication(workspace/'outputs/layer3/publication',
@@ -98,7 +99,7 @@ def verify_graph(run):
 
 def graph_policy(run):
     from layer3_graphrag.configuration import load_config
-    config,_=load_config(Path(run)/'workspace')
+    config,_=load_config(knowledge_workspace(run))
     if config['embeddings'].get('allow_model_download',False):
         raise ValueError('Manifiesto local no permite descargas de modelos')
     return config['embeddings']
@@ -123,7 +124,7 @@ def build_graph(root,run):
 def historical(root, run):
     """Validate and import only historical PASS calls; keep every source byte intact."""
     accepted=HistoryRows(run);files={};binding=None;catalog=None
-    base=run/'workspace/outputs/layer4'
+    base=evaluation_dir(run)
     for directory in sorted(base.glob('batch_*')):
         plan=live.check(directory)
         if plan.get('request_protocol')!=live.CONTEXT_VERSION:
@@ -165,6 +166,13 @@ def prepare(root, run, policy, *, runtime=None, evaluator=None, indicator_ids=No
     if type(batch_size) is not int or batch_size not in (1,2,3):raise ValueError('Lote: 1, 2 o 3 indicadores')
     if batch_size>1 and policy['workers']!=1:raise ValueError('Lotes requieren un worker para reservar trabajos sin carreras')
     directory=folder(run)
+    from knowledge_store import run_state
+    if run_state(run).get('knowledge_build') or run_state(run).get('knowledge_activation_pending'):
+        if (directory/'manifest.json').exists():
+            raise ValueError('BASE pendiente en un manifiesto autonomo sellado; conservarlo y preparar otro run')
+        if not (knowledge_workspace(run)/'outputs/layer3/publication/_manifest.json').is_file():
+            raise ValueError('Finalizar BASE con run --through graphrag antes de preparar el manifiesto autonomo')
+        coordinator.register_built_knowledge(root, run, s.read(run_file(run, 'execution.json')))
     if discovery is not None:
         if indicator_ids is not None or project_indicators is not None:raise ValueError('No mezclar descubrimiento automatico y seleccion manual')
         project_indicators=discovery['project_indicators']
@@ -228,7 +236,7 @@ def prepare(root, run, policy, *, runtime=None, evaluator=None, indicator_ids=No
     if runtime['model']!=llm['model'] or runtime['provider']!=llm['provider']:
         raise ValueError('Modelo/proveedor ajeno al alcance')
     directory.mkdir(parents=True)
-    workspace=run/'workspace/outputs'
+    workspace=knowledge_workspace(run)/'outputs'
     sources={kind:workspace/'layer2/knowledge'/name for kind,name in
         [('sections','source_sections.parquet'),('chunks','source_chunks.parquet')]}
     index=index_sources(directory,sources,policy['parquet_batch_rows'])
@@ -288,16 +296,16 @@ def prepare(root, run, policy, *, runtime=None, evaluator=None, indicator_ids=No
     files.update(projection_files)
     if discovery is not None:
         if s.read(run_file(run, 'discovery.json'))!=discovery:raise ValueError('Descubrimiento distinto de su registro')
-        publication=run/'workspace/outputs/layer3/publication/_manifest.json'
+        publication=knowledge_workspace(run)/'outputs/layer3/publication/_manifest.json'
         if s.sha(publication)!=discovery['graph_manifest_sha256']:raise ValueError('GraphRAG distinto del descubrimiento')
-        if s.sha(run/'workspace/outputs/layer2/knowledge/_manifest.json')!=discovery['knowledge_manifest_sha256']:
+        if s.sha(knowledge_workspace(run)/'outputs/layer2/knowledge/_manifest.json')!=discovery['knowledge_manifest_sha256']:
             raise ValueError('Fuente distinta del descubrimiento')
         if canonical_hash(dict(profiles=catalog['profiles'],rubrics=catalog['rubrics']))!=discovery['catalog_sha256']:
             raise ValueError('Catalogo distinto del descubrimiento')
         if s.sha(run_file(run, 'discovery_candidates.parquet'))!=discovery['candidates_sha256']:raise ValueError('Candidatos modificados')
         for path in (run_file(run, 'discovery.json'),run_file(run, 'discovery_candidates.parquet')):
             files[path.relative_to(root).as_posix()]=s.sha(path)
-    publication=run/'workspace/outputs/layer3/publication/_manifest.json'
+    publication=knowledge_workspace(run)/'outputs/layer3/publication/_manifest.json'
     if publication.exists():
         verify_graph(run)
         files[publication.relative_to(root).as_posix()]=s.sha(publication)
@@ -487,7 +495,7 @@ def progress(root,run):
 
 def deep_verify(root,run):
     manifest=verify(root,run,require_authorization=False)
-    if (Path(run)/'workspace/outputs/layer3/publication/_manifest.json').exists():
+    if (knowledge_workspace(run)/'outputs/layer3/publication/_manifest.json').exists():
         verify_graph(run)
     worker=Worker(folder(run),manifest)
     try:
@@ -502,7 +510,7 @@ def deep_verify(root,run):
 
 def graph_index(root,run,directory,manifest):
     from scripts import pipeline_coordinator as coordinator
-    publication=Path(run)/'workspace/outputs/layer3/publication'
+    publication=knowledge_workspace(run)/'outputs/layer3/publication'
     db=s.connect(directory);db.execute("INSERT OR REPLACE INTO meta VALUES('stage','graphrag')");db.close()
     if not (publication/'_manifest.json').exists():
         build_graph(root,run)  # Child exits before Qwen; no retained BGE GPU allocator.

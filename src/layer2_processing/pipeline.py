@@ -1,5 +1,6 @@
 """Internal SAD layer 2 pipeline; isolated staging, canonical and knowledge checkpoints."""
 from run_paths import file_path as run_file
+from pathlib import Path
 import json
 from datetime import datetime,timezone
 import yaml
@@ -49,7 +50,57 @@ def check(root, run, *, knowledge_only=False):
         # its sealed checkpoint (RAW, knowledge code and every sealed file).
         from knowledge_store import resolve_reference
         resolve_reference(root,state['knowledge_ref'])
+    if state.get('knowledge_build'):
+        from knowledge_store import knowledge_root
+        built = check(root, knowledge_root(run), knowledge_only=knowledge_only)
+        if built['status'] != state['status']:
+            # A completed stage may precede its small evaluation receipt after interruption.
+            state = dict(state, status=built['status'], counts=built.get('counts'),
+                         knowledge_counts=built.get('knowledge_counts'))
     return state
+
+
+def _shared_selection(root, run, builder):
+    """Run the unchanged selection validator on a disposable canonical snapshot."""
+    if not read(run_file(run, 'run.json'))['configuration'].get('project_selection'):
+        return
+    import shutil
+    import tempfile
+    import knowledge_store as store
+    from .preprocessing.project_selection import validate_selection
+    parent = store.shared_root(root) / 'validation'
+    parent.mkdir(parents=True, exist_ok=True)
+    canonical = builder / 'workspace/outputs/layer2/canonical'
+    required = sum(p.stat().st_size for p in canonical.rglob('*') if p.is_file())
+    if shutil.disk_usage(parent).free < required + (64 << 20):
+        raise OSError('Espacio insuficiente para validar seleccion')
+    with tempfile.TemporaryDirectory(prefix='selection-', dir=parent) as name:
+        temporary = Path(name)
+        shutil.copytree(canonical, temporary / 'workspace/outputs/layer2/canonical')
+        write(run_file(temporary, 'run.json'), read(run_file(run, 'run.json')))
+        report = validate_selection(root, temporary)
+        write(run / 'preprocess/selection_manifest.json', report)
+
+
+def _sync_shared_build(root, run, builder):
+    import shutil
+    state = read(run_file(run, 'run.json'))
+    built = read(run_file(builder, 'run.json'))
+    for name in ('status', 'counts', 'knowledge_counts', 'global_catalog_sha256', 'scope_quarantine'):
+        if name in built:
+            state[name] = built[name]
+    run_file(run, 'raw_manifest.json').parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(run_file(builder, 'raw_manifest.json'), run_file(run, 'raw_manifest.json'))
+    write(run_file(run, 'run.json'), state)
+    for name in ('review.json', 'scope_validation.json'):
+        source = builder / 'preprocess' / name
+        if source.is_file():
+            target = run / 'preprocess' / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, target)
+    if built['status'] in ('PREPROCESSED', 'PREPARED'):
+        _shared_selection(root, run, builder)
+    seal(run)
 
 
 def restore_lineage(workspace, lineage):
@@ -145,7 +196,13 @@ def reuse_global_base(root,run,raw,config,dataset,*,probe=False,require_graph=Fa
     import knowledge_store as store
     source=config.get('base_knowledge_source')
     if source and not source.startswith(store.REFERENCE_PREFIX):
-        return _legacy_copy_reuse(root,run,raw,config,dataset,probe=probe,require_graph=require_graph)
+        from .checkpoints import resolve
+        matches = [item for item in store.status(root)['versions']
+                   if store.location(root, store.load_version(root, item['version_id'])[0]) == resolve(root, source).resolve()]
+        if len(matches) != 1:
+            reuse_global_base.last_reason = 'Fuente historica sin una version registrada unica'
+            return False
+        source = store.REFERENCE_PREFIX + matches[0]['version_id']
     from jsonschema.exceptions import ValidationError
     reuse_global_base.last_reason=None
     try:
@@ -155,12 +212,6 @@ def reuse_global_base(root,run,raw,config,dataset,*,probe=False,require_graph=Fa
         reuse_global_base.last_reason=str(exc)  # Reported to the user; never a silent rebuild.
         return False
     if probe:return store.REFERENCE_PREFIX+manifest['version_id']
-    if config.get('project_selection'):
-        # Sampling/contract selections are validated by project_selection against a
-        # run-local canonical copy; that module is sealed knowledge code and is not
-        # changed here. Keep the historical copy, taken from the verified version.
-        return _legacy_copy_reuse(root,run,raw,dict(config,base_knowledge_source=manifest['location']),dataset,
-            require_graph=require_graph)
     if (run/'workspace').exists() or run_file(run,'prepared_hashes.json').exists():
         raise ValueError('No sobrescribir un checkpoint existente para referenciar BASE')
     import shutil
@@ -176,6 +227,7 @@ def reuse_global_base(root,run,raw,config,dataset,*,probe=False,require_graph=Fa
         knowledge_ref=store.reference(manifest,manifest_sha))
     if 'scope_quarantine' in builder_state:state['scope_quarantine']=builder_state['scope_quarantine']
     write(run_file(run,'run.json'),state)
+    _shared_selection(root, run, builder)
     seal(run)
     return True
 
@@ -243,6 +295,44 @@ def _legacy_copy_reuse(root,run,raw,config,dataset,*,probe=False,require_graph=F
 
 
 def prepare(root, run, raw, dataset, config, through='knowledge'):
+    import knowledge_store as store
+    # BASE builders live in shared staging from their first byte. Evaluation
+    # runs own only configuration, selection/review and stable version receipts.
+    shared = store.shared_root(root).resolve()
+    if config.get('knowledge_scope') == 'BASE_GLOBAL_V1' and not Path(run).resolve().is_relative_to(shared):
+        existing = read(run_file(run, 'run.json')) if run_file(run, 'run.json').is_file() else {}
+        if existing.get('knowledge_ref'):
+            return dict(status='ALREADY_PREPARED', run=str(run))
+        if existing and existing.get('status') != 'REGISTERED' and not existing.get('knowledge_build'):
+            return _prepare_checkpoint(root, run, raw, dataset, config, through)
+        if not existing.get('knowledge_build') and config.get('base_knowledge_action', 'auto') != 'rebuild':
+            run.mkdir(parents=True, exist_ok=True)
+            if reuse_global_base(root, run, raw, config, dataset, require_graph=True):
+                return dict(status='REUSED_GLOBAL_BASE', run=str(run), inference_calls=0, embeddings_created=0)
+            if config.get('base_knowledge_action') == 'reuse':
+                raise ValueError('No existe conocimiento global BASE compatible: ' + str(reuse_global_base.last_reason))
+        if not existing.get('knowledge_build'):
+            import uuid
+            if existing and existing.get('status') != 'REGISTERED':
+                # Existing historical checkpoints retain their original lifecycle.
+                return _prepare_checkpoint(root, run, raw, dataset, config, through)
+            builder = shared / 'staging' / ('build-' + uuid.uuid4().hex)
+            state = dict(run_id=run.name, dataset=dataset, raw_path=raw.relative_to(root).as_posix(),
+                status='REGISTERED', started_at=datetime.now(timezone.utc).isoformat(), configuration=config,
+                code_hashes=code_hashes(root), storage_layout=store.RUN_LAYOUT,
+                knowledge_build=builder.relative_to(root).as_posix())
+            write(run_file(run, 'run.json'), state)
+        builder = store.knowledge_root(run)
+        build_config = dict(config, base_knowledge_action='rebuild')
+        build_config.pop('project_selection', None)
+        build_config.pop('base_knowledge_source', None)
+        result = _prepare_checkpoint(root, builder, raw, dataset, build_config, through)
+        _sync_shared_build(root, run, builder)
+        return dict(result, run=str(run))
+    return _prepare_checkpoint(root, run, raw, dataset, config, through)
+
+
+def _prepare_checkpoint(root, run, raw, dataset, config, through='knowledge'):
     registered = (run_file(run, 'run.json')).exists() and read(run_file(run, 'run.json')).get('status') == 'REGISTERED'
     if (run_file(run, 'run.json')).exists() and not registered:
         state = check(root, run)
@@ -334,6 +424,12 @@ def prepare(root, run, raw, dataset, config, through='knowledge'):
 
 
 def knowledge(root, run):
+    import knowledge_store as store
+    if store.run_state(run).get('knowledge_build'):
+        builder = store.knowledge_root(run)
+        result = knowledge(root, builder)
+        _sync_shared_build(root, run, builder)
+        return dict(result, run=str(run))
     state = check(root, run)
     if state['status'] == 'PREPARED':
         return dict(status='ALREADY_PREPARED', run=str(run))

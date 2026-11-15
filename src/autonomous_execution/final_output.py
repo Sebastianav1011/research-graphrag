@@ -136,7 +136,12 @@ def _rows(path):
 
 def researchers(root,run,project):
     """Only exact institutional joins; never substitute canonical hash IDs."""
-    for base in (run/'workspace/outputs/layer2/canonical',root/'outputs/layer2/canonical'):
+    from knowledge_store import knowledge_workspace, run_state
+    state=run_state(run)
+    bases=[knowledge_workspace(run)/'outputs/layer2/canonical']
+    if not (state.get('knowledge_ref') or state.get('knowledge_build')):
+        bases.append(root/'outputs/layer2/canonical')
+    for base in bases:
         projects=_rows(base/'proyectos.parquet')
         ids={p['project_id'] for p in projects if p.get('source_project_id')==project['siap_id']}
         people={r['researcher_id']:r.get('institutional_id') for r in _rows(base/'investigadores.parquet')}

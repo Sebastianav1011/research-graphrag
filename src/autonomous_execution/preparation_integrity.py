@@ -287,13 +287,15 @@ def reuse_run(root,source_id,new_id,policy,*,batch_size=1):
         raise ValueError('SOURCE_MODEL_CONFIGURATION_INCOMPATIBLE')
     prepared=s.read(run_file(source, 'prepared_hashes.json'))
     for name,expected in prepared.items():receipt(root,(source/name).relative_to(root).as_posix(),expected,origin=source_id)
-    config,_=load_config(source/'workspace')
+    from knowledge_store import knowledge_workspace
+    workspace=knowledge_workspace(source)
+    config,_=load_config(workspace)
     if config['embeddings']!=manifest['embeddings']:raise ValueError('SOURCE_EMBEDDINGS_INCOMPATIBLE')
-    snapshot=validate_inputs(source/'workspace',config)
-    graph_manifest,_,graph=load_artifacts(source/'workspace',snapshot,config,create_provider(config['embeddings']))
+    snapshot=validate_inputs(workspace,config)
+    graph_manifest,_,graph=load_artifacts(workspace,snapshot,config,create_provider(config['embeddings']))
     if not (run_file(source, 'discovery.json')).is_file():raise ValueError('SOURCE_DISCOVERY_MISSING')
     audit=discovery.validate_saved(source)
-    if (audit['graph_manifest_sha256']!=s.sha(source/'workspace/outputs/layer3/publication/_manifest.json') or
+    if (audit['graph_manifest_sha256']!=s.sha(workspace/'outputs/layer3/publication/_manifest.json') or
             audit['knowledge_manifest_sha256']!=snapshot.manifest_hash or
             audit['catalog_sha256']!=canonical_hash(dict(profiles=current_catalog['profiles'],rubrics=current_catalog['rubrics'])) or
             audit['project_indicators']!=manifest['project_indicators'] or
@@ -342,8 +344,9 @@ def reuse_run(root,source_id,new_id,policy,*,batch_size=1):
     for name in ('raw_manifest.json','execution.json','prepared_hashes.json','discovery.json','discovery_candidates.parquet'):
         paths[name]=s.sha(run_file(source,name))
     publication='workspace/outputs/layer3/publication'
-    paths[publication+'/_manifest.json']=s.sha(source/publication/'_manifest.json')
-    paths.update({publication+'/'+name:sha for name,sha in graph_manifest['output_hashes'].items()})
+    if not state.get('knowledge_ref'):
+        paths[publication+'/_manifest.json']=s.sha(source/publication/'_manifest.json')
+        paths.update({publication+'/'+name:sha for name,sha in graph_manifest['output_hashes'].items()})
     # Copy only validated immutable artifacts. No queues, authorizations or GPU caches.
     run.mkdir(parents=True)  # Reserve the new ID atomically; never overwrite an existing run.
     for name,expected_hash in paths.items():

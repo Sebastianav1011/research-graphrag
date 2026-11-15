@@ -75,6 +75,12 @@ def relocate(path):
 
 def structured(run):
     run=Path(run)
+    # Shared checkpoints retain the metadata layout of their sealed builder.
+    if (run.parent.name == 'staging' and run.parent.parent.parts[-3:] == ('outputs', 'shared', 'base')):
+        return True
+    if (run.name == 'artifacts' and run.parent.parent.name == 'versions' and
+            run.parent.parent.parent.parts[-3:] == ('outputs', 'shared', 'base')):
+        return True
     return run.parent.name in BUCKETS and run.parent.parent.name=='runs' and run.parent.parent.parent.name=='outputs'
 
 

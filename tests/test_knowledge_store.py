@@ -65,7 +65,10 @@ def repo(tmp_path, monkeypatch):
     monkeypatch.setattr('layer3_graphrag.configuration.load_config', lambda ws: ({'embeddings': {}}, None))
     monkeypatch.setattr('layer3_graphrag.validate_inputs.validate_inputs', lambda ws, cfg: None)
     monkeypatch.setattr('layer3_graphrag.embeddings.create_provider', lambda settings: None)
-    monkeypatch.setattr('layer3_graphrag.pipeline.load_artifacts', lambda ws, *a: deep.append(Path(ws)))
+    def load_artifacts(ws, *a):
+        deep.append(Path(ws))
+        return read(Path(ws) / 'outputs/layer3/publication/_manifest.json'), {}, None
+    monkeypatch.setattr('layer3_graphrag.pipeline.load_artifacts', load_artifacts)
     return root, deep
 
 
@@ -74,9 +77,9 @@ def config(root, **changes):
                      text_columns=['resumen']), **changes)
 
 
-def builder(root, name, *, label='v1'):
+def builder(root, name, *, label='v1', shared=False):
     """A sealed PREPARED checkpoint with a published (synthetic) GraphRAG."""
-    run = root / 'outputs/runs/local' / name
+    run = root / ('outputs/shared/base/staging' if shared else 'outputs/runs/local') / name
     ws = run / 'workspace/outputs'
     write(ws / 'layer2/canonical/_manifest.json', {'canonical': label})
     write(ws / 'layer2/knowledge/_manifest.json', {'knowledge': label})
@@ -251,20 +254,34 @@ def test_reuse_references_without_copying_and_checks_through_the_version(repo):
         processing.reuse_global_base(root, run, root / 'data/raw', cfg, 'raw')
 
 
-def test_sampling_selection_keeps_documented_copy_from_the_registered_version(repo, monkeypatch):
+@pytest.mark.parametrize('shared', [False, True])
+def test_sampling_selection_validates_without_persistent_knowledge_copy(repo, shared):
     root, _ = repo
-    source = builder(root, 'run_builder')
-    store.register(root, source, activate=True)
+    source = builder(root, 'run_builder', shared=shared)
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    from layer2_processing.preprocessing.contracts import KEYS
+    from layer2_processing.preprocessing.project_selection import digest
+    folder = source / 'workspace/outputs/layer2/canonical'
+    for name, keys in KEYS.items():
+        row = {key: '1' for key in keys}
+        if name == 'proyectos':
+            row['source_project_id'] = '1'
+        pq.write_table(pa.Table.from_pylist([row]), folder / (name + '.parquet'))
+    processing.seal(source)
+    manifest = store.register(root, source, activate=True)
+    source = store.location(root, manifest)
     before = tree_hash(source)
-    validated = []
-    monkeypatch.setattr('layer2_processing.preprocessing.project_selection.validate_selection',
-                        lambda root_, run: validated.append(run.name))
-    cfg = config(root, base_knowledge_action='reuse', project_selection={'project_ids': ['1']})
+    cfg = config(root, base_knowledge_action='reuse', project_selection={
+        'project_ids': ['1'], 'selection_sha256': digest(['1']), 'sources': {'data/raw/a.csv': sha(root / 'data/raw/a.csv')}})
     run = new_run(root, 'run_sample', cfg)
     assert processing.reuse_global_base(root, run, root / 'data/raw', cfg, 'raw', require_graph=True) is True
     state = read(run_file(run, 'run.json'))
-    assert state['global_reuse']['source_run'] == 'run_builder' and 'knowledge_ref' not in state
-    assert (run / 'workspace/outputs/layer3/publication/_manifest.json').is_file() and validated == ['run_sample']
+    assert 'knowledge_ref' in state and 'global_reuse' not in state
+    assert not (run / 'workspace').exists()
+    report = read(run / 'preprocess/selection_manifest.json')
+    assert report['status'] == 'VALIDATED_SELECTION' and report['evaluation_project_ids'] == ['1']
+    assert not list((store.shared_root(root) / 'validation').iterdir())
     assert tree_hash(source) == before
 
 
@@ -305,3 +322,252 @@ def test_retention_pins_checkpoints_backing_registered_versions(repo):
     from run_retention import plan
     rows = {r['key']: r for r in plan(root, dict(version=1, keep_recent=1))}
     assert rows['local/run_builder']['reason'].startswith('Pinned')
+
+
+def test_shared_publication_renames_and_keeps_legacy_pin(repo):
+    root, _ = repo
+    old = builder(root, 'old')
+    previous = store.register(root, old, activate=True)
+    old_bytes = tree_hash(old)
+    old_manifest = store.manifest_path(root, previous['version_id']).read_bytes()
+    pointer = (store.shared_root(root) / 'active.json').read_bytes()
+    stage = builder(root, 'build-new', label='new', shared=True)
+    stage_bytes = tree_hash(stage)
+    expected = store.describe(root, stage)
+    new = store.register(root, stage)
+    final = store.location(root, new)
+    assert final == store.shared_root(root) / 'versions' / new['version_id'] / 'artifacts'
+    assert new['storage'] == 'SHARED_SEALED_CHECKPOINT' and new['artifact_inventory_sha256']
+    assert new['version_id'] == expected['version_id'] != previous['version_id']
+    assert tree_hash(final) == stage_bytes and not stage.exists()
+    assert new['location'] == final.relative_to(root).as_posix()
+    assert (store.shared_root(root) / 'active.json').read_bytes() == pointer
+    store.activate_version(root, new['version_id'])
+    assert store.read_active(root)['previous']['version_id'] == previous['version_id']
+    assert tree_hash(old) == old_bytes and store.manifest_path(root, previous['version_id']).read_bytes() == old_manifest
+    cfg = config(root, base_knowledge_action='reuse')
+    run = new_run(root, 'new-evaluation', cfg)
+    assert processing.reuse_global_base(root, run, root / 'data/raw', cfg, 'raw')
+    assert store.knowledge_root(run) == final
+    assert not (run / 'workspace').exists()
+    assert REAL_CHECK(root, run)['knowledge_ref']['version_id'] == new['version_id']
+
+
+@pytest.mark.parametrize('cut', ['rename', 'manifest'])
+def test_shared_publication_recovers_interruption_without_touching_previous(repo, monkeypatch, cut):
+    root, _ = repo
+    old = store.register(root, builder(root, 'old'), activate=True)
+    previous = (store.shared_root(root) / 'active.json').read_bytes()
+    stage = builder(root, 'build-new', label='new', shared=True)
+    described = store.describe(root, stage)
+    path = store.manifest_path(root, described['version_id'])
+    replace = os.replace
+    failed = []
+    def interrupt(src, dst):
+        dst = Path(dst)
+        if not failed and ((cut == 'rename' and dst.name == 'artifacts') or (cut == 'manifest' and dst == path)):
+            failed.append(True)
+            raise OSError('simulated interruption')
+        return replace(src, dst)
+    monkeypatch.setattr(store.os, 'replace', interrupt)
+    with pytest.raises(OSError, match='simulated'):
+        store.register(root, stage, activate=True)
+    assert (store.shared_root(root) / 'active.json').read_bytes() == previous
+    assert not path.exists()
+    # Retry the original durable builder locator, including when rename succeeded.
+    new = store.register(root, stage, activate=True)
+    assert not stage.exists() and store.location(root, new).is_dir()
+    assert store.read_active(root)['previous']['version_id'] == old['version_id']
+    assert new['location'].endswith('/artifacts')
+
+
+def test_new_version_inventory_changes_for_actual_artifact_changes(repo):
+    root, _ = repo
+    stage = builder(root, 'build-new', shared=True)
+    first = store.describe(root, stage)
+    write(stage / 'workspace/outputs/layer3/query_cache/q.json', {'key': 'changed'})
+    second = store.describe(root, stage)
+    assert first['fingerprint'] == second['fingerprint']
+    assert first['version_id'] != second['version_id']
+    assert first['artifact_inventory_sha256'] != second['artifact_inventory_sha256']
+
+
+def test_existing_version_is_never_relocated_or_overwritten(repo):
+    root, _ = repo
+    stage = builder(root, 'build-new', shared=True)
+    new = store.register(root, stage)
+    before = tree_hash(store.shared_root(root))
+    assert store.register(root, stage) == new  # Durable journal makes retry idempotent.
+    assert tree_hash(store.shared_root(root)) == before
+    # A different builder with identical output bytes cannot replace final artifacts.
+    import shutil
+    other = store.shared_root(root) / 'staging' / 'another'
+    shutil.copytree(store.location(root, new), other)
+    with pytest.raises(ValueError, match='ya existe'):
+        store.register(root, other)
+    assert tree_hash(store.location(root, new)) == tree_hash(other)
+
+
+def test_prepare_new_base_is_shared_from_first_checkpoint_and_resume_is_pinned(repo, monkeypatch):
+    root, _ = repo
+    from scripts import pipeline_coordinator as coordinator
+    monkeypatch.setattr(coordinator, 'check', REAL_CHECK)
+    calls = []
+    def prepare_checkpoint(root_, run_, raw, dataset, cfg, through):
+        calls.append(run_)
+        assert run_.parent == store.shared_root(root) / 'staging'
+        assert 'project_selection' not in cfg
+        if not run_.exists():
+            builder(root, run_.name, label='new', shared=True)
+        return dict(status='PREPARED', run=str(run_))
+    monkeypatch.setattr(processing, '_prepare_checkpoint', prepare_checkpoint)
+    cfg = config(root, base_knowledge_action='rebuild')
+    run = new_run(root, 'new-evaluation', cfg)
+    result = processing.prepare(root, run, root / 'data/raw', 'raw', cfg)
+    assert result['status'] == 'PREPARED' and not (run / 'workspace').exists()
+    stage = store.knowledge_root(run)
+    assert stage.parent == store.shared_root(root) / 'staging'
+    assert REAL_CHECK(root, run)['status'] == 'PREPARED'
+    processing.prepare(root, run, root / 'data/raw', 'raw', cfg)
+    assert calls == [stage, stage]  # Resume uses the same durable checkpoint.
+    request = {}
+    manifest = coordinator.register_built_knowledge(root, run, request)
+    state = read(run_file(run, 'run.json'))
+    assert not stage.exists() and 'knowledge_build' not in state
+    assert state['knowledge_ref']['version_id'] == manifest['version_id']
+    assert request['knowledge_version']['location'] == manifest['location']
+    assert store.knowledge_workspace(run) == store.location(root, manifest) / 'workspace'
+    assert store.evaluation_dir(run) == run / 'evaluation'
+    assert REAL_CHECK(root, run)['status'] == 'PREPARED'
+    assert processing.prepare(root, run, root / 'data/raw', 'raw', cfg)['status'] == 'ALREADY_PREPARED'
+
+
+def test_activation_recovery_preserves_previous_and_execution_receipt(repo, monkeypatch):
+    root, _ = repo
+    from scripts import pipeline_coordinator as coordinator
+    old = store.register(root, builder(root, 'old'), activate=True)
+    stage = builder(root, 'build-new', label='new', shared=True)
+    cfg = config(root, base_knowledge_action='rebuild')
+    run = new_run(root, 'new-evaluation', cfg)
+    state = read(run_file(run, 'run.json'))
+    state.update(status='PREPARED', knowledge_build=stage.relative_to(root).as_posix(), storage_layout=store.RUN_LAYOUT)
+    write(run_file(run, 'run.json'), state)
+    processing._sync_shared_build(root, run, stage)
+    original = coordinator.write
+    failed = []
+    def interrupt(path, value):
+        if Path(path) == run_file(run, 'run.json') and 'knowledge_ref' in value and 'knowledge_activation_pending' not in value and not failed:
+            failed.append(True)
+            raise OSError('interrupted after activation')
+        return original(path, value)
+    monkeypatch.setattr(coordinator, 'write', interrupt)
+    with pytest.raises(OSError, match='interrupted'):
+        coordinator.register_built_knowledge(root, run, {})
+    pointer = (store.shared_root(root) / 'active.json').read_bytes()
+    assert store.read_active(root)['previous']['version_id'] == old['version_id']
+    request = {}
+    manifest = coordinator.register_built_knowledge(root, run, request)
+    assert (store.shared_root(root) / 'active.json').read_bytes() == pointer
+    assert not read(run_file(run, 'run.json')).get('knowledge_activation_pending')
+    assert read(run_file(run, 'execution.json'))['knowledge_version']['version_id'] == manifest['version_id']
+    assert request['knowledge_version']['location'] == manifest['location']
+
+
+def test_partial_export_reads_evaluation_directory(repo, monkeypatch):
+    root, _ = repo
+    from scripts import export_verified_partial as recovery
+    cfg = config(root, base_knowledge_action='reuse')
+    store.register(root, builder(root, 'old'), activate=True)
+    run = new_run(root, 'new-evaluation', cfg)
+    assert processing.reuse_global_base(root, run, root / 'data/raw', cfg, 'raw')
+    directory = run / 'evaluation/batch_one'
+    directory.mkdir(parents=True)
+    monkeypatch.setattr(recovery.coordinator, 'check', REAL_CHECK)
+    monkeypatch.setattr(recovery.live, 'verify_run', lambda folder: {'verified': str(folder)})
+    assert recovery.collect(root, run) == [dict(directory=str(directory), state={'verified': str(directory)})]
+
+
+def test_shared_graph_reader_and_autonomous_pending_guard(repo, monkeypatch):
+    root, deep = repo
+    from scripts import pipeline_coordinator as coordinator
+    from autonomous_execution import lifecycle
+    stage = builder(root, 'build-new', shared=True)
+    run = new_run(root, 'new-evaluation', config(root, base_knowledge_action='rebuild'))
+    state = read(run_file(run, 'run.json'))
+    state.update(knowledge_build=stage.relative_to(root).as_posix(), storage_layout=store.RUN_LAYOUT)
+    write(run_file(run, 'run.json'), state)
+    coordinator.validated_graph(root, run)
+    assert deep[-1] == stage / 'workspace'
+    (stage / 'workspace/outputs/layer3/publication/_manifest.json').unlink()
+    monkeypatch.setattr(lifecycle.p, 'validate', lambda value: value)
+    with pytest.raises(ValueError, match='through graphrag'):
+        lifecycle.prepare(root, run, {'workers': 1})
+    assert not lifecycle.folder(run).exists()
+
+
+def test_publication_receipt_corruption_fails_closed(repo, monkeypatch):
+    root, _ = repo
+    stage = builder(root, 'build-new', shared=True)
+    replace = os.replace
+    def stop_rename(src, dst):
+        if Path(dst).name == 'artifacts':
+            raise OSError('simulated cut')
+        return replace(src, dst)
+    monkeypatch.setattr(store.os, 'replace', stop_rename)
+    with pytest.raises(OSError):
+        store.register(root, stage)
+    journal = store._promotion(root, stage)
+    data = read(journal)
+    data['schema'] = 'unexpected'
+    write(journal, data)
+    with pytest.raises(store.KnowledgeUnavailable, match='Recibo'):
+        store.register(root, stage)
+    assert stage.exists() and not store.manifest_path(root, data['manifest']['version_id']).exists()
+
+
+def test_shared_researchers_never_fall_back_to_global_snapshot(repo):
+    root, _ = repo
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    from autonomous_execution.final_output import researchers
+    stage = builder(root, 'build-new', shared=True)
+    for base, institutional in [(stage / 'workspace/outputs/layer2/canonical', None),
+                                 (root / 'outputs/layer2/canonical', 'WRONG-GLOBAL')]:
+        base.mkdir(parents=True, exist_ok=True)
+        for name, rows in {
+            'proyectos': [dict(project_id='p', source_project_id='siap')],
+            'investigadores': [dict(researcher_id='r', institutional_id=institutional)],
+            'proyecto_investigador': [dict(project_id='p', researcher_id='r')]
+        }.items():
+            pq.write_table(pa.Table.from_pylist(rows), base / (name + '.parquet'))
+    run = new_run(root, 'new-evaluation', config(root))
+    state = read(run_file(run, 'run.json'))
+    state['knowledge_build'] = stage.relative_to(root).as_posix()
+    write(run_file(run, 'run.json'), state)
+    assert researchers(root, run, {'siap_id': 'siap'}) == [None]
+
+
+def test_autonomous_completes_pending_activation_before_sealing(repo, monkeypatch):
+    root, _ = repo
+    from autonomous_execution import lifecycle
+    from scripts import pipeline_coordinator as coordinator
+    stage = builder(root, 'build-new', shared=True)
+    manifest = store.register(root, stage)
+    _, checksum = store.load_version(root, manifest['version_id'])
+    run = new_run(root, 'new-evaluation', config(root))
+    state = read(run_file(run, 'run.json'))
+    state.update(knowledge_ref=store.reference(manifest, checksum), knowledge_activation_pending=True)
+    write(run_file(run, 'run.json'), state)
+    write(run_file(run, 'execution.json'), {})
+    monkeypatch.setattr(lifecycle.p, 'validate', lambda value: value)
+    original = coordinator.register_built_knowledge
+    calls = []
+    def publish(*args):
+        original(*args)
+        calls.append(True)
+        raise RuntimeError('stopped before autonomous seal')
+    monkeypatch.setattr(coordinator, 'register_built_knowledge', publish)
+    with pytest.raises(RuntimeError, match='before autonomous seal'):
+        lifecycle.prepare(root, run, {'workers': 1})
+    assert calls == [True] and not read(run_file(run, 'run.json')).get('knowledge_activation_pending')
+    assert not (lifecycle.folder(run) / 'manifest.json').exists()
