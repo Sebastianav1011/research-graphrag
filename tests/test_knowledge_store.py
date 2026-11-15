@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 import knowledge_store as store
+from knowledge_verification import verified_execution, receipts, snapshot
 from layer2_processing import pipeline as processing
 from layer2_processing.preprocessing.adapters import read, sha, write
 from run_paths import file_path as run_file
@@ -104,6 +105,239 @@ def new_run(root, name, cfg):
     run = root / 'outputs/runs/local' / name
     write(run_file(run, 'run.json'), dict(status='REGISTERED', dataset='raw', raw_path='data/raw', configuration=cfg))
     return run
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows read leases')
+def test_execution_verifies_deep_once_and_never_reuses_across_runs(repo, monkeypatch):
+    root, deep = repo
+    manifest = store.register(root, builder(root, 'sealed', shared=True))
+    _, checksum = store.load_version(root, manifest['version_id'])
+    ref = store.reference(manifest, checksum)
+    deep.clear()
+    inventories = []
+    original = store._inventory
+    def inventory(folder):
+        inventories.append(folder)
+        return original(folder)
+    monkeypatch.setattr(store, '_inventory', inventory)
+    before = tree_hash(store.shared_root(root))
+
+    @verified_execution
+    def run():
+        for _ in range(3):
+            assert store.resolve_reference(root, ref) == store.location(root, manifest)
+        store.verify(root, manifest, deep=True)
+        assert len(receipts.get()) == 1
+
+    run()
+    assert len(deep) == len(inventories) == 1  # Even deep=False starts with a deep check.
+    assert receipts.get() is None
+    run()
+    assert len(deep) == len(inventories) == 2
+    assert tree_hash(store.shared_root(root)) == before
+
+
+def test_snapshot_observes_all_entries_and_ignores_reads(tmp_path):
+    folder = tmp_path / 'metadata'
+    (folder / 'empty').mkdir(parents=True)
+    (folder / 'nested').mkdir()
+    for name in ['.hidden', 'unicode-á.txt', 'nested/entry']:
+        (folder / name).write_bytes(b'original')
+    before = snapshot([folder])
+    assert set(before) == {str(folder), *(str(p) for p in folder.rglob('*'))}
+    for path in folder.rglob('*'):
+        if path.is_file():
+            path.read_bytes()
+    assert snapshot([folder]) == before
+    (folder / 'empty').rmdir()
+    assert snapshot([folder]) != before
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows directory metadata API')
+def test_bulk_metadata_failure_never_allows_reuse(tmp_path, monkeypatch):
+    import ctypes
+    import knowledge_verification as verification
+    def denied(*args):
+        ctypes.set_last_error(5)
+        return False
+    monkeypatch.setattr(verification, '_info', denied)
+    with pytest.raises(OSError):
+        snapshot([tmp_path])
+
+
+@pytest.mark.parametrize('change', ['write_restore_mtime', 'add', 'delete', 'replace', 'code', 'manifest'])
+@pytest.mark.skipif(os.name != 'nt', reason='Windows read leases')
+def test_execution_receipt_invalidates_changes(repo, monkeypatch, change):
+    root, _ = repo
+    manifest = store.register(root, builder(root, 'sealed', shared=True))
+    _, checksum = store.load_version(root, manifest['version_id'])
+    ref = store.reference(manifest, checksum)
+    folder = store.location(root, manifest)
+    original = store._verify
+    checks = []
+    def verify(*args, **kwargs):
+        checks.append(kwargs['deep'])
+        return original(*args, **kwargs)
+    monkeypatch.setattr(store, '_verify', verify)
+
+    def tamper():
+        target = folder / 'workspace/outputs/layer2/knowledge/source_chunks.parquet'
+        if change == 'write_restore_mtime':
+            st = target.stat()
+            target.write_bytes(b'x' * st.st_size)
+            os.utime(target, ns=(st.st_atime_ns, st.st_mtime_ns))
+        elif change == 'add':
+            (folder / 'unexpected').write_bytes(b'new')
+        elif change == 'delete':
+            target.unlink()
+        elif change == 'replace':
+            other = target.with_suffix('.tmp')
+            other.write_bytes(b'changed')
+            os.replace(other, target)
+        elif change == 'code':
+            (root / KNOWLEDGE_CODE).write_text('VERSION = 2\n', encoding='utf-8')
+        else:
+            path = store.manifest_path(root, manifest['version_id'])
+            path.write_text(path.read_text(encoding='utf-8') + '\n', encoding='utf-8')
+
+    @verified_execution
+    def run():
+        store.resolve_reference(root, ref)
+        if change == 'add':
+            tamper()
+            with pytest.raises(ValueError):
+                store.resolve_reference(root, ref)
+            assert checks == [True, True] and not receipts.get()
+        else:
+            with pytest.raises(OSError):
+                tamper()  # Windows enforces immutability for the receipt lifetime.
+            if change == 'replace':
+                (folder / 'workspace/outputs/layer2/knowledge/source_chunks.tmp').unlink()
+            store.resolve_reference(root, ref)
+            assert checks == [True]
+
+    run()
+    if change != 'add':
+        tamper()  # Released at the end of the run; next execution must reject changes.
+        @verified_execution
+        def next_run():
+            with pytest.raises((ValueError, OSError)):
+                store.resolve_reference(root, ref)
+        next_run()
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows read leases')
+def test_execution_receipt_checks_each_version_and_detects_changes_during_validation(repo, monkeypatch):
+    root, deep = repo
+    first = store.register(root, builder(root, 'one', shared=True))
+    second = store.register(root, builder(root, 'two', label='v2', shared=True))
+    deep.clear()
+    original = store._verify
+
+    @verified_execution
+    def run():
+        store.verify(root, first)
+        store.verify(root, second)
+        assert len(deep) == 2
+        assert len(receipts.get()) == 2
+    run()
+
+    def change_after_check(*args, **kwargs):
+        result = original(*args, **kwargs)
+        (store.location(root, first) / 'late-file').write_bytes(b'changed')
+        return result
+    monkeypatch.setattr(store, '_verify', change_after_check)
+
+    @verified_execution
+    def interrupted():
+        with pytest.raises(store.KnowledgeUnavailable, match='durante'):
+            store.verify(root, first)
+        assert not receipts.get()
+    interrupted()
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows read leases')
+def test_shared_graph_validation_uses_deep_execution_receipt(repo):
+    root, deep = repo
+    from scripts import pipeline_coordinator as coordinator
+    manifest = store.register(root, builder(root, 'sealed', shared=True))
+    _, checksum = store.load_version(root, manifest['version_id'])
+    run = new_run(root, 'fresh', config(root))
+    state = read(run_file(run, 'run.json'))
+    state['knowledge_ref'] = store.reference(manifest, checksum)
+    write(run_file(run, 'run.json'), state)
+    deep.clear()
+
+    @verified_execution
+    def prepare():
+        store.resolve_reference(root, state['knowledge_ref'])
+        for _ in range(3):
+            assert coordinator.validated_graph(root, run)['layer3_run_id'] == 'sealed'
+    prepare()
+    assert len(deep) == 1
+    assert not (run / 'workspace').exists()
+
+
+@pytest.mark.parametrize('name', ['data/raw/a.csv', 'data/catalog.xlsx'])
+@pytest.mark.skipif(os.name != 'nt', reason='Windows read leases')
+def test_execution_receipt_invalidates_external_sources(repo, monkeypatch, name):
+    root, _ = repo
+    manifest = store.register(root, builder(root, 'sealed', shared=True))
+    monkeypatch.setattr(processing, 'check', REAL_CHECK)
+
+    @verified_execution
+    def run():
+        store.verify(root, manifest)
+        with pytest.raises(OSError):
+            (root / name).write_bytes(b'changed')
+    run()
+    (root / name).write_bytes(b'changed')
+    @verified_execution
+    def changed():
+        with pytest.raises(ValueError):
+            store.verify(root, manifest)
+        assert not receipts.get()
+    changed()
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows read leases')
+def test_existing_writer_rejects_receipt_and_exception_releases_leases(repo):
+    root, _ = repo
+    manifest = store.register(root, builder(root, 'sealed', shared=True))
+    target = store.location(root, manifest) / 'workspace/outputs/layer2/knowledge/source_chunks.parquet'
+
+    @verified_execution
+    def blocked():
+        with pytest.raises(OSError):
+            store.verify(root, manifest)
+        assert not receipts.get()
+    with target.open('r+b') as writer:
+        writer.write(b'large')
+        writer.flush()
+        blocked()
+
+    @verified_execution
+    def interrupted():
+        store.verify(root, manifest)
+        raise RuntimeError('interrupt')
+    with pytest.raises(RuntimeError, match='interrupt'):
+        interrupted()
+    target.write_bytes(b'allowed after release')
+
+
+def test_platform_without_enforced_leases_keeps_full_deep_checks(repo, monkeypatch):
+    root, deep = repo
+    import knowledge_verification as verification
+    manifest = store.register(root, builder(root, 'sealed', shared=True))
+    monkeypatch.setattr(verification, 'supports_read_leases', False)
+    deep.clear()
+    @verified_execution
+    def run():
+        store.verify(root, manifest, deep=False)
+        store.verify(root, manifest, deep=False)
+        assert not receipts.get()
+    run()
+    assert len(deep) == 2
 
 
 def test_register_creates_manifest_without_touching_checkpoint(repo):

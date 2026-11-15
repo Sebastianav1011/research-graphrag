@@ -1,6 +1,7 @@
 """CLI orchestration; existing layer implementations operate inside a private root."""
 from run_paths import file_path as run_file
 from knowledge_store import knowledge_workspace, knowledge_root, evaluation_dir
+from knowledge_verification import verified_execution
 import argparse
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -138,6 +139,11 @@ def graph(root, run, build=False):
 
 def validated_graph(root, run):
     """Reject another run's graph, corrupt vectors, or a test/changed embedding provider."""
+    state = read(run_file(run, 'run.json'))
+    if state.get('knowledge_ref'):
+        from knowledge_store import resolve_reference
+        builder = resolve_reference(root, state['knowledge_ref'], deep=True)
+        return read(builder / 'workspace/outputs/layer3/publication/_manifest.json')
     from layer3_graphrag.configuration import load_config
     from layer3_graphrag.embeddings import create_provider
     from layer3_graphrag.pipeline import load_artifacts
@@ -823,6 +829,7 @@ def verify_execution_approval(root, approval):
             raise ValueError('Alcance autorizado modificado: '+name+'; detener y revisar antes de autorizar otra ejecucion')
 
 
+@verified_execution
 @measured_pipeline
 def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=None, run_id=None,
                      stage=None, through=None, resume=False, approve_build=False, authorize=False,

@@ -165,7 +165,60 @@ def location(root, manifest):
     return path
 
 
+def _verification_inputs(root, manifest):
+    """Include sealed artifacts and every external dependency of their checks."""
+    from layer2_processing.checkpoints import registry, resolve
+    root = Path(root).resolve()
+    ident = manifest['identity']
+    paths = [location(root, manifest), manifest_path(root, manifest['version_id']),
+             root / ident['raw_path'], root / 'config',
+             root / 'outputs/layer4/auditoria/rutas.json',
+             root / 'docs/architecture/auditoria_consolidacion/relocations.json',
+             resolve(root, ident['data_config']['reference_catalog'])]
+    # Imports may create bytecode, which is not executable-source acceptance.
+    # Sealed artifacts themselves are always observed in full, without exclusions.
+    paths.extend(p for p in (root / 'src').rglob('*.py') if '__pycache__' not in p.parts)
+    bindings = registry(root).get('runtime_bindings', {})
+    for name in ident['knowledge_code']:
+        resolved = resolve(root, name)
+        paths.extend((root / name, resolved))
+        binding = bindings.get(name) or bindings.get(resolved.relative_to(root).as_posix(), {})
+        paths.extend(root / p for p in binding.get('snapshots', [binding.get('snapshot')]) if p)
+        paths.extend(root / p for p in binding.get('related_sha256', {}))
+    return paths
+
+
 def verify(root, manifest, *, deep=True):
+    """Reuse only an unchanged, deeply verified sealed version in this execution."""
+    from knowledge_verification import receipts, snapshot, supports_read_leases
+    cache = receipts.get()
+    if cache is None or manifest.get('storage') != 'SHARED_SEALED_CHECKPOINT':
+        return _verify(root, manifest, deep=deep)
+    if not supports_read_leases:
+        return _verify(root, manifest, deep=True)
+    from knowledge_verification import ReadLease
+    key = (str(Path(root).resolve()), digest(manifest))
+    paths = _verification_inputs(root, manifest)
+    before = snapshot(paths)
+    saved = cache.get(key)
+    if saved is not None and saved[0] == before:
+        return manifest
+    # Remove the old receipt before checking: a failed validation cannot leave a hit.
+    if saved is not None:
+        cache.pop(key)[1].close()
+    lease = ReadLease(before)
+    try:
+        result = _verify(root, manifest, deep=True)
+        if before != snapshot(_verification_inputs(root, manifest)):
+            raise KnowledgeUnavailable('Knowledge cambio durante la verificacion; repetir antes de utilizarlo')
+    except BaseException:
+        lease.close()
+        raise
+    cache[key] = (before, lease)
+    return result
+
+
+def _verify(root, manifest, *, deep=True):
     """Integrity of a registered version; raises on any missing/changed component."""
     from layer2_processing.pipeline import check
     builder = location(root, manifest)
