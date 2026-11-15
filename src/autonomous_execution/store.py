@@ -62,13 +62,13 @@ def read(path):
     return strict_json(Path(path).read_text(encoding='utf-8-sig'))
 
 
-def write(path, value):
+def write(path, value, sort_keys=True):
     from run_paths import resolve_file
     path = resolve_file(path); path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_name(path.name+'.'+uuid.uuid4().hex+'.pending')
     try:
         with temp.open('x',encoding='utf-8',newline='\n') as stream:
-            json.dump(value,stream,ensure_ascii=False,allow_nan=False,sort_keys=True)
+            json.dump(value,stream,ensure_ascii=False,allow_nan=False,sort_keys=sort_keys)
             stream.flush(); os.fsync(stream.fileno())
         # Concurrent replacements and short antivirus reads can transiently deny
         # Windows rename access. Keep the durable candidate and retry only that

@@ -5,6 +5,8 @@ from pathlib import Path
 import json
 import math
 
+API_RETRIEVED_CONTEXT=32768  # API window for BASE_RETRIEVED_GRAPH_V1 (local model keeps its own limits)
+
 options=ContextVar('experiment_options',default={})
 
 
@@ -33,7 +35,13 @@ def binding(root,run,base,*,evaluation=None):
             budget=float(input('Presupuesto operativo maximo USD (15 recomendado; reserva externa prevista 5 de 20): '))
         if not math.isfinite(budget) or budget<=0:raise ValueError('Presupuesto positivo requerido')
         api['budget_usd']=budget
-        llm=configuration(dict(provider='openai',model='gpt-6.1-terra',api=api))
+        settings=dict(provider='openai',model='gpt-6.1-terra',api=api)
+        if (evaluation or {}).get('context_mode')=='BASE_RETRIEVED_GRAPH_V1':
+            # The 8000-token evidence cap applies only to the local model. The API
+            # receives every ranked fragment and relation of the project; its window
+            # covers the largest BASE project (~13k tokens) with ample margin.
+            settings.update(num_ctx=API_RETRIEVED_CONTEXT,num_predict=4096,context_margin_tokens=1024)
+        llm=configuration(settings)
     else:llm=configuration(base)
     result=dict(llm=llm,contract=requested.get('contract'))
     if evaluation:result['evaluation_policy']=evaluation

@@ -64,9 +64,20 @@ def with_relations(request,package,schema,settings,reserve,*,tokenizer=None,cap=
     if seed not in nodes or nodes[seed]['entity_type']!='PROJECT' or nodes[seed]['canonical_id']!=request['project_id']:
         raise ValueError('Semilla relacional de otro proyecto')
     prefix=request['prompt'].split('INPUT_JSON:\n',1)[0]+RELATIONAL_INSTRUCTIONS
+    digest_only=request.get('prompt_version')==v3.PROSPECTIVE_PROMPT_V3
+    def shown(relation):
+        # RELATIONAL_PROVENANCE_DIGEST_V1 (new V3 requests): full provenance is audit
+        # metadata (hashes, configs, local source paths), not evidence. The model
+        # receives the relation and a digest; the verified package keeps the rest.
+        if not digest_only:return relation
+        value={k:v for k,v in relation.items() if k!='provenance'}
+        value['provenance_sha256']=hashlib.sha256(json.dumps(relation['provenance'],ensure_ascii=False,
+            sort_keys=True,separators=(',',':')).encode()).hexdigest()
+        return value
     def build(ids,accepted,entities):
         context={k:v for k,v in package.items() if k not in ('relations','entities','support_paths','metrics')}
-        context.update(relations=[relations[rid] for rid in sorted(ids)],
+        if digest_only:context['provenance_projection']='RELATIONAL_PROVENANCE_DIGEST_V1'
+        context.update(relations=[shown(relations[rid]) for rid in sorted(ids)],
             entities=[nodes[eid] for eid in sorted(entities)],support_paths=accepted)
         payload=dict(request['payload'],relational_context=context)
         return dict(request,payload=payload,prompt=prefix+'INPUT_JSON:\n'+compact(payload))
@@ -214,6 +225,8 @@ def make_request(project, profile, rubric, fields, *, evidence_references=False,
         criterion_instructions = criterion_instructions.replace(v3.DEMONSTRATED_STAGE_LINE, v3.PROSPECTIVE_STAGE_LINE)
         note += ' ' + v3.TITLE_NOTE
         protocol['prompt_version'] = prompt_version
+        if assessment_version == v3.SK_VERSION:
+            protocol['response_order'] = refs.REASONING_FIRST  # Schema generation order only.
     elif prompt_version not in (None, 'PROSPECTIVE_SK_PROMPT_V2_PARTIAL', 'DEMONSTRATED_SK_PROMPT_V2_PARTIAL'):
         raise ValueError('Version de prompt desconocida')
     prompt = criterion_instructions + instructions + '\n' + note + '\nINPUT_JSON:\n' + compact(payload)
@@ -286,7 +299,9 @@ def prepare_contexts(projects, profiles, rubrics, settings, candidates, chunks, 
     cap); without it the historical estimator is reproduced unchanged.
     """
     retrieved = context_mode==v3.RETRIEVED_CONTEXT
-    cap = RETRIEVED_INPUT_CAP if retrieved and tokenizer is not None else None
+    # The input cap bounds the local model only; API runs receive the complete
+    # ranked project evidence (identical order, no omissions) within their window.
+    cap = RETRIEVED_INPUT_CAP if retrieved and tokenizer is not None and settings.get('provider','ollama')!='openai' else None
     relational_reserve = RELATIONAL_RESERVE if retrieved else 0
     chunk_index = {c['chunk_id']: c for c in chunks}
     section_index = {s['section_id']: s for s in sections}
@@ -458,6 +473,13 @@ def prepare_contexts(projects, profiles, rubrics, settings, candidates, chunks, 
                 request_sha256=canonical_hash(request), budget=budget,
                 prompt_bytes=len(request['prompt'].encode()), selected=selected, omitted=omitted))
             if 'relational_context_receipt' in request:diagnostics[-1]['relational']=request['relational_context_receipt']
+            if request.get('prompt_version')==v3.PROSPECTIVE_PROMPT_V3 and 'INPUT_JSON:\n' in request['prompt']:
+                # Separate fingerprints so providers can be compared on identical
+                # evidence, instructions and decoding schema (configuration is in the plan).
+                from .evidence_references import response_schema
+                diagnostics[-1]['fingerprints']=dict(evidence_sha256=canonical_hash(request['payload']),
+                    instructions_sha256=hashlib.sha256(request['prompt'].split('INPUT_JSON:\n',1)[0].encode()).hexdigest(),
+                    response_schema_sha256=canonical_hash(response_schema(request,project['fields'])))
             if 'truncation' in request['context_selection']:
                 diagnostics[-1].update(evidence_limited=request['context_selection']['evidence_limited'],
                     truncation=request['context_selection']['truncation'])

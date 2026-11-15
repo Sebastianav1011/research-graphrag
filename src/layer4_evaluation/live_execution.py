@@ -22,7 +22,8 @@ from layer4_evaluation.indicators import assessment_v3 as v3, global_discovery_v
 
 from layer4_evaluation.indicators.ollama_provider import (
     OllamaClient, OllamaAssessmentProvider, context_guard, configuration as llm_configuration, create_client,
-    CORRECTION_VERSION, TARGETED_CORRECTION_VERSION, corrective_request, targeted_baseline, scope_issues)
+    CORRECTION_VERSION, TARGETED_CORRECTION_VERSION, corrective_request, targeted_baseline, scope_issues,
+    TARGETED_VERSIONS, MERGE_CORRECTION_VERSION, targeted_scope, merged_attempt)
 
 from layer4_evaluation.indicators.experiment_inputs import read, sha256, verify_hashes
 
@@ -44,9 +45,9 @@ FROZEN=ROOT/'outputs/layer4/pruebas/validacion_v3_3/cierre_homogeneo_v3_3/closur
 def require(value,message):
     if not value: raise ValueError(message)
 
-def write(path,value):
+def write(path,value,sort_keys=True):
     from autonomous_execution.store import write as atomic_write
-    atomic_write(path,value)
+    atomic_write(path,value,sort_keys)
 
 def emit(value): print(json.dumps(value,ensure_ascii=True,indent=2),flush=True)
 
@@ -228,7 +229,7 @@ def verify_run(directory,*,recover=False):
                         require(index<=corrective and not any(i.get('category')=='INTERNAL_VALIDATION_ERROR'
                             for i in previous['validation_issues']), 'Reintento correctivo no permitido')
                         prior=None
-                        if cp.get('correction_version')==TARGETED_CORRECTION_VERSION:
+                        if cp.get('correction_version') in TARGETED_VERSIONS:
                             runs=out/cp['phase']/('ollama_runs' if local else 'codex_runs')/pid
                             prior,_=targeted_baseline([runs/('attempt_'+str(n+1)) for n in range(index)],
                                 [c['validation_issues'] for c in record['calls'][:index]])
@@ -289,16 +290,33 @@ def verify_run(directory,*,recover=False):
                         body.get('model')==plan['requested_model'],'Transporte incompleto; conservar claim')
                     parsed=strict_json(body['message']['content'])
                     require(parsed==strict_json((attempt/'response.raw.txt').read_text(encoding='utf-8')) and
-                        refs.materialize(request,parsed)==record['wrapper'],'Respuesta original/recuperada difieren')
+                        ((attempt/'repair.json').exists() or refs.materialize(request,parsed)==record['wrapper']),'Respuesta original/recuperada difieren')
                     require(native['usage_observations'][0]==dict(input_tokens=body.get('prompt_eval_count'),
                         output_tokens=body.get('eval_count')),'Metricas originales/recuperadas difieren')
-                if refs.active(request) and cp.get('correction_version')==TARGETED_CORRECTION_VERSION and len(record['calls'])>1:
+                merged=False
+                if refs.active(request) and cp.get('correction_version') in TARGETED_VERSIONS and len(record['calls'])>1:
                     runs=out/cp['phase']/('ollama_runs' if local else 'codex_runs')/pid
-                    baseline,flagged=targeted_baseline([runs/('attempt_'+str(n+1)) for n in range(len(record['calls'])-1)],
+                    baseline,flagged,broad=targeted_scope([runs/('attempt_'+str(n+1)) for n in range(len(record['calls'])-1)],
                         [c['validation_issues'] for c in record['calls'][:-1]])
-                    require(baseline is None or not scope_issues(baseline,flagged,read(attempt/'selection.json')),
-                        'Correccion dirigida modifico juicios no senalados')
-                if refs.active(request):
+                    if cp['correction_version']==MERGE_CORRECTION_VERSION and baseline is not None and flagged is not None:
+                        # Rebuild the criterion merge from the persisted outputs and require
+                        # the same accepted assessment and provenance.
+                        wrapper,provenance=merged_attempt(baseline,flagged,broad,read(attempt/'selection.json'),request,
+                            lambda w: check_wrapper(plan,p,request,pid,cp['indicator_ids'],w))
+                        require(wrapper==record['wrapper'] and read(attempt/'repair.json')==provenance,
+                            'Fusion por criterio no reproducible')
+                        merged=True
+                    else:
+                        require(baseline is None or not scope_issues(baseline,flagged,read(attempt/'selection.json')),
+                            'Correccion dirigida modifico juicios no senalados')
+                require(merged or not (attempt/'repair.json').exists(),'Reparacion no declarada por el protocolo')
+                if merged:
+                    from jsonschema import Draft202012Validator
+                    from layer4_evaluation.indicators.ollama_provider import strict_json
+                    Draft202012Validator(expected_schema).validate(read(attempt/'selection.json'))
+                    require(strict_json((attempt/'response.raw.txt').read_text(encoding='utf-8'))==read(attempt/'selection.json'),
+                        'Seleccion original de la correccion modificada')
+                if refs.active(request) and not merged:
                     selection=read(attempt/'selection.json')
                     from jsonschema import Draft202012Validator
                     Draft202012Validator(expected_schema).validate(selection)
@@ -375,6 +393,19 @@ def call_request(plan, project, call_plan):
 def runnable_indicator(state, iid, attempted):
     return (iid not in state.get('context_limits', {}) and (state['project_id'],iid) not in attempted and
         (iid not in state['blocked_indicators'] or iid in state.get('retryable_indicators', [])))
+
+
+def check_wrapper(plan,p,request,pid,ids,wrapper):
+    """Assessment gate shared by dispatch and audit replay (criterion merges included)."""
+    v3.validate_wrapper(wrapper,pid,ids,p['fields'],plan['assessment_version'])
+    validate_context_evidence(request, wrapper)
+    for item in wrapper['assessments']:
+        assessment = {k:v for k,v in item.items() if k!='indicator_id'}
+        issues = semantic_issues(v3.validate(p['fields'],plan['profiles'][item['indicator_id']],
+            assessment,plan['rubrics'][item['indicator_id']]), assessment, item['indicator_id'],
+            plan['rubrics'][item['indicator_id']],p['fields'])
+        if issues:
+            raise AssessmentValidationError(issues)
 
 
 def validate_context_evidence(request, wrapper):
@@ -498,7 +529,11 @@ def execute(args):
             if plan.get('evaluation_policy'):cp['evaluation_policy_sha256']=plan['evaluation_policy']['sha256']
             if correction:
                 cp.update(correction_version=plan.get('correction_protocol', refs.VERSION) if refs.active(request) else CORRECTION_VERSION,corrective_retries=corrective_retries)
-            write(out/'plan.json',cp);write(out/'schema.json',schema)
+            # Ollama follows the schema's property order: keep it when the request
+            # declares REASONING_BEFORE_SCORE_V1 (legacy schemas stay sorted).
+            write(out/'plan.json',cp)
+            if request.get('response_order')==refs.REASONING_FIRST: write(out/'schema.json',schema,sort_keys=False)
+            else: write(out/'schema.json',schema)
             call_auth=dict(authorized=True,project_ids=[p['project_id']],phase=phase,indicator_ids=ids,plan_sha256=sha256(out/'plan.json'),
                 request_sha256=cp['request_sha256'],token_budget=reservation,maximum_new_calls=1+retries,max_retries=retries,
                 authorized_by=auth['authorized_by'],authorization_reference='Reviewed live-run authorization sha256='+sha256(auth_path),authorized_at=now())
@@ -509,15 +544,7 @@ def execute(args):
                     require(pid==p['project_id'] and indicator_ids==[gd.MARKER],'Envelope de descubrimiento difiere')
                     gd.validate_selection(wrapper,p,plan['profiles'])
                 else:
-                    v3.validate_wrapper(wrapper,pid,ids,p['fields'],plan['assessment_version'])
-                    validate_context_evidence(request, wrapper)
-                    for item in wrapper['assessments']:
-                        assessment = {k:v for k,v in item.items() if k!='indicator_id'}
-                        issues = semantic_issues(v3.validate(p['fields'],plan['profiles'][item['indicator_id']],
-                            assessment,plan['rubrics'][item['indicator_id']]), assessment, item['indicator_id'],
-                            plan['rubrics'][item['indicator_id']],p['fields'])
-                        if issues:
-                            raise AssessmentValidationError(issues)
+                    check_wrapper(plan,p,request,pid,ids,wrapper)
             emit(dict(status='CALL_STARTED',project_id=p['project_id'],phase=phase,indicator_ids=ids,token_reservation=reservation))
             provider = OllamaAssessmentProvider(out/phase/'ollama_runs', out/'schema.json', lambda p,i:request,
                 settings=settings, client=client, runtime=runtime, wrapper_validator=gate,

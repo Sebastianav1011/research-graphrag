@@ -142,3 +142,59 @@ def test_relations_use_the_same_calibrated_budget(corpus, tokenizer_stub):
     assert [r['relation_id'] for r in request['payload']['relational_context']['relations']] == ['E1', 'E2']
     assert request['context_budget']['estimated_input_tokens'] == count(request['prompt'], tokenizer_stub) + 12
     assert 'UNSELECTED' not in json.dumps(response_schema(request, corpus.project['fields']))
+
+
+def test_v3_relations_show_provenance_digest_and_keep_full_provenance_out_of_prompt(corpus, tokenizer_stub):
+    """RELATIONAL_PROVENANCE_DIGEST_V1: audit metadata (local paths, hashes) is not sent to the model."""
+    import hashlib
+    pid = corpus.project['project_id']
+    text = 'Synthetic mechanism documented for the project. '
+    corpus.project['fields'].update(methodology=text, title='Titulo')
+    corpus.rubrics, _ = v3.catalog_for_mode(corpus.profiles, corpus.rubrics, v3.PROSPECTIVE)
+    chunk = dict(chunk_id='CHUNK', section_id='SECTION', source_id=pid, field_name='methodology', text=text, char_start=0, char_end=len(text))
+    package = relational_fixture(pid)
+    hit = dict(corpus.hits[0], relational_context=package)
+    def build(version):
+        requests, _ = cb.prepare_contexts([corpus.project], {'I00': corpus.profiles['I00']}, corpus.rubrics,
+            corpus.settings | WIDE, [hit], [chunk], [dict(corpus.sections[0], text_original=text)], evidence_references=True,
+            assessment_version=v3.SK_VERSION, evaluation_mode=v3.PROSPECTIVE, context_mode=v3.RETRIEVED_CONTEXT,
+            tokenizer=tokenizer_stub, prompt_version=version)
+        return requests[pid]['I00']
+    new, old = build(v3.PROSPECTIVE_PROMPT_V3), build(None)
+    shown = new['payload']['relational_context']
+    assert shown['provenance_projection'] == 'RELATIONAL_PROVENANCE_DIGEST_V1'
+    assert 'base/members.csv' not in new['prompt'] and 'base/members.csv' in old['prompt']
+    original = {r['relation_id']: r for r in package['relations']}
+    for relation in shown['relations']:
+        assert 'provenance' not in relation
+        assert relation['provenance_sha256'] == hashlib.sha256(json.dumps(original[relation['relation_id']]['provenance'],
+            ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    assert new['relational_context_receipt']['selected_relation_ids'] == ['E1', 'E2']
+
+
+def test_input_cap_limits_only_the_local_model_and_api_receives_complete_ranked_evidence(corpus, tokenizer_stub):
+    """Qwen keeps the 8000 cap; the API gets every ranked unit, in the same order, within its window."""
+    texts = ['Top ranked documented mechanism. '] + [f'lower ranked documented activity {n} ' * 600 + '. ' for n in range(4)]
+    local, _ = retrieved(corpus, texts, WIDE, tokenizer_stub)
+    api, _ = retrieved(corpus, texts, dict(WIDE, provider='openai', num_ctx=32768), tokenizer_stub)
+    assert local['context_budget']['input_cap'] == 8000 and local['context_selection']['evidence_limited']
+    assert 'input_cap' not in api['context_budget'] and api['context_budget']['input_budget'] == 32768 - 4096 - 1024
+    assert not api['context_selection']['evidence_limited'] and api['context_selection']['status'] == 'READY'
+    whole = ''.join(f['text'] for f in api['payload']['project']['fragments'])
+    assert whole == corpus.project['fields']['methodology']  # complete, literal, original order
+    seen = [f['text'] for f in local['payload']['project']['fragments']]
+    assert seen == [f['text'] for f in api['payload']['project']['fragments']][:len(seen)]  # local = prefix of the same ranking
+
+
+def test_api_binding_sizes_window_for_retrieved_graph_and_local_binding_is_unchanged(tmp_path, monkeypatch):
+    import experiment_runtime as er
+    token = er.options.set(dict(provider='openai', budget_usd=15))
+    import shutil; (tmp_path / 'config').mkdir(); shutil.copyfile('config/openai.json', tmp_path / 'config/openai.json')
+    policy = dict(context_mode='BASE_RETRIEVED_GRAPH_V1')
+    run = tmp_path / 'run'; run.mkdir()
+    api = er.binding(tmp_path, run, dict(num_ctx=16384, context_margin_tokens=1024), evaluation=policy)['llm']
+    assert api['provider'] == 'openai' and api['num_ctx'] == er.API_RETRIEVED_CONTEXT == 32768 and api['context_margin_tokens'] == 1024
+    er.options.reset(token); token = er.options.set(dict(provider='ollama'))
+    local = er.binding(tmp_path, run, dict(num_ctx=16384, context_margin_tokens=1024), evaluation=policy)['llm']
+    er.options.reset(token)
+    assert local['provider'] == 'ollama' and local['num_ctx'] == 16384

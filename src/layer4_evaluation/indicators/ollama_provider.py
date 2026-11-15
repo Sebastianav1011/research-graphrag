@@ -139,6 +139,9 @@ TARGETED_RULES = {
         'si ningun criterio tiene respaldo, support_strength=0.',
     'SK_STRENGTH:UNVERIFIABLE_CRITERION_REFERENCE': 'strength_rubric.evidence_refs solo repite referencias '
         'de criterios PARTIAL/CLEAR.',
+    'V3_CRITERION:UNSUPPORTED_CANNOT_CLAIM_EVIDENCE': 'NOT_DEMONSTRATED exige evidence_refs=[]. Resuelve la '
+        'contradiccion con tu juicio: si esas referencias no respaldan el criterio, conserva NOT_DEMONSTRATED y vacialas; '
+        'si lo respaldan parcialmente, usa PARTIAL con coverage 1..3 y solo esas referencias. Nunca CLEAR ni referencias nuevas.',
     'TARGETED_CORRECTION:UNFLAGGED_CRITERION_CHANGED': 'Ese criterio no tenia error: restaura exactamente su '
         'support, coverage y evidence_refs de RESPUESTA_ANTERIOR.',
     'TARGETED_CORRECTION:FLAGGED_CRITERION_INCREASED': 'Al corregir no puedes aumentar support ni coverage '
@@ -191,7 +194,13 @@ def scope_issues(baseline, flagged, selection):
             criterion_id=item['criterion_id'], support=item['support'], coverage=item.get('coverage'),
             previous_support=before['support'], previous_coverage=before.get('coverage'))
         if item['criterion_id'] in flagged:
-            if (SUPPORT_ORDER[item['support']] > SUPPORT_ORDER[before['support']] or
+            # NOT_DEMONSTRATED with its own references is an internal contradiction
+            # with two legitimate readings: keep ND (empty refs) or PARTIAL 1..3
+            # restricted to those same references. Never CLEAR, never new refs.
+            contradictory = before['support'] == 'NOT_DEMONSTRATED' and before.get('evidence_refs')
+            bounded_partial = (contradictory and item['support'] == 'PARTIAL' and 1 <= (item.get('coverage') or 0) <= 3
+                               and item.get('evidence_refs') and set(refs(item)) <= set(refs(before)))
+            if not bounded_partial and (SUPPORT_ORDER[item['support']] > SUPPORT_ORDER[before['support']] or
                     (item.get('coverage') or 0) > (before.get('coverage') or 0)):
                 issues.append(dict(detail, rule='TARGETED_CORRECTION:FLAGGED_CRITERION_INCREASED'))
         elif (item['support'], item.get('coverage'), refs(item)) != (before['support'], before.get('coverage'), refs(before)):
@@ -218,14 +227,78 @@ def previous_judgments(selection, flagged=(), explanations=True):
             ('directness', 'specificity', 'clarity', 'temporal_alignment')}, evidence_refs=refs(strength.get('evidence_refs'))))
 
 
-def targeted_baseline(attempt_directories, attempt_issues):
-    """(first persisted selection, its correction scope) for one evaluation's attempts."""
+def targeted_scope(attempt_directories, attempt_issues):
+    """(first persisted selection, flagged criteria, whether a global field was flagged)."""
     for directory, issues in zip(attempt_directories, attempt_issues):
         path = Path(directory) / 'selection.json'
         if path.exists():
             baseline = strict_json(path.read_text(encoding='utf-8'))
-            return baseline, correction_scope(baseline, issues)
-    return None, None
+            return baseline, correction_scope(baseline, issues), has_global_issue(baseline, issues)
+    return None, None, None
+
+
+def targeted_baseline(attempt_directories, attempt_issues):
+    """(first persisted selection, its correction scope) for one evaluation's attempts."""
+    return targeted_scope(attempt_directories, attempt_issues)[:2]
+
+
+# TARGETED_REFERENCE_CORRECTION_V3_CRITERION_MERGE. Same corrective prompt as V2,
+# but the accepted assessment keeps every unflagged criterion of the first
+# judgment and takes only the flagged criteria from the corrective answer. The
+# global fields come from the first judgment when they were not flagged and the
+# merge validates, otherwise from the corrective answer. Every value comes from
+# one of the model's own outputs; origins are written to repair.json and the
+# full assessment is revalidated with the unchanged rules.
+MERGE_CORRECTION_VERSION = 'TARGETED_REFERENCE_CORRECTION_V3_CRITERION_MERGE'
+TARGETED_VERSIONS = (TARGETED_CORRECTION_VERSION, MERGE_CORRECTION_VERSION)
+GLOBAL_FIELDS = ('decision', 'support_strength', 'strength_rubric', 'explanation')
+
+
+def has_global_issue(baseline, issues):
+    criteria = baseline['assessments'][0].get('criterion_assessments', [])
+    for issue in issues or []:
+        match = re.match(r'\$\.criterion_assessments\[(\d+)\]', issue.get('path', ''))
+        if not (issue.get('criterion_id') or issue.get('criterion_ids') or (match and int(match[1]) < len(criteria))):
+            return True
+    return False
+
+
+def merge_candidates(baseline, flagged, has_global, selection):
+    from copy import deepcopy
+    first, answer = baseline['assessments'][0], selection['assessments'][0]
+    corrected = {c['criterion_id']: c for c in answer['criterion_assessments']}
+    criteria, origin = [], {}
+    for item in first['criterion_assessments']:
+        cid = item['criterion_id']
+        criteria.append(deepcopy(corrected[cid] if cid in flagged else item))
+        origin[cid] = 'correction' if cid in flagged else 'first_judgment'
+    for source in (('correction',) if has_global else ('first_judgment', 'correction')):
+        item = deepcopy(answer)
+        origin_item = answer if source == 'correction' else first
+        for key in GLOBAL_FIELDS:
+            if key in origin_item:  # strength_rubric exists only in SK assessments
+                item[key] = deepcopy(origin_item[key])
+        item['criterion_assessments'] = deepcopy(criteria)
+        yield (dict(selection, assessments=[item]),
+               dict(criteria_origin=origin, global_fields_origin=source, flagged=sorted(flagged)))
+
+
+def merged_attempt(baseline, flagged, has_global, selection, request, validator):
+    """Accepted (wrapper, provenance) for a criterion merge; raises when nothing coherent exists."""
+    from .evidence_references import materialize
+    scoped = [i for i in scope_issues(baseline, flagged, selection)
+              if i['rule'] != 'TARGETED_CORRECTION:UNFLAGGED_CRITERION_CHANGED']
+    if scoped:
+        raise AssessmentValidationError(scoped)
+    last = None
+    for candidate, provenance in merge_candidates(baseline, flagged, has_global, selection):
+        try:
+            wrapper = materialize(request, candidate)
+            validator(wrapper)
+            return wrapper, dict(version=MERGE_CORRECTION_VERSION, **provenance)
+        except AssessmentValidationError as exc:
+            last = exc
+    raise last
 
 
 def _targeted_prompt(prefix, marker, payload, issues, previous, schema, settings, budget):
@@ -264,7 +337,7 @@ def corrective_request(request, schema, settings, issues=None, previous=None, ve
         raise ValueError('Solicitud correctiva sin INPUT_JSON')
     prefix = prefix.split('\nCORRECTIVE_JSON_RULES:\n', 1)[0]
     from .evidence_references import active
-    if active(request) and version == TARGETED_CORRECTION_VERSION:
+    if active(request) and version in TARGETED_VERSIONS:
         prefix = prefix.split('\nREFERENCE_CORRECTION_V2:\n', 1)[0]
         revised['prompt'] = _targeted_prompt(prefix, marker, payload, issues, previous, schema, settings,
                                              request.get('context_budget'))
@@ -461,13 +534,13 @@ class OllamaAssessmentProvider:
                     if any(i.get('category') == 'INTERNAL_VALIDATION_ERROR' for i in self.calls[-1]['validation_issues']):
                         raise
                     previous = None
-                    if self.correction_version == TARGETED_CORRECTION_VERSION:
+                    if self.correction_version in TARGETED_VERSIONS:
                         # The first complete judgment of this evaluation is the
                         # baseline for every corrective attempt (also on replay).
-                        previous, flagged = targeted_baseline(
+                        previous, flagged, broad = targeted_scope(
                             [self.directory.parent / c['working_directory'] for c in self.calls[first:]],
                             [c['validation_issues'] for c in self.calls[first:]])
-                        self.scope = (previous, flagged) if previous is not None and flagged is not None else None
+                        self.scope = (previous, flagged, broad) if previous is not None and flagged is not None else None
                     revised = corrective_request(self.input_factory(project, indicators),
                         strict_json(self.schema.read_text(encoding='utf-8')), self.settings,
                         self.calls[-1]['validation_issues'], previous, self.correction_version)
@@ -562,18 +635,25 @@ class OllamaAssessmentProvider:
             Draft202012Validator(schema).validate(parsed)
             validation_stage = 'semantic'
             from .evidence_references import active, materialize
-            scoped = []
+            scoped, scope = [], getattr(self, 'scope', None)
+            ids = [i['indicator_id'] for i in indicators]
             if active(request):
                 save('selection.json', parsed)
-                scoped = scope_issues(*self.scope, parsed) if getattr(self, 'scope', None) else []
-            try:
-                if active(request):
-                    parsed = materialize(request, parsed)
-                self.wrapper_validator(parsed, project['project_id'], [i['indicator_id'] for i in indicators])
-            except AssessmentValidationError as exc:
-                raise AssessmentValidationError(exc.issues + scoped) if scoped else exc
-            if scoped:
-                raise AssessmentValidationError(scoped)
+            if active(request) and scope and self.correction_version == MERGE_CORRECTION_VERSION:
+                parsed, provenance = merged_attempt(*scope, parsed, request,
+                    lambda wrapper: self.wrapper_validator(wrapper, project['project_id'], ids))
+                save('repair.json', provenance)
+            else:
+                if active(request) and scope:
+                    scoped = scope_issues(scope[0], scope[1], parsed)
+                try:
+                    if active(request):
+                        parsed = materialize(request, parsed)
+                    self.wrapper_validator(parsed, project['project_id'], ids)
+                except AssessmentValidationError as exc:
+                    raise AssessmentValidationError(exc.issues + scoped) if scoped else exc
+                if scoped:
+                    raise AssessmentValidationError(scoped)
             save('response.json', parsed)
             self.last_output = parsed
         except OllamaError as exc:

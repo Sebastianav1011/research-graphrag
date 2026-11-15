@@ -14,6 +14,7 @@ from layer4_evaluation import live_execution as live
 from layer4_evaluation.indicators import context_budget as cb, evidence_references as refs
 from layer4_evaluation.indicators import assessment_v3 as v3, ollama_provider as transport
 from layer4_evaluation.indicators.selection import canonical_hash
+from layer4_evaluation.indicators.validation_diagnostics import AssessmentValidationError
 from layer2_processing.preprocessing.adapters import read, write, sha
 from scripts import pipeline_coordinator as coordinator
 
@@ -698,3 +699,92 @@ def test_targeted_correction_scope_preserves_unflagged_and_never_raises_flagged(
     assert transport.correction_scope(first,[dict(rule='SK_STRENGTH:ZERO_ANCHOR_MISMATCH',path='$')])==[]
     assert transport.correction_scope(first,[dict(rule='SK_CRITERION:JUSTIFICATION_REQUIRED',path='$')]) is None
     assert transport.scope_issues(first,None,answer(('C01','CLEAR',4,ref('F001'))))==[]
+
+
+def test_unsupported_criterion_with_references_is_named_and_kept_unsupported():
+    from layer4_evaluation.indicators.validation_diagnostics import semantic_issues
+    assessment=dict(evidence=[dict(field='methodology',text='x',stage='CONTEXT')],criterion_assessments=[
+        dict(criterion_id='C01',support='PARTIAL',evidence_indices=[0]),
+        dict(criterion_id='C02',support='NOT_DEMONSTRATED',evidence_indices=[0])])
+    issues=semantic_issues(['V3_CRITERION:UNSUPPORTED_CANNOT_CLAIM_EVIDENCE'],assessment,'I00')
+    assert issues==[dict(category='INVALID_FIELD_VALUE',rule='V3_CRITERION:UNSUPPORTED_CANNOT_CLAIM_EVIDENCE',
+        path='$.criterion_assessments[1].evidence_indices',indicator_id='I00',criterion_id='C02',support='NOT_DEMONSTRATED')]
+    first=dict(project_id='P',assessments=[dict(indicator_id='I00',criterion_assessments=[
+        dict(criterion_id='C01',support='PARTIAL',coverage=2,evidence_refs=[dict(fragment_id='F000',stage='CONTEXT')]),
+        dict(criterion_id='C02',support='NOT_DEMONSTRATED',coverage=0,evidence_refs=[dict(fragment_id='F000',stage='CONTEXT')])])])
+    flagged=transport.correction_scope(first,issues)
+    assert flagged==['C02']
+    fixed=deepcopy(first); fixed['assessments'][0]['criterion_assessments'][1]['evidence_refs']=[]
+    assert transport.scope_issues(first,flagged,fixed)==[]
+    # The contradiction may also resolve to PARTIAL 1..3 with the same references only.
+    partial=deepcopy(first); partial['assessments'][0]['criterion_assessments'][1].update(support='PARTIAL',coverage=1)
+    assert transport.scope_issues(first,flagged,partial)==[]
+    for change in (dict(support='CLEAR',coverage=4),dict(support='PARTIAL',coverage=1,evidence_refs=[dict(fragment_id='F009',stage='CONTEXT')])):
+        bad=deepcopy(first); bad['assessments'][0]['criterion_assessments'][1].update(change)
+        assert [i['rule'] for i in transport.scope_issues(first,flagged,bad)]==['TARGETED_CORRECTION:FLAGGED_CRITERION_INCREASED']
+
+
+def test_criterion_merge_keeps_valid_first_judgment_and_records_origin():
+    """COL-01 pattern: C04 CLEAR/2 invalid; the correction zeroes everything; merge keeps C02/C03."""
+    ref=lambda f:[dict(fragment_id=f,stage='DESIGN_DOCUMENTED')]
+    def answer(criteria,strength,dims):
+        return dict(project_id='P',assessments=[dict(indicator_id='I00',decision='INSUFFICIENT_EVIDENCE',support_strength=strength,
+            explanation='x',strength_rubric=dict(explanation='y',evidence_refs=ref('F013') if strength else [],
+            **dict(zip(('directness','specificity','clarity','temporal_alignment'),dims))),
+            criterion_assessments=[dict(criterion_id=c,support=s,coverage=k,evidence_refs=r,explanation='e') for c,s,k,r in criteria])])
+    first=answer([('C01','NOT_DEMONSTRATED',0,[]),('C02','PARTIAL',1,ref('F013')),('C04','CLEAR',2,ref('F015'))],2,(2,3,3,3))
+    issues=[dict(rule='SK_CRITERION:COVERAGE_SUPPORT_MISMATCH',path='$.criterion_assessments[2].coverage',criterion_id='C04')]
+    flagged,broad=transport.correction_scope(first,issues),transport.has_global_issue(first,issues)
+    assert (flagged,broad)==(['C04'],False)
+    collapsed=answer([('C01','NOT_DEMONSTRATED',0,[]),('C02','NOT_DEMONSTRATED',0,[]),('C04','PARTIAL',2,ref('F015'))],0,(0,0,0,0))
+    seen=[]
+    def validator(wrapper):
+        seen.append(wrapper)
+        item=wrapper['assessments'][0]
+        if item['support_strength']==0 and any(c['support']!='NOT_DEMONSTRATED' for c in item['criterion_assessments']):
+            raise AssessmentValidationError([dict(rule='SK_ZERO_SUPPORT:CANNOT_CLAIM_POSITIVE_CONCEPTUAL_SUPPORT',path='$')])
+    request=dict(evidence_protocol=refs.VERSION,payload=dict(project=dict(fragments=[
+        dict(fragment_id=f,field='methodology',text=f+' texto. ') for f in ('F013','F015')])))
+    wrapper,provenance=transport.merged_attempt(first,flagged,broad,collapsed,request,validator)
+    crit={c['criterion_id']:(c['support'],c['coverage']) for c in wrapper['assessments'][0]['criterion_assessments']}
+    assert crit=={'C01':('NOT_DEMONSTRATED',0),'C02':('PARTIAL',1),'C04':('PARTIAL',2)}
+    assert provenance=={'version':transport.MERGE_CORRECTION_VERSION,'flagged':['C04'],'global_fields_origin':'first_judgment',
+        'criteria_origin':{'C01':'first_judgment','C02':'first_judgment','C04':'correction'}}
+    assert wrapper['assessments'][0]['support_strength']==2 and len(seen)==1
+    # A flagged criterion may never be raised by the correction.
+    raised=answer([('C01','NOT_DEMONSTRATED',0,[]),('C02','NOT_DEMONSTRATED',0,[]),('C04','CLEAR',4,ref('F015'))],0,(0,0,0,0))
+    with pytest.raises(AssessmentValidationError):
+        transport.merged_attempt(first,flagged,broad,raised,request,validator)
+
+
+@pytest.mark.parametrize('protocol',['V2','MERGE'])
+def test_criterion_merge_is_replayed_and_v2_still_blocks(live_run, corpus, sample, monkeypatch, protocol):
+    directory, client = live_run
+    corpus.hits = corpus.hits[:1]
+    install_plan(directory, corpus, pack(corpus))
+    plan = read(directory/'plan.json')
+    version = transport.TARGETED_CORRECTION_VERSION if protocol=='V2' else transport.MERGE_CORRECTION_VERSION
+    plan.update(isolate_indicator_errors=True, corrective_retries=2, token_limit_retries=2, correction_protocol=version,
+        maximum_calls=9, total_token_reservation_cap=9*8192,
+        budgets=dict(assessment_reservation=3*8192, assessment_postcall_review_threshold=3*8192))
+    write(directory/'plan.json', plan)
+    manifest=read(directory/'manifest.json');manifest['plan_sha256']=sha(directory/'plan.json');write(directory/'manifest.json',manifest)
+    client.inspect.return_value=runtime(corpus.settings)
+    monkeypatch.setattr(live,'create_client',lambda _:client)
+    def reply(method,path,payload):
+        value=selection(sample); criteria=value['assessments'][0]['criterion_assessments']
+        if client.request.call_count==1:
+            criteria[0]['evidence_refs']=[]          # flagged formatting defect
+        else:
+            criteria[1].update(support='NOT_DEMONSTRATED',evidence_refs=[])  # unflagged change in every correction
+        return response(value)|dict(model=corpus.settings['model'])
+    client.request.side_effect=reply
+    live.execute(SimpleNamespace(run='batch_test',authorize=True))
+    state=live.verify_run(directory)
+    first=state['projects'][0]
+    repairs=list(directory.rglob('repair.json'))
+    if protocol=='V2':
+        assert client.request.call_count==3 and first['blocked_indicators']=={'I00':'BLOCKED_ERROR'} and not repairs
+    else:
+        assert client.request.call_count==2 and len(first['rows'])==1 and not state['blocking_errors']
+        assert read(repairs[0])['criteria_origin'][sample['assessment']['criterion_assessments'][0]['criterion_id']]=='correction'

@@ -42,6 +42,13 @@ def semantic_issues(errors, assessment, indicator_id, rubric=None, project_field
                         criterion_id=criterion['criterion_id'], evidence_indices=invalid,
                         evidence_count=len(assessment['evidence'])))
             continue
+        if code == 'V3_CRITERION:UNSUPPORTED_CANNOT_CLAIM_EVIDENCE':
+            for index, criterion in enumerate(assessment['criterion_assessments']):
+                if criterion['support'] == 'NOT_DEMONSTRATED' and criterion['evidence_indices']:
+                    issues.append(dict(category='INVALID_FIELD_VALUE', rule=code,
+                        path=f'$.criterion_assessments[{index}].evidence_indices', indicator_id=indicator_id,
+                        criterion_id=criterion['criterion_id'], support='NOT_DEMONSTRATED'))
+            continue
         if code == 'V3_CRITERION:POSITIVE_SUPPORT_REQUIRES_QUOTE':
             for index, criterion in enumerate(assessment['criterion_assessments']):
                 if criterion['support'] != 'NOT_DEMONSTRATED' and not criterion['evidence_indices']:

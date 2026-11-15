@@ -182,3 +182,33 @@ def test_execute_pipeline_freezes_indicator_selection_on_resume(system, monkeypa
         runner.execute_pipeline(system.root, run_id='selection', resume=True, through='knowledge', indicator_ids=['I03'])
     assert runner.execute_pipeline(system.root, run_id='selection', resume=True, through='knowledge')['status'] == 'COMPLETE'
     assert read(execution)['indicator_ids'] == ['I01', 'I02']
+
+
+def test_v3_schema_generates_justification_before_scores_and_legacy_order_is_kept(corpus, tokenizer_stub):
+    """REASONING_BEFORE_SCORE_V1: same fields and limits; only generation order changes."""
+    from layer4_evaluation.indicators import evidence_references as refs
+    profiles = prospective(corpus)
+    new = contexts(corpus, profiles, tokenizer_stub)[0]['TEST_PROJECT']['I00']
+    old = contexts(corpus, profiles, tokenizer_stub, prompt_version=None)[0]['TEST_PROJECT']['I00']
+    assert new['response_order'] == refs.REASONING_FIRST and 'response_order' not in old
+    a = response_schema(new, corpus.project['fields'])['properties']['assessments']['items']
+    b = response_schema(old, corpus.project['fields'])['properties']['assessments']['items']
+    criterion = a['properties']['criterion_assessments']['items']
+    assert list(criterion['properties']) == refs.CRITERION_ORDER == criterion['required']
+    assert list(a['properties']['strength_rubric']['properties']) == refs.STRENGTH_ORDER
+    assert list(a['properties']) == refs.ASSESSMENT_ORDER
+    def same(x):  # 'required' order carries no JSON Schema meaning
+        if isinstance(x, dict):
+            return {k: sorted(v) if k == 'required' else same(v) for k, v in x.items()}
+        return [same(v) for v in x] if isinstance(x, list) else x
+    assert same(a) == same(b)  # identical fields, enums and limits
+
+
+def test_v3_context_report_records_separate_fingerprints(corpus, tokenizer_stub):
+    requests, report = contexts(corpus, prospective(corpus), tokenizer_stub)
+    request = requests['TEST_PROJECT']['I00']
+    marks = report['requests'][0]['fingerprints']
+    assert marks['evidence_sha256'] == v3.canonical_hash(request['payload'])
+    assert marks['response_schema_sha256'] == v3.canonical_hash(response_schema(request, corpus.project['fields']))
+    import hashlib
+    assert marks['instructions_sha256'] == hashlib.sha256(request['prompt'].split('INPUT_JSON:\n', 1)[0].encode()).hexdigest()
