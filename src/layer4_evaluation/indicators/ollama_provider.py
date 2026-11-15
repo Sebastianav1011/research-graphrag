@@ -477,7 +477,24 @@ class OllamaClient:
                     quantization=details.get('quantization_level'), capabilities=info.get('capabilities', []),
                     think=False if no_thinking else None,
                     template_bytes=len((info.get('template', '') + info.get('system', '')).encode('utf-8')),
-                    model_metadata_sha256=canonical_hash(info))
+                    model_metadata_sha256=metadata_hash(info))
+
+
+def metadata_hash(info):
+    # Ollama serialises the Modelfile PARAMETER map in nondeterministic order
+    # (it varies across server restarts). Line order carries no meaning, so the
+    # lines are sorted (also the PARAMETER block of the modelfile); any change in
+    # names or values still alters the hash.
+    info = dict(info)
+    if isinstance(info.get('parameters'), str):
+        info['parameters'] = '\n'.join(sorted(info['parameters'].splitlines()))
+    if isinstance(info.get('modelfile'), str):
+        lines = info['modelfile'].split('\n')
+        index = [i for i, line in enumerate(lines) if line.startswith('PARAMETER ')]
+        for i, line in zip(index, sorted(lines[i] for i in index)):
+            lines[i] = line
+        info['modelfile'] = '\n'.join(lines)
+    return canonical_hash(info)
 
 
 def create_client(settings):
