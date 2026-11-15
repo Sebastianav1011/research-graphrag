@@ -1,29 +1,25 @@
-# Capa 5 — indicadores, evaluación y resultados
+# Layer 4 — evaluación y resultados
 
-La documentación operativa y el estado actual están en
-[outputs/layer4/README.md](../../outputs/layer4/README.md).
+El flujo actual se inicia desde `run.py`: Qwen local mediante Ollama evalúa
+los indicadores institucionales con evidencia GraphRAG verificable. Python
+valida citas y contratos, calcula confianza S/K y exporta Excel/CSV. La API
+requiere autorización y presupuesto separados. La resolución territorial es
+determinista y no depende del LLM.
 
-Codex CLI es la interfaz mediante la cual el sistema utiliza un LLM para realizar
-la interpretación semántica. El modelo descubre relaciones entre proyectos y los
-48 perfiles, interpreta criterios, vincula citas y evalúa evidencias. Python
-prepara datos, coordina llamadas y reanudación, valida contratos y citas, calcula
-`100 × (0.55S + 0.45K)` y consolida/exporta. Capa 4B resuelve territorios de forma
-determinista y no depende de Codex CLI.
+La [guía principal](../../README.md#flujo-base-y-ejecución-manual) reúne ejecución,
+Knowledge compartido, estados, limitaciones y contrato de siete columnas.
 
-## Módulos actuales
+## Módulos del flujo actual
 
-- `indicators/global_discovery_v3_3.py`: selección semántica versionada, cero a seis
-  priorizados, citas y diagnóstico de descartes.
-- `indicators/assessment_v3.py`: contrato vigente, validación determinista y confianza.
-- `indicators/consumer_v3_3.py`: proyección futura de seis columnas, solo VALID
-  SUPPORTED priorizados, estados conservados en auditoría; no publica.
-- `indicators/final_export.py`: exportación histórica V2 de siete columnas.
-- `paths.py`: resolución explícita de la reorganización sin reescribir fingerprints.
-- `territories/`: extracción/resolución territorial y publicación 4B aceptada.
+- `live_execution.py`: ejecución, validación, checkpoints y verificación de recibos.
+- `indicators/scoped_retrieval.py`: ranking vectorial propio del proyecto y contexto relacional.
+- `indicators/context_budget.py`: empaquetado y cobertura del contexto enviado.
+- `indicators/ollama_provider.py`: transporte local y reparación focalizada.
+- `indicators/evidence_references.py`: referencias a fragmentos y materialización literal.
+- `indicators/assessment_v3.py`: criterios, validación y cálculo S/K.
+- `thesis_output.py` e `indicator_csv.py`: exportaciones del run.
+- `territories/`: extracción y resolución territorial.
 
-El ejecutor controlado `scripts/run_layer4_pilot_discovery_v3_3.py` autoriza una
-llamada independiente, sin retry ni assessments automáticos. PROJ_20456 ya terminó;
-PROJ_21299 sigue pendiente. No usar el cierre histórico V2 para ejecutar V3.3.
-Los helpers históricos permanecen como procedencia, no como comandos de reanudación
-universal. Las propuestas COL-01/CUL-01 y compactación JSON no están activadas.
-No se ha publicado V3.3 ni reconstruido otra capa.
+Codex CLI, los cierres V2, `global_discovery_v3_3.py` y `consumer_v3_3.py`
+conservan estudios y contratos históricos. No representan el flujo BASE actual,
+que prepara los 48 indicadores salvo selección CLI explícita.

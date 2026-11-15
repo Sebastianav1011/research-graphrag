@@ -1,6 +1,6 @@
 # Capa 2 — preprocesamiento
 
-Entrada vigente: `data/raw`, leída por `adapters.py`. El único coordinador de documentos nuevos es `scripts/run_pipeline_manual.py`; el comando ETL original que sigue es una herramienta de mantenimiento.
+Entrada actual: `data/layer1_sources/base` o entregas `incoming`, leídas por `adapters.py` y coordinadas desde `run.py`. BASE se prepara en staging compartido; ver [guía principal](../../../README.md#knowledge-compartido). El ETL original descrito abajo se conserva como herramienta de mantenimiento.
 
 ## Propósito
 
@@ -28,12 +28,12 @@ ETL: preflight → ingesta/validación → normalización → identidad → cons
 
 ## Entradas y salidas
 
-Recibe CSV/XLSX y mappings locales de config/sources.yaml. Publica siete Parquet en data/canonical y staging/auditoría bajo data/staging y outputs/layer1. DANE recibe su XLSX autorizado y escribe data/reference/processed, sin alterar canonical.
+Recibe CSV/XLSX y mappings locales de config/sources.yaml. En el flujo BASE publica canonical, staging y auditoría dentro del checkpoint compartido. El ETL histórico conserva sus rutas `data/canonical`, `data/staging` y `outputs/layer2`. DANE escribe su referencia separada, sin alterar canonical.
 
 ## Relación con otras capas
 
-Capa 2 solo lee canonical aprobado. Capa 4B consume la dimensión DANE mediante load_reference; no hay un paquete activo layer1_territories.
+El constructor de Knowledge consume canonical aprobado. La resolución territorial consume la dimensión DANE mediante load_reference; no hay un paquete activo layer1_territories.
 
 ## Ejecución
 
-Usar [la guía principal](../../README.md#ejecución-paso-a-paso) y los entrypoints [run_layer1.py](../../scripts/run_layer1.py) y [build_dane_reference.py](../../scripts/build_dane_reference.py). Ambos escriben publicaciones.
+Usar [la guía principal](../../../README.md#flujo-base-y-ejecución-manual) para BASE. Los entrypoints de mantenimiento [run_layer1.py](../../../scripts/run_layer1.py) y [build_dane_reference.py](../../../scripts/build_dane_reference.py) escriben publicaciones.

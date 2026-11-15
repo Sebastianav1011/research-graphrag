@@ -1,6 +1,8 @@
 # Ejecución
 
-Entrada única para documentos nuevos:
+Entrada actual: `uv run python run.py`; ver [ejecución manual](../README.md#flujo-base-y-ejecución-manual).
+
+El wrapper compatible para documentos nuevos conserva su interfaz:
 
 ```powershell
 uv run python -B scripts/run_pipeline_manual.py run --through results --approve-build --authorize

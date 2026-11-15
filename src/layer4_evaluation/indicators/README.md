@@ -1,4 +1,9 @@
-# Capa 5 — indicadores (4A en estudios históricos)
+# Indicadores — componentes históricos
+
+Para la campaña BASE actual con Qwen/Ollama, GraphRAG y S/K, consultar la
+[guía principal](../../../README.md#flujo-base-y-ejecución-manual) y el
+[mapa de módulos actuales](../README.md). Lo siguiente documenta estudios
+V1/V2 y preliminares conservados, no el procedimiento vigente de la campaña.
 
 El cierre candidato V2 extiende `experiment.py` y el mismo `codex_cli.py`.
 `assessment_v2.py` define contratos, rúbrica, validación y fórmula V2;
@@ -8,14 +13,14 @@ histórico y `closure_export.py` prepara revisión/comparaciones y la publicaci�
 oficial con aceptación humana. No son proveedores ni pipelines alternativos.
 V1 y sus resultados se preservan. Véase el [procedimiento de cierre](../../../docs/methodology/layer4_closure_v2.md).
 
-## Procedimiento vigente de cierre
+## Procedimiento histórico de cierre
 
 Usar `scripts/run_layer4_closure.py --settings config/layer4_closure_definitive.yaml`.
 El cierre mantiene dos candidatos y fallback desactivado; su implementación y
 plan experimental permanecen conservados y configurables. La extensión
 `semantic_fallback.py` añade una ronda configurable con el mismo adaptador;
 `closure_runtime.py` conserva los hashes y valida por separado opiniones humanas.
-`final_projection.py` y `final_export.py` son la única proyección oficial activa
+`final_projection.py` y `final_export.py` son la proyección oficial del cierre histórico
 de siete columnas de indicadores y cuatro territoriales. `cleanup.py` registra
 inventario, dry-run y recuperación antes de retirar temporales demostrados.
 
@@ -60,7 +65,7 @@ No modifica Capa 3 ni sustituye su catálogo congelado. Puede incorporar la brid
 
 ## Ejecución
 
-La ruta vigente de 50 proyectos está en `experiment.py`, con selección diversa
+La ruta histórica de 50 proyectos está en `experiment.py`, con selección diversa
 en `experiment_selection.py`, lectura verificada en `experiment_inputs.py`,
 revisión/métricas en `review.py` y exportación reusable en `experiment_export.py`.
 Usa exclusivamente el adaptador `codex_cli.py`. Configuración:
@@ -71,4 +76,4 @@ del preliminar de 20 se conservan como históricos.
 
 Véase [metodología, autorización y reproducción](../../../docs/methodology/layer4a_codex_50.md).
 
-Véase [Capa 4A en la guía](../../../README.md#5-capa-4a--preparación-y-preliminar-técnico). El YAML conserva ejecución de preparación deshabilitada, pero el runner provisional tiene un --execute explícito independiente. Requiere autorización, CLI compatible y snapshots exactos; nunca es parte de una verificación documental.
+Véase [guía operativa actual](../../../README.md#flujo-base-y-ejecución-manual). El YAML conserva ejecución de preparación deshabilitada, pero el runner provisional tiene un --execute explícito independiente. Requiere autorización, CLI compatible y snapshots exactos; nunca es parte de una verificación documental.

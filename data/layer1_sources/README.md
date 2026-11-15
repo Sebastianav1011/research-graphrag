@@ -59,11 +59,12 @@ equivale a publicación: el ETL existente valida duplicados, conflictos e identi
 La operación existente `run_pipeline_manual.py raw` muestra un resumen sin valores
 de las filas; `run --through knowledge` prepara una ejecución aislada sin LLM.
 
-Los nuevos resultados quedan en `outputs/`: Capa 2 en `layer2_processing/`, GraphRAG
-en `layer3_graphrag/` y evaluación en `layer4_evaluation/`. El coordinador mantiene
-cada ejecución en `outputs/runs/<run_id>/`, con esas mismas carpetas dentro de
-`workspace/outputs/`. Después de agregar fuentes o cambiar mappings, crear un run
-nuevo; la reanudación comprueba los originales y los checkpoints previos.
+La BASE nueva se construye en `outputs/shared/base/staging/` y, tras verificarse,
+se publica en `outputs/shared/base/versions/<version_id>/artifacts/`. Los runs BASE
+reutilizan esa versión sin copiarla; sus evaluaciones quedan en `outputs/runs/local/`
+para Ollama. Ver [arquitectura y ejecución](../../README.md#knowledge-compartido).
+Después de agregar fuentes o cambiar mappings, preparar una nueva versión compatible;
+la reanudación comprueba los originales y los checkpoints previos.
 
 Las publicaciones trasladadas conservan sus bytes y manifiestos. El registro existente
 `config/sad_relocations.json` resuelve sus rutas históricas. `outputs/layer4/` conserva

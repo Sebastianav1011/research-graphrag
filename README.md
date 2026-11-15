@@ -119,6 +119,107 @@ El presupuesto API conserva reservas para llamadas en curso e inciertas; es una
 protección preventiva y no consulta saldo real ni garantiza sobrecosto cero.
 Cada proveedor usa su propio run, sin mezclar checkpoints o respuestas.
 
+## Flujo BASE y ejecución manual
+
+BASE procede de los CSV originales en `data/layer1_sources/base/`; catálogo y
+DANE están separados en `reference/`. Layer 2 valida, normaliza y resuelve
+identidades, produce canonical y construye documentos, secciones, fragmentos,
+entidades y relaciones con hashes y procedencia, sin modificar originales.
+
+Layer 3 utiliza embeddings **BGE-M3 SOURCE/REFERENCE**. `retrieved-graph` combina
+ranking vectorial de fragmentos propios del proyecto con nodos, relaciones y
+caminos verificables del grafo. No descarta indicadores por un umbral de similitud:
+sin `--indicators`, prepara los **48**, sujetos a bloqueos técnicos. Las relaciones
+son contexto complementario; no transfieren logros entre proyectos. Las citas
+se extraen de fragmentos literales verificables; ranking y relaciones no las sustituyen.
+
+Después de preparar dependencias con `uv sync --locked`, abrir `uv run python run.py`:
+
+1. En **Cambiar modelo**, elegir Ollama local y comprobar `qwen3.5:4b-q4_K_M`
+   en el encabezado. Ollama y los pesos locales deben estar disponibles.
+2. Elegir **Ejecutar sistema → Fuente de datos → Base**.
+3. Elegir **Seleccionar proyectos específicos por ID** e introducir IDs separados por comas.
+4. En **CONOCIMIENTO BASE**, elegir **Reutilizar conocimiento existente** o
+   **Reconstruir conocimiento completo**. Para la campaña, elegir reutilización.
+5. En BASE, el menú fija `retrieved-graph` y usa modo prospectivo por defecto;
+   no presenta otro selector de contexto o temporalidad en esa rama. Evalúa los 48 indicadores.
+6. Revisar el resumen, confirmar y consultar resultados y auditorías en el run informado.
+
+Para fijar las opciones explícitamente desde CLI:
+
+```powershell
+uv run python run.py run --source base --projects 21736 --provider ollama --evaluation-mode prospective --context-mode retrieved-graph --knowledge-action reuse --through export
+```
+
+## Knowledge compartido
+
+```text
+outputs/shared/base/active.json                         Versión vigente
+outputs/shared/base/versions/<version_id>/manifest.json Identidad y hashes
+outputs/shared/base/versions/<version_id>/artifacts/    BASE física persistente
+outputs/shared/base/staging/<build_id>/                 Construcción no activada
+outputs/runs/local/<run_id>/                            Evaluación con Ollama
+```
+
+En `artifacts/workspace/outputs/`, `layer2/` contiene canonical y Knowledge;
+`layer3/` contiene embeddings, índices, grafo y caché de consultas. Configuraciones
+y recibos de preprocesamiento acompañan al checkpoint. Una BASE compatible puede
+reutilizarse en múltiples runs sin reconstruirse ni copiarse por proyecto.
+
+- **reuse:** verifica compatibilidad e integridad y fija la versión utilizada.
+- **rebuild:** construye en staging, verifica artefactos, manifiestos e inventario,
+  publica por rename y después activa la nueva versión, conservando la anterior.
+  Las interrupciones conservan checkpoints para recuperación.
+
+`active.json` registra la versión vigente y la anterior; cada run guarda su
+referencia exacta. Las versiones antiguas pueden conservar su ubicación histórica.
+Las carpetas globales `outputs/layer2`, `layer3`, `layer4` y `reviews` mantienen
+históricos o recursos necesarios: modelos, tokenizadores, rúbricas y referencias
+territoriales. No eliminarlas automáticamente. Los runs sellados pueden requerir
+su runtime original; no cambiar hashes para aceptar código incompatible.
+
+## Resultados y límites
+
+El contrato predeterminado `THESIS_VALID_ASSESSMENTS_V2` exporta evaluaciones
+válidas, incluidas parciales y de confianza cero. Excel (`Proyectos`, `Artículos`)
+y `indicadores.csv` utilizan siete columnas:
+
+`proyecto/articulo_siap_id`, `indicador_id`, `estado_cumplimiento`,
+`parrafo_evidencia`, `fuente_evidencia`, `ubicacion_evidencia`, `confianza`.
+
+- **SUPPORTED:** respaldo suficiente según los criterios y reglas institucionales.
+- **INSUFFICIENT_EVIDENCE:** evaluación válida con respaldo parcial o ausente;
+  puede tener confianza positiva y citas pertinentes.
+- **BLOCKED_ERROR:** error técnico o respuesta inválida; queda en auditoría,
+  no se exporta como evaluación válida ni equivale a ausencia de evidencia.
+
+Python calcula `100 × (0.55S + 0.45K)`. En SK, S normaliza la suma de directness,
+specificity, clarity y temporal_alignment; K combina cobertura REQUIRED y la
+mejor alternativa por grupo. La confianza mide **respaldo documental, no
+probabilidad de exactitud** ni cumplimiento pleno. Las citas conservan campo,
+archivo, fila y ubicación verificable.
+
+La evaluación prospectiva admite respaldo parcial de propuestas concretas, sin
+acreditar logros realizados. `CONTEXT_ONLY` puede producir confianza positiva
+sin respaldo sustantivo del resultado buscado. El contexto es un subconjunto
+recuperado con omisiones registradas; ausencia allí no prueba ausencia documental.
+
+## Campaña experimental actual
+
+Referencia local verificada: **`78420dc8b249600b-9558d0f0`**, no una versión
+universal requerida en otras instalaciones. Consultar su registro con
+`uv run python run.py knowledge-status`.
+
+Proyectos: **21750, 21736, 22022, 21869 y 21844**. Configuración común: BASE,
+Qwen 3.5 4B local mediante Ollama, prospectivo, `retrieved-graph`, Knowledge
+`reuse` y los 48 indicadores. Conservar la misma versión durante la campaña.
+La referencia previa de 21844 procesó 48 indicadores: **42 evaluaciones válidas
+y 6 bloqueadas**. Demuestra funcionamiento técnico, no calidad perfecta.
+
+La comparación API será posterior, con evidencia canónica y parámetros metodológicos
+equivalentes. Revisar fingerprints y omisiones: las ventanas distintas no garantizan
+el mismo payload. Confirmar modelo, tarifas, presupuesto y autorización antes de enviar.
+
 ## Runs, resultados e histórico
 
 ```text
@@ -128,10 +229,14 @@ outputs/runs/anteriores/<ID>/   Proveedor heredado no identificable
 outputs/historico/<grupo>/<ID>/ Resultados permanentes y revisiones verificadas
 ```
 
-Dentro de un run: `estado/`, `manifiestos/`, `grafo/`, `logs/`, `preprocess/`,
-`workspace/`, checkpoints técnicos y `resultados/`. Las tres salidas son
-`resultados/indicadores.csv`, `resultados/indicadores_territorios.csv` y
-`resultados/performance/`. Importar `codigo_dane` como texto en herramientas externas.
+Los nuevos runs BASE contienen `estado/`, `manifiestos/`, `grafo/`, `logs/`,
+`preprocess/`, `evaluation/` y `resultados/`: configuraciones, contextos,
+solicitudes, respuestas, auditorías y checkpoints, sin duplicar BASE completa en
+un `workspace/`. Los históricos pueden conservar su distribución original.
+Dentro de `resultados/` están `resultado_indicadores.xlsx`, `indicadores.csv`,
+`indicadores_territorios.csv` y `performance/`. Consultar también
+`estado_indicadores.json` y `evaluaciones_validas.json` para cobertura y bloqueos.
+Importar `codigo_dane` como texto en herramientas externas.
 
 Cada exportación conserva una copia verificada en histórico con evidencias,
 performance y metadata. Las revisiones no sobrescriben snapshots previos; consultar
@@ -177,4 +282,4 @@ El conjunto de publicación contiene código, schemas, configuración pública,
 plantillas vacías, contrato autorizado, documentación y archivos uv. `outputs/`,
 bases privadas, credenciales, preferencias, cachés, pesos y entornos permanecen
 excluidos. Las actas y reportes históricos no revisados se conservan localmente
-fuera del conjunto preparado para Git. No se ejecutó commit ni push.
+fuera del conjunto preparado para Git. Publicar código no publica Knowledge ni resultados privados.
