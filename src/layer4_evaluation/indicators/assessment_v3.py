@@ -17,6 +17,12 @@ from .confidence import _normalize, validate_assessment
 from .prompt import indicator_input
 from .selection import FIELDS, canonical_hash
 from .validation_diagnostics import AssessmentValidationError
+from . import prospective_v2 as p2
+
+PROSPECTIVE_V2 = p2.MODE
+P2_VERSION = p2.VERSION
+PROSPECTIVE_PROMPT_V4 = p2.PROMPT
+PROSPECTIVE_PROMPTS_V2 = p2.PROMPTS
 
 VERSION = 'ASSESSMENT_V3'
 RUBRIC_VERSION = 'CATALOG_ROLES_V3_CANDIDATE'
@@ -158,7 +164,8 @@ PROMPT_V3_TEXTS = [SK_TEMPORAL_SCALE, PROSPECTIVE_TEMPORAL_SCALE, SK_COHERENCE, 
 def evaluation_policy(mode=None, context=None, *, base=False, configured=None, saved=None):
     """Resolve new-run defaults or enforce the exact frozen/legacy policy."""
     configured=configured or {}
-    modes={'prospective':PROSPECTIVE,'demonstrated':DEMONSTRATED,PROSPECTIVE:PROSPECTIVE,DEMONSTRATED:DEMONSTRATED}
+    modes={'prospective':PROSPECTIVE_V2,'prospective-v1':PROSPECTIVE,'prospective-v2':PROSPECTIVE_V2,
+           'demonstrated':DEMONSTRATED,PROSPECTIVE:PROSPECTIVE,PROSPECTIVE_V2:PROSPECTIVE_V2,DEMONSTRATED:DEMONSTRATED}
     contexts={'full-descriptor':FULL_CONTEXT,'graphrag':GRAPHRAG_CONTEXT,'descriptor-graph':BASE_CONTEXT,'retrieved-graph':RETRIEVED_CONTEXT,
         RETRIEVED_CONTEXT:RETRIEVED_CONTEXT,
         FULL_CONTEXT:FULL_CONTEXT,GRAPHRAG_CONTEXT:GRAPHRAG_CONTEXT,BASE_CONTEXT:BASE_CONTEXT}
@@ -168,13 +175,21 @@ def evaluation_policy(mode=None, context=None, *, base=False, configured=None, s
         if (mode is not None and modes.get(mode)!=old_mode or context is not None and contexts.get(context)!=old_context):
             raise ValueError('Modos incompatibles con el checkpoint; crear un run nuevo')
         return dict(saved)
-    mode=mode or configured.get('mode') or (PROSPECTIVE if base else DEMONSTRATED)
+    mode=mode or configured.get('mode') or PROSPECTIVE_V2
     if mode not in modes:raise ValueError('Modo de evaluacion desconocido')
     mode=modes[mode]
     context=context or configured.get('context_mode') or (RETRIEVED_CONTEXT if base else GRAPHRAG_CONTEXT)
     if base and contexts.get(context)!=RETRIEVED_CONTEXT:
         raise ValueError('BASE requiere retrieved-graph sin descriptor completo; crear un run nuevo con ese contexto')
     if context not in contexts:raise ValueError('Modo de contexto desconocido')
+    if mode==PROSPECTIVE_V2:
+        value=dict(version=MODE_VERSION,evaluation_mode=mode,context_mode=contexts[context],
+            instructions_version=p2.PROMPT,supported_meaning='PLANNED_CONTRIBUTION_SUPPORTED_NOT_OBSERVED_IMPACT',
+            instructions_sha256=canonical_hash([SK_INSTRUCTIONS,PROSPECTIVE_TEMPORAL_SCALE,SK_COHERENCE,
+                p2.INSTRUCTIONS,p2.INTERPRETATIONS,p2.LIMITATIONS,p2.EXTERNAL_RECORD_CRITERIA,PARTIAL_COVERAGE]),
+            confidence_version=SK_CONFIDENCE_VERSION, decision_policy=p2.DECISION_POLICY)
+        value['sha256']=canonical_hash(value)
+        return value
     value=dict(version=MODE_VERSION,evaluation_mode=mode,context_mode=contexts[context],
         instructions_version=PROSPECTIVE_PROMPT_V3 if mode==PROSPECTIVE else 'DEMONSTRATED_SK_PROMPT_V2_PARTIAL',
         supported_meaning='PLANNED_CONTRIBUTION_SUPPORTED' if mode==PROSPECTIVE else 'CATALOG_REQUIRED_STAGE_SUPPORTED',
@@ -186,7 +201,7 @@ def evaluation_policy(mode=None, context=None, *, base=False, configured=None, s
 
 
 def verify_evaluation_policy(policy):
-    if (policy.get('version')!=MODE_VERSION or policy.get('evaluation_mode') not in (PROSPECTIVE,DEMONSTRATED)
+    if (policy.get('version')!=MODE_VERSION or policy.get('evaluation_mode') not in (PROSPECTIVE,PROSPECTIVE_V2,DEMONSTRATED)
             or policy.get('context_mode') not in (FULL_CONTEXT,GRAPHRAG_CONTEXT,BASE_CONTEXT,RETRIEVED_CONTEXT)
             or policy.get('sha256')!=canonical_hash({k:v for k,v in policy.items() if k!='sha256'})):
         raise ValueError('Fingerprint de modos incompatible o alterado')
@@ -205,14 +220,19 @@ def prospective_rubric(rubric):
 
 
 def catalog_for_mode(profiles,rubrics,mode):
-    if mode not in (PROSPECTIVE,DEMONSTRATED):raise ValueError('Modo de evaluacion desconocido')
-    derived={iid:prospective_rubric(r) if mode==PROSPECTIVE else deepcopy(r) for iid,r in rubrics.items()}
+    if mode not in (PROSPECTIVE,PROSPECTIVE_V2,DEMONSTRATED):raise ValueError('Modo de evaluacion desconocido')
+    derived={iid:p2.derive(r) if mode==PROSPECTIVE_V2 else prospective_rubric(r) if mode==PROSPECTIVE else deepcopy(r) for iid,r in rubrics.items()}
     for iid,r in derived.items():check_rubric(profiles[iid],r)
     receipt=dict(version='TEMPORAL_CATALOG_DERIVATION_V1',evaluation_mode=mode,
         original_catalog_sha256=canonical_hash(rubrics),effective_catalog_sha256=canonical_hash(derived),
         criteria={iid:[dict(criterion_id=c['criterion_id'],original_temporal_requirement=c['temporal_requirement'],
             effective_temporal_requirement=d['temporal_requirement']) for c,d in zip(r['criteria'],derived[iid]['criteria'])]
             for iid,r in rubrics.items()})
+    if mode==PROSPECTIVE_V2:
+        receipt.update(version='PROSPECTIVE_OPERATIONAL_CATALOG_V2',
+            interpretations={iid:dict(interpretation=p2.INTERPRETATIONS.get(iid),
+                limitation=p2.LIMITATIONS.get(iid),original_rubric=deepcopy(r),effective_rubric_sha256=derived[iid]['rubric_sha256'])
+                for iid,r in rubrics.items()},acceptance='PENDING_HUMAN_REVIEW')
     return derived,receipt
 
 
@@ -241,7 +261,7 @@ def rubric_response_schema():
 
 
 def schemas(fields=FIELDS, version=VERSION):
-    if version not in (VERSION, SK_VERSION):
+    if version not in (VERSION, SK_VERSION, P2_VERSION):
         raise ValueError('Unknown assessment confidence contract: '+str(version))
     result = field_schema(deepcopy(v2.schemas()), fields)
     assessment = result['assessment']
@@ -250,7 +270,7 @@ def schemas(fields=FIELDS, version=VERSION):
     criterion = assessment['properties']['criterion_assessments']['items']
     criterion['properties'].pop('required_stage')
     criterion['required'].remove('required_stage')
-    if version == SK_VERSION:
+    if version in (SK_VERSION, P2_VERSION):
         criterion['properties']['coverage'] = dict(type='integer', minimum=0, maximum=4)
         criterion['required'].append('coverage')
         assessment['properties']['strength_rubric'] = _object(dict(
@@ -259,6 +279,8 @@ def schemas(fields=FIELDS, version=VERSION):
             explanation=dict(type='string', minLength=1)))
         assessment['required'].append('strength_rubric')
         assessment['properties']['coverage_policy']=dict(type='string',const=PARTIAL_COVERAGE)
+    if version == P2_VERSION:
+        p2.extend_schema(assessment)
     item = deepcopy(assessment)
     item['properties'] = {'indicator_id':dict(type='string', minLength=1), **item['properties']}
     item['required'] = [k for k in item['properties'] if k!='coverage_policy']
@@ -275,9 +297,12 @@ def schemas(fields=FIELDS, version=VERSION):
     result['rubric_batch'] = rubric_response_schema()
     result['confidence_result']['properties']['conceptual_coverage_version'] = dict(type='string', const=K_VERSION)
     result['confidence_result']['required'].append('conceptual_coverage_version')
-    if version == SK_VERSION:
+    if version in (SK_VERSION, P2_VERSION):
         result['confidence_result']['properties']['confidence_version']['const'] = SK_CONFIDENCE_VERSION
         result['confidence_result']['properties']['conceptual_coverage_version'] = dict(type='string',enum=[SK_K_VERSION,PARTIAL_COVERAGE])
+    if version == P2_VERSION:
+        result['confidence_result']['properties']['confidence_status']['enum'].append('NOT_APPLICABLE')
+        result['confidence_result']['allOf'][0]['if']['properties']['confidence_status'] = dict(enum=['INVALID_ASSESSMENT','NOT_APPLICABLE'])
     return result
 
 
@@ -415,9 +440,15 @@ def validate_criteria(project_fields, profile, assessment, rubric, ids):
     return errors+_criterion_contract(project_fields,value,rubric,ids)[0]
 
 
-def validate(project_fields, profile, assessment, rubric):
+def validate(project_fields, profile, assessment, rubric, *, components_only=False):
     check_rubric(profile, rubric)
     version = assessment.get('assessment_version') if isinstance(assessment, dict) else None
+    if version == P2_VERSION:
+        errors=[f'P2_SCHEMA:{list(e.absolute_path)}:{e.validator}' for e in
+            Draft202012Validator(schemas(project_fields,version)['assessment']).iter_errors(assessment)]
+        if errors:return errors
+        return (validate(project_fields,profile,p2.common_assessment(assessment),rubric, components_only=components_only) +
+                p2.validate(project_fields,profile,assessment,rubric, components_only=components_only))
     if version not in (VERSION, SK_VERSION):
         return ['V3_SCHEMA:UNKNOWN_ASSESSMENT_VERSION']
     errors = [f'V3_SCHEMA:{list(e.absolute_path)}:{e.validator}' for e in
@@ -429,6 +460,11 @@ def validate(project_fields, profile, assessment, rubric):
     if len(actual) != len(set(actual)) or set(actual) != set(criteria):
         return ['V3_CRITERIA:EXACT_FROZEN_RUBRIC_REQUIRED']
     projection = v2.legacy_projection(profile, assessment)
+    if components_only:
+        # A validation-only envelope aligns the legacy decision/strength pair.
+        # Nothing in the original assessment or its strength is rewritten.
+        projection['decision'] = ('NOT_SUPPORTED' if assessment['support_strength'] == 0 else
+            'INSUFFICIENT_EVIDENCE' if assessment['support_strength'] < 3 else 'SUPPORTED')
     # Only the new state policy merges completed no-support judgments. Reuse the
     # legacy gates without changing V1/V2/V3 or the meanings of S and K.
     if version == SK_VERSION and assessment['decision'] == 'INSUFFICIENT_EVIDENCE' and assessment['support_strength'] == 0:
@@ -460,11 +496,11 @@ def validate(project_fields, profile, assessment, rubric):
             errors.append('SK_STRENGTH:ZERO_ANCHOR_MISMATCH')
         if assessment['support_strength'] == 0 and positive:
             errors.append('SK_ZERO_SUPPORT:CANNOT_CLAIM_POSITIVE_CONCEPTUAL_SUPPORT')
-    if assessment['decision'] == 'NOT_SUPPORTED' and positive:
+    if not components_only and assessment['decision'] == 'NOT_SUPPORTED' and positive:
         errors.append('V3_NOT_SUPPORTED:CANNOT_CLAIM_POSITIVE_CONCEPTUAL_SUPPORT')
     if assessment['support_strength'] > 0 and not evidence:
         errors.append('V3_POSITIVE_STRENGTH:REQUIRES_EVIDENCE')
-    if assessment['decision'] == 'SUPPORTED':
+    if not components_only and assessment['decision'] == 'SUPPORTED':
         if not clear:
             errors.append('V3_SUPPORTED:CLEAR_SUBSTANTIVE_CRITERION_REQUIRED')
         if any(c['role'] == 'REQUIRED' and cid not in clear for cid,c in criteria.items()):
@@ -477,6 +513,13 @@ def validate(project_fields, profile, assessment, rubric):
 
 def confidence(project_fields, profile, assessment, rubric):
     errors = validate(project_fields, profile, assessment, rubric)
+    if isinstance(assessment,dict) and assessment.get('assessment_version')==P2_VERSION:
+        result=dict(confidence_version=SK_CONFIDENCE_VERSION,conceptual_coverage_version=PARTIAL_COVERAGE,
+            confidence_status='INVALID_ASSESSMENT' if errors else 'NOT_APPLICABLE',confidence_raw_score=None,
+            conceptual_coverage=None,support_strength_score=None,confidence_probability=None,confidence_level=None,validation_errors=errors)
+        if errors or assessment['decision']=='NOT_APPLICABLE':return result
+        # Exact same S, K, Decimal rounding and weights as SK; no parallel formula.
+        return confidence(project_fields,profile,p2.common_assessment(assessment),rubric)
     granular = isinstance(assessment, dict) and assessment.get('assessment_version') == SK_VERSION
     result = dict(confidence_version=SK_CONFIDENCE_VERSION if granular else CONFIDENCE_VERSION,
         conceptual_coverage_version=assessment.get('coverage_policy',SK_K_VERSION) if granular else K_VERSION,
@@ -517,6 +560,9 @@ def indicator_row(project, profile, assessment, rubric):
         **({'strength_rubric':deepcopy(assessment['strength_rubric'])}
            if 'strength_rubric' in assessment else {}),
         assessment_version=assessment.get('assessment_version'), decision=decision, support_strength=assessment.get('support_strength'),
+        **({'applicability':deepcopy(assessment['applicability']),
+            'evaluation_meaning':'PLANNED_CONTRIBUTION_NOT_OBSERVED_IMPACT',
+            'prospective_limitation':p2.LIMITATIONS.get(profile['indicator_id'])} if assessment.get('assessment_version')==P2_VERSION else {}),
         **({'coverage_policy':assessment['coverage_policy']} if 'coverage_policy' in assessment else {}),
         criterion_assessments=assessment.get('criterion_assessments', []),
         evidence_source_fields=[e['field'] for e in assessment.get('evidence', [])],

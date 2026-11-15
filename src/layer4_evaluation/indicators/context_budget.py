@@ -64,7 +64,7 @@ def with_relations(request,package,schema,settings,reserve,*,tokenizer=None,cap=
     if seed not in nodes or nodes[seed]['entity_type']!='PROJECT' or nodes[seed]['canonical_id']!=request['project_id']:
         raise ValueError('Semilla relacional de otro proyecto')
     prefix=request['prompt'].split('INPUT_JSON:\n',1)[0]+RELATIONAL_INSTRUCTIONS
-    digest_only=request.get('prompt_version')==v3.PROSPECTIVE_PROMPT_V3
+    digest_only=request.get('prompt_version') in (v3.PROSPECTIVE_PROMPT_V3,*v3.PROSPECTIVE_PROMPTS_V2)
     def shown(relation):
         # RELATIONAL_PROVENANCE_DIGEST_V1 (new V3 requests): full provenance is audit
         # metadata (hashes, configs, local source paths), not evidence. The model
@@ -155,6 +155,35 @@ def rebudget(prompt, schema, settings, budget):
 
 def make_request(project, profile, rubric, fields, *, evidence_references=False, evidence_units=None,
                  assessment_version=v3.VERSION, evaluation_mode=None, context_mode=None, prompt_version=None):
+    if evaluation_mode==v3.PROSPECTIVE_V2:
+        from . import prospective_v2 as p2, evidence_references as refs
+        if assessment_version!=p2.VERSION or not evidence_references or prompt_version not in p2.PROMPTS:
+            raise ValueError('PROSPECTIVE_V2 requiere contrato, referencias y prompt V2')
+        request=make_request(project,profile,rubric,fields,evidence_references=True,evidence_units=evidence_units,
+            assessment_version=v3.SK_VERSION,evaluation_mode=v3.PROSPECTIVE,context_mode=context_mode,
+            prompt_version=v3.PROSPECTIVE_PROMPT_V3)
+        indicator=request['payload']['indicators'][0]
+        # Official profiles remain sealed in the plan. Demonstrated-mode examples
+        # are not instructions for this operational counterpart.
+        for key in ('favorable_evidence','insufficient_evidence','relational_context'):
+            indicator.pop(key,None)
+        indicator['prospective_interpretation']=p2.INTERPRETATIONS.get(profile['indicator_id'])
+        indicator['prospective_limitation']=p2.LIMITATIONS.get(profile['indicator_id'])
+        instructions=refs.SK_INSTRUCTIONS.replace(v3.SK_STATE_INSTRUCTIONS,'').replace(v3.SK_VERSION,p2.VERSION)
+        instructions=instructions.replace('assessment_version="ASSESSMENT_V3"',f'assessment_version="{p2.VERSION}"')
+        instructions=instructions.replace('Diseno vigente no es ejecucion; mecanismo existente no es resultado; intencion no es adopcion ni mejora.',
+            'Etapas previstas no son etapas ejecutadas; una intencion vaga no acredita un mecanismo.')
+        instructions+=v3.SK_INSTRUCTIONS.replace(v3.SK_VERSION,p2.VERSION).replace(v3.SK_TEMPORAL_SCALE,v3.PROSPECTIVE_TEMPORAL_SCALE)
+        instructions+=v3.SK_COHERENCE+p2.instructions_for(prompt_version)
+        if context_mode==v3.RETRIEVED_CONTEXT:
+            instructions+='\nFragmentos recuperados no exhaustivos: el silencio no establece no aplicabilidad ni ausencia en todo el documento.\n'
+        request.update(assessment_version=p2.VERSION,evaluation_mode=p2.MODE,prompt_version=prompt_version,
+            prompt=instructions+'\nINPUT_JSON:\n'+compact(request['payload']))
+        if prompt_version == p2.PROMPT_V3:
+            request['applicability_protocol'] = p2.COHERENT_APPLICABILITY
+        if prompt_version == p2.PROMPT:
+            request['decision_policy'] = p2.DECISION_POLICY
+        return request
     # Keep the frozen criterion explanations verbatim. Provenance/basis and
     # hashes remain in the sealed plan, without duplicating them in each prompt.
     v3.check_rubric(profile, rubric)
@@ -473,7 +502,7 @@ def prepare_contexts(projects, profiles, rubrics, settings, candidates, chunks, 
                 request_sha256=canonical_hash(request), budget=budget,
                 prompt_bytes=len(request['prompt'].encode()), selected=selected, omitted=omitted))
             if 'relational_context_receipt' in request:diagnostics[-1]['relational']=request['relational_context_receipt']
-            if request.get('prompt_version')==v3.PROSPECTIVE_PROMPT_V3 and 'INPUT_JSON:\n' in request['prompt']:
+            if request.get('prompt_version') in (v3.PROSPECTIVE_PROMPT_V3,*v3.PROSPECTIVE_PROMPTS_V2) and 'INPUT_JSON:\n' in request['prompt']:
                 # Separate fingerprints so providers can be compared on identical
                 # evidence, instructions and decoding schema (configuration is in the plan).
                 from .evidence_references import response_schema

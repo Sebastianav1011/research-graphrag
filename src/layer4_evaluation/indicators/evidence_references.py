@@ -94,21 +94,60 @@ def response_schema(request, fields):
     if not ids:
         props['evidence_refs']['maxItems'] = 0
     criteria['items']['required'] = list(props)
-    if version == v3.SK_VERSION:
+    if version in (v3.SK_VERSION,v3.P2_VERSION):
         strength = item['properties']['strength_rubric']
         strength['properties'].pop('evidence_indices')
         strength['properties']['evidence_refs'] = deepcopy(props['evidence_refs'])
         strength['required'] = list(strength['properties'])
+        if version==v3.P2_VERSION:
+            app=item['properties']['applicability']
+            app['properties'].pop('evidence_indices')
+            app['properties']['evidence_refs']=deepcopy(props['evidence_refs'])
+            app['required']=list(app['properties'])
         if request.get('response_order') == REASONING_FIRST:
             # Ollama generates properties in schema order. The legacy order made
             # the model emit coverage before criterion_id and its justification,
             # contradicting the prompt's own sequence (justify, then support and
             # coverage). Same fields and constraints; only the generation order.
-            for node, keys in ((item, ASSESSMENT_ORDER), (criteria['items'], CRITERION_ORDER), (strength, STRENGTH_ORDER)):
+            order=ASSESSMENT_ORDER if version!=v3.P2_VERSION else ['indicator_id','assessment_version','applicability',*ASSESSMENT_ORDER[2:]]
+            criterion_order=CRITERION_ORDER if version!=v3.P2_VERSION else CRITERION_ORDER+['evidence_relation']
+            for node, keys in ((item, order), (criteria['items'], criterion_order), (strength, STRENGTH_ORDER)):
                 if set(node['properties']) != set(keys):
                     raise ValueError('Campos de respuesta inesperados para ' + REASONING_FIRST)
                 node['properties'] = {k: node['properties'][k] for k in keys}
                 node['required'] = list(keys)
+    if version == v3.P2_VERSION:
+        from . import prospective_v2 as p2
+        if request.get('applicability_protocol') == p2.COHERENT_APPLICABILITY:
+            # Encode existing cross-field gates in the decoding grammar. Never
+            # infer applicability or repair the model's decision in Python.
+            branches = []
+            for status, basis, decisions in (
+                ('UNDETERMINED', ['UNKNOWN'], ['INSUFFICIENT_EVIDENCE']),
+                ('APPLICABLE', ['RELEVANT_SCOPE'], ['SUPPORTED', 'INSUFFICIENT_EVIDENCE']),
+                ('NOT_APPLICABLE', ['EXPLICIT_EXCLUSION', 'DOCUMENTED_SCOPE'], ['NOT_APPLICABLE']),
+            ):
+                branch = deepcopy(item)
+                bp = branch['properties']
+                ap = bp['applicability']['properties']
+                ap['status']['enum'] = [status]
+                ap['basis']['enum'] = basis
+                bp['decision']['enum'] = decisions
+                if status != 'UNDETERMINED':
+                    ap['evidence_refs']['minItems'] = 1
+                if status == 'NOT_APPLICABLE':
+                    bp['support_strength'] = dict(type='integer', const=0)
+                    cp = bp['criterion_assessments']['items']['properties']
+                    cp['support']['enum'] = ['NOT_DEMONSTRATED']
+                    cp['coverage'] = dict(type='integer', const=0)
+                    cp['evidence_refs']['maxItems'] = 0
+                    sp = bp['strength_rubric']['properties']
+                    for dimension in v3.STRENGTH_DIMENSIONS:
+                        sp[dimension] = dict(type='integer', const=0)
+                    sp['evidence_refs']['maxItems'] = 0
+                branches.append(branch)
+            item.clear()
+            item['anyOf'] = branches
     return schema
 
 
@@ -128,6 +167,8 @@ def materialize(request, wrapper):
                      for ci, criterion in enumerate(item['criterion_assessments'])]
         if 'strength_rubric' in item:
             judgments.append(('$.strength_rubric', item['strength_rubric']))
+        if 'applicability' in item:
+            judgments.append(('$.applicability', item['applicability']))
         for path, criterion in judgments:
             indices = []
             for ref in criterion.pop('evidence_refs'):

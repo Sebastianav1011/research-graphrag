@@ -36,6 +36,7 @@ from layer4_evaluation.indicators.selection import substantive_fields
 from layer4_evaluation.indicators.context_budget import VERSION as CONTEXT_VERSION
 from layer4_evaluation.indicators.validation_diagnostics import AssessmentValidationError, semantic_issues
 from layer4_evaluation.indicators import evidence_references as refs
+from layer4_evaluation.indicators import prospective_v2 as p2
 from layer4_evaluation.indicators.confidence import _normalize
 
 BASE=ROOT/'outputs/layer4/final/candidatos/demo_en_vivo'
@@ -70,6 +71,7 @@ def assessment_from_row(row):
     return dict(assessment_version=row['assessment_version'],decision=row['decision'],support_strength=row['support_strength'],
         **({'coverage_policy':row['coverage_policy']} if 'coverage_policy' in row else {}),
         **({'strength_rubric':row['strength_rubric']} if 'strength_rubric' in row else {}),
+        **({'applicability':row['applicability']} if 'applicability' in row else {}),
         criterion_assessments=row['criterion_assessments'],explanation=row['evidence_explanation'],
         evidence=[dict(field=f,text=t,stage=s) for f,t,s in zip(row['evidence_source_fields'],row['evidence_texts'],row['evidence_stages'])])
 
@@ -94,6 +96,9 @@ def check(directory):
     policy=plan.get('evaluation_policy')
     if policy:
         v3.verify_evaluation_policy(policy)
+        if policy['evaluation_mode']==v3.PROSPECTIVE_V2:
+            require(plan['assessment_version']==v3.P2_VERSION and policy['instructions_version'] in v3.PROSPECTIVE_PROMPTS_V2,
+                'Modo prospectivo V2 requiere su contrato y prompt propios')
         require(manifest.get('evaluation_policy_sha256')==policy['sha256'],'Fingerprint de modos distinto del manifiesto')
         require(plan['catalog_derivation']['effective_catalog_sha256']==canonical_hash(plan['rubrics']),
             'Catalogo derivado distinto del plan sellado')
@@ -101,8 +106,8 @@ def check(directory):
         verify_hashes(ROOT, plan['recovery']['archive_hashes'])
     if plan.get('checkpoint_migration'):
         verify_hashes(ROOT, plan['checkpoint_migration']['archive_hashes'])
-    require(plan['discovery_version']==gd.VERSION and plan['assessment_version'] in (v3.VERSION,v3.SK_VERSION) and len(plan['profiles'])==48,'Configuracion incompatible')
-    if plan['assessment_version']==v3.SK_VERSION:
+    require(plan['discovery_version']==gd.VERSION and plan['assessment_version'] in (v3.VERSION,v3.SK_VERSION,v3.P2_VERSION) and len(plan['profiles'])==48,'Configuracion incompatible')
+    if plan['assessment_version'] in (v3.SK_VERSION,v3.P2_VERSION):
         require(plan.get('confidence_version')==v3.SK_CONFIDENCE_VERSION, 'Version de confianza incompatible')
     if plan.get('request_protocol') == CONTEXT_VERSION:
         require(set(plan['context_requests'])=={p['project_id'] for p in plan['projects']}, 'Cobertura de proyectos/contextos incompleta')
@@ -117,6 +122,8 @@ def check(directory):
                 if policy:
                     require(request.get('evaluation_mode')==policy['evaluation_mode'] and
                         request.get('context_mode')==policy['context_mode'],'Modos de request/plan incompatibles')
+                    require(request.get('decision_policy') == policy.get('decision_policy'),
+                        'Politica de decision de request/plan incompatible')
                 require(request.get('assessment_version',v3.VERSION)==plan['assessment_version'], 'Contrato de confianza/request difieren')
                 require(request['project_id']==p['project_id'] and
                     [i['indicator_id'] for i in request['payload']['indicators']]==[iid], 'Contexto de otro proyecto/indicador')
@@ -290,7 +297,7 @@ def verify_run(directory,*,recover=False):
                         body.get('model')==plan['requested_model'],'Transporte incompleto; conservar claim')
                     parsed=strict_json(body['message']['content'])
                     require(parsed==strict_json((attempt/'response.raw.txt').read_text(encoding='utf-8')) and
-                        ((attempt/'repair.json').exists() or refs.materialize(request,parsed)==record['wrapper']),'Respuesta original/recuperada difieren')
+                        ((attempt/'repair.json').exists() or materialize_output(plan,p,request,parsed)[0]==record['wrapper']),'Respuesta original/recuperada difieren')
                     require(native['usage_observations'][0]==dict(input_tokens=body.get('prompt_eval_count'),
                         output_tokens=body.get('eval_count')),'Metricas originales/recuperadas difieren')
                 merged=False
@@ -321,8 +328,12 @@ def verify_run(directory,*,recover=False):
                     from jsonschema import Draft202012Validator
                     Draft202012Validator(expected_schema).validate(selection)
                     from layer4_evaluation.indicators.ollama_provider import strict_json
+                    materialized, decision_receipts = materialize_output(plan,p,request,selection)
                     require(strict_json((attempt/'response.raw.txt').read_text(encoding='utf-8'))==selection and
-                        refs.materialize(request,selection)==record['wrapper'], 'Referencias/citas materializadas diferentes')
+                        materialized==record['wrapper'], 'Referencias/citas materializadas diferentes')
+                    if request.get('decision_policy') == p2.DECISION_POLICY:
+                        require(read(attempt/'decision.json') == decision_receipts,
+                            'Decision derivada o procedencia no reproducibles')
                 native_tokens,_=aggregate_metrics(record['calls'])
                 require(all(verification['tokens'][k]==native_tokens[k] for k in ('input_tokens','output_tokens','total_tokens')) and
                     verification['tokens']['total_tokens']<=plan['budgets'][cp['phase']+'_postcall_review_threshold'],'Metricas ausentes o requieren revision')
@@ -406,6 +417,29 @@ def check_wrapper(plan,p,request,pid,ids,wrapper):
             plan['rubrics'][item['indicator_id']],p['fields'])
         if issues:
             raise AssessmentValidationError(issues)
+
+
+def resolve_wrapper(plan, project, request, wrapper):
+    """Shared deterministic decision for transport and offline audit replay."""
+    if request.get('decision_policy') != p2.DECISION_POLICY:
+        return wrapper, []
+    require(plan['evaluation_policy'].get('decision_policy') == p2.DECISION_POLICY,
+        'Politica de decision distinta del plan sellado')
+    ids = [i['indicator_id'] for i in request['payload']['indicators']]
+    v3.validate_wrapper(wrapper, project['project_id'], ids, project['fields'], plan['assessment_version'])
+    validate_context_evidence(request, wrapper)
+    resolved, receipts = [], []
+    for item in wrapper['assessments']:
+        iid = item['indicator_id']
+        assessment, receipt = p2.resolve_decision(project['fields'], plan['profiles'][iid],
+            {k:v for k,v in item.items() if k != 'indicator_id'}, plan['rubrics'][iid])
+        resolved.append(dict(indicator_id=iid, **assessment))
+        receipts.append(dict(indicator_id=iid, **receipt))
+    return dict(wrapper, assessments=resolved), receipts
+
+
+def materialize_output(plan, project, request, selection):
+    return resolve_wrapper(plan, project, request, refs.materialize(request, selection))
 
 
 def validate_context_evidence(request, wrapper):
@@ -548,6 +582,7 @@ def execute(args):
             emit(dict(status='CALL_STARTED',project_id=p['project_id'],phase=phase,indicator_ids=ids,token_reservation=reservation))
             provider = OllamaAssessmentProvider(out/phase/'ollama_runs', out/'schema.json', lambda p,i:request,
                 settings=settings, client=client, runtime=runtime, wrapper_validator=gate,
+                wrapper_resolver=lambda w: resolve_wrapper(plan,p,request,w),
                 execution_id=plan['execution_id'], max_retries=0, max_indicators=3, token_limit_retries=token_retries,
                 corrective_retries=corrective_retries if correction else 0, correction_version=cp.get('correction_version'))
             error = None
@@ -576,7 +611,7 @@ def execute(args):
 def summary(state):
     from collections import Counter
     decisions=Counter(r['decision'] for project in state['projects'] for r in project['rows'])
-    return {**{k:v for k,v in state.items() if k!='projects'},'projects':[{k:v for k,v in s.items() if k!='rows'} for s in state['projects']],
+    result={**{k:v for k,v in state.items() if k!='projects'},'projects':[{k:v for k,v in s.items() if k!='rows'} for s in state['projects']],
         'selected_projects':len(state['projects']),
         'processed_projects':sum(p['processed'] for p in state['projects']),
         'completed_projects':sum(p['complete'] for p in state['projects']),
@@ -588,3 +623,8 @@ def summary(state):
         'processing_complete':all(p['processed'] for p in state['projects']),
         'results_available':bool(decisions),
         'valid_assessments':sum(len(s['rows']) for s in state['projects'])}
+    if state.get('evaluation_policy',{}).get('evaluation_mode')==v3.PROSPECTIVE_V2:
+        result.update(not_applicable=decisions['NOT_APPLICABLE'],
+            support_denominator=sum(r.get('applicability',{}).get('status')=='APPLICABLE' for p in state['projects'] for r in p['rows']),
+            applicability_undetermined=sum(r.get('applicability',{}).get('status')=='UNDETERMINED' for p in state['projects'] for r in p['rows']))
+    return result

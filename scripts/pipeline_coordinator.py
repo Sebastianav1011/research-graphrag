@@ -321,6 +321,7 @@ def prepare_evaluation(root, run, selected):
     if policy:
         settings=dict(settings)
         settings['rubrics'],derivation=v3.catalog_for_mode(settings['profiles'],settings['rubrics'],policy['evaluation_mode'])
+    assessment_version=v3.P2_VERSION if policy.get('evaluation_mode')==v3.PROSPECTIVE_V2 else v3.SK_VERSION
     catalog_ids = {r['indicator_id'] for r in pq.read_table(workspace / 'outputs/layer2/canonical/indicadores.parquet').to_pylist()}
     if catalog_ids != set(settings['profiles']):
         raise ValueError('Catalogo GraphRAG y los 48 perfiles V3.3 no tienen los mismos IDs')
@@ -374,12 +375,12 @@ def prepare_evaluation(root, run, selected):
     tokenizer=pinned_tokenizer(root) if policy.get('context_mode')==v3.RETRIEVED_CONTEXT else None
     requests, context_report = prepare_contexts(inputs, selected_profiles, settings['rubrics'], provider_config,
         scoped_candidates,source_chunks,sections,
-        evidence_references=True, assessment_version=v3.SK_VERSION,
+        evidence_references=True, assessment_version=assessment_version,
         evaluation_mode=policy.get('evaluation_mode'),context_mode=policy.get('context_mode'),
         relational_contexts=relational_contexts,
         **({'tokenizer':tokenizer} if tokenizer is not None else {}),
         # Prompt text follows the run's sealed policy version (V2 plans stay V2).
-        **({'prompt_version':policy['instructions_version']} if policy.get('instructions_version')==v3.PROSPECTIVE_PROMPT_V3 else {}))
+        **({'prompt_version':policy['instructions_version']} if policy.get('instructions_version') in (v3.PROSPECTIVE_PROMPT_V3,*v3.PROSPECTIVE_PROMPTS_V2) else {}))
     context_report['project_scoped_retrieval']=retrieval_report
     write(directory / 'context_selection.json', context_report)
     review['context_selection'] = context_report
@@ -408,12 +409,14 @@ def prepare_evaluation(root, run, selected):
                  root/'src/layer4_evaluation/indicators/token_budget.py',root/'config/qwen_tokenizer.json',
                  root/'src/layer4_evaluation/indicators/scoped_retrieval.py',run_file(run, 'model.binding.json')):
         if path.exists():source_hashes[path.relative_to(root).as_posix()]=sha(path)
+    if assessment_version==v3.P2_VERSION:
+        source_hashes['src/layer4_evaluation/indicators/prospective_v2.py']=sha(root/'src/layer4_evaluation/indicators/prospective_v2.py')
     plan.update(version='MANUAL_RAW_V3_3_OLLAMA_V1', execution_id=uuid.uuid4().hex, projects=inputs,
-        assessment_version=v3.SK_VERSION, confidence_version=v3.SK_CONFIDENCE_VERSION,
+        assessment_version=assessment_version, confidence_version=v3.SK_CONFIDENCE_VERSION,
         coverage_policy=v3.PARTIAL_COVERAGE,
         request_protocol=context_version, context_requests=requests,
         isolate_indicator_errors=True,
-        corrective_retries=2, correction_protocol=MERGE_CORRECTION_VERSION,
+        corrective_retries=2, correction_protocol=v3.p2.CORRECTION if assessment_version==v3.P2_VERSION else MERGE_CORRECTION_VERSION,
         token_limit_retries=provider_config['token_limit_retries'] if provider_config['provider']=='ollama' else 0,
         runtime=dict(provider=provider_config['provider'], configuration=provider_config), requested_model=provider_config['model'],
         maximum_calls=len(selected_profiles) * len(inputs), total_token_reservation_cap=170000 * len(inputs), timeout_seconds=provider_config['timeout_seconds'],
@@ -461,10 +464,11 @@ def evidence_sources(project, location):
 def export(root, run, *, offline=False, output_contract=None):
     from layer4_evaluation.indicator_csv import TerritoryCodes, write_results
     from layer4_evaluation.thesis_output import (positive_record, indicator_record, render as render_thesis,
-        TEMPLATE, SHEETS, DEFAULT_CONTRACT, POSITIVE_CONTRACT, ALL_CONTRACT, VALID_CONTRACT, GENERAL_COLUMNS, recover_export)
-    output_contract=output_contract or DEFAULT_CONTRACT
-    if output_contract not in (POSITIVE_CONTRACT,ALL_CONTRACT,VALID_CONTRACT):raise ValueError('Contrato desconocido')
-    consumer_columns=GENERAL_COLUMNS if output_contract==VALID_CONTRACT else COLUMNS
+        TEMPLATE, SHEETS, DEFAULT_CONTRACT, POSITIVE_CONTRACT, ALL_CONTRACT, VALID_CONTRACT, PROSPECTIVE_CONTRACT, GENERAL_CONTRACTS, GENERAL_COLUMNS, recover_export)
+    export_request=read(run_file(run,'execution.json')) if run_file(run,'execution.json').exists() else {}
+    output_contract=output_contract or (PROSPECTIVE_CONTRACT if export_request.get('evaluation_policy',{}).get('evaluation_mode')=='PROSPECTIVE_V2' else DEFAULT_CONTRACT)
+    if output_contract not in (POSITIVE_CONTRACT,ALL_CONTRACT,*GENERAL_CONTRACTS):raise ValueError('Contrato desconocido')
+    consumer_columns=GENERAL_COLUMNS if output_contract in GENERAL_CONTRACTS else COLUMNS
     if offline:return recover_export(root,run,contract=output_contract)
     resolve_codes = TerritoryCodes(root)
     codes_by_pair, csv_records = {}, {}
@@ -508,6 +512,13 @@ def export(root, run, *, offline=False, output_contract=None):
                     s.get('context_limits',{}).get(iid) or 'PENDING')
                 coverage.append(dict(siap_id=p['siap_id'],indicator_id=iid,status=status,
                     decision=decisions.get(iid),project_complete=s['complete']))
+                if plan.get('assessment_version')==module.v3.P2_VERSION:
+                    attempts=[u for u in state['usage'] if u['project_id']==s['project_id'] and iid in u.get('indicator_ids',[])]
+                    saved_row=next((r for r in s['rows'] if r['indicator_id']==iid),None)
+                    coverage[-1].update(processing_status='EVALUATED' if status=='VALID' else 'PENDING' if status=='PENDING' else 'TECHNICALLY_BLOCKED',
+                        llm_calls=sum(u['calls'] for u in attempts),
+                        technical_error=next((u['error'] for u in reversed(attempts) if u.get('error')),None) if status!='VALID' else None,
+                        applicability_status=saved_row['applicability']['status'] if saved_row else None)
                 # Audit only: the prepared context state travels with every
                 # indicator, so evidence limits are never hidden behind VALID.
                 context=plan.get('context_requests',{}).get(s['project_id'],{}).get(iid,{}).get('context_selection')
@@ -525,16 +536,19 @@ def export(root, run, *, offline=False, output_contract=None):
                 locations = module.evidence_locations(p, assessment)
                 relevant = any(c['support'] in ('CLEAR', 'PARTIAL') and any(assessment['evidence'][i]['field'] in substantive_fields(p['fields']) for i in c['evidence_indices']) for c in assessment['criterion_assessments'])
                 if row['decision']=='SUPPORTED' and (not relevant or not locations or not all(e['match_valid'] and e['section_id'] for e in locations)):
-                    if output_contract in (ALL_CONTRACT,VALID_CONTRACT):raise ValueError('SUPPORTED sin evidencia verificada')
+                    if output_contract in (ALL_CONTRACT,*GENERAL_CONTRACTS):raise ValueError('SUPPORTED sin evidencia verificada')
                     export_exclusions.append(dict(siap_id=p['siap_id'],indicator_id=iid,reason='UNVERIFIED_OR_NON_SUBSTANTIVE_EVIDENCE'))
                     continue
                 value = row['confidence_raw_score']
-                if type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 100:
+                not_applicable=row['decision']=='NOT_APPLICABLE' and row.get('assessment_version')==module.v3.P2_VERSION
+                if not_applicable:
+                    if value is not None or row['confidence_status']!='NOT_APPLICABLE':raise ValueError('No aplicable requiere confianza N/A')
+                elif type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 100:
                     raise ValueError('Confianza guardada invalida')
                 codes=resolve_codes(p,assessment)
                 try:consumer=indicator_record(p,iid,row=row,locations=locations,territory_codes=codes)
                 except (ValueError,KeyError,TypeError) as exc:
-                    if output_contract in (ALL_CONTRACT,VALID_CONTRACT):raise
+                    if output_contract in (ALL_CONTRACT,*GENERAL_CONTRACTS):raise
                     export_exclusions.append(dict(siap_id=p['siap_id'],indicator_id=iid,reason=str(exc)))
                     continue
                 record=[consumer[c] for c in COLUMNS]
@@ -602,7 +616,11 @@ def export(root, run, *, offline=False, output_contract=None):
         if not result['supported'] else 'Excel vacio: ningun SUPPORTED supero los controles de exportacion; consultar export_exclusions.' if not rows
         else 'Se exportaron todos los positivos verificados, incluidos los de proyectos incompletos.')
     if output_contract==ALL_CONTRACT:result['note']='Cobertura de todos los indicadores seleccionados; decisiones y confianzas originales.'
-    if output_contract==VALID_CONTRACT:result['note']='Evaluaciones validas, incluidas confianzas bajas y cero; errores y limites de recuperacion solo en auditoria.'
+    if output_contract in GENERAL_CONTRACTS:result['note']='Evaluaciones validas, incluidas confianzas bajas y cero; errores y limites de recuperacion solo en auditoria.'
+    if request.get('evaluation_policy',{}).get('evaluation_mode')==module.v3.PROSPECTIVE_V2:
+        result.update(not_applicable=sum(c['decision']=='NOT_APPLICABLE' for c in coverage),
+            support_denominator=sum(r.get('applicability',{}).get('status')=='APPLICABLE' for r in valid_results),
+            applicability_undetermined=sum(r.get('applicability',{}).get('status')=='UNDETERMINED' for r in valid_results))
     if result['status']!='COMPLETE':result['note']+=' Cobertura PARTIAL; consultar indicadores bloqueados y pendientes.'
     write(run_file(run, 'export.json'), result)
     write(run_file(run, 'evidence_lineage.json'), lineage)

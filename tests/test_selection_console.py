@@ -104,14 +104,19 @@ def test_main_menu_incoming_uses_existing_source_selector(tmp_path,monkeypatch,m
     path.parent.mkdir(parents=True);path.write_text('Synthetic source',encoding='utf-8')
     monkeypatch.setattr(console,'ROOT',tmp_path)
     monkeypatch.setattr(console,'dispatch',lambda args:calls.append(args) or dict(status='CANCELLED'))
-    answers=iter(['1','1','1','1','2','','','0'] if mode=='file' else ['1','1','2','1','','','0'])
+    answers=iter(['1','1','1','1','2','0'] if mode=='file' else ['1','1','2','1','0'])
     monkeypatch.setattr('builtins.input',lambda prompt:next(answers))
     assert console.main([])==0
     assert len(calls)==1 and calls[0].source is None
     assert calls[0].input_file==('data/layer1_sources/incoming/example/project.txt' if mode=='file' else None)
     assert calls[0].delivery==('example' if mode=='delivery' else None)
     assert calls[0].through=='export'
-    assert calls[0].evaluation_mode=='demonstrated' and calls[0].context_mode=='graphrag'
+    assert calls[0].evaluation_mode is None and calls[0].context_mode=='graphrag'
+    from layer4_evaluation.indicators import assessment_v3 as v3, prospective_v2 as p2
+    policy=v3.evaluation_policy(calls[0].evaluation_mode,calls[0].context_mode)
+    assert policy['evaluation_mode']==p2.MODE and policy['decision_policy']==p2.DECISION_POLICY
+    output=capsys.readouterr().out
+    assert 'MODO DE EVALUACION' not in output and 'MODO DE CONTEXTO' not in output
 
 
 @pytest.mark.parametrize('mode',['prospective','demonstrated'])

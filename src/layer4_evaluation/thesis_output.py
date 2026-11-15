@@ -9,9 +9,11 @@ TEMPLATE=Path('data/templates/plantilla_resultado_tesis.xlsx')
 POSITIVE_CONTRACT='THESIS_POSITIVE_OUTPUT_V1'
 ALL_CONTRACT='THESIS_ALL_INDICATORS_V1'
 VALID_CONTRACT='THESIS_VALID_ASSESSMENTS_V2'
+PROSPECTIVE_CONTRACT='THESIS_PROSPECTIVE_ASSESSMENTS_V3'
+GENERAL_CONTRACTS=(VALID_CONTRACT,PROSPECTIVE_CONTRACT)
 GENERAL_COLUMNS=[c for c in COLUMNS if c!='territorio_region']
 DEFAULT_CONTRACT=VALID_CONTRACT
-DECISIONS={'SUPPORTED','INSUFFICIENT_EVIDENCE','NOT_SUPPORTED'}
+DECISIONS={'SUPPORTED','INSUFFICIENT_EVIDENCE','NOT_SUPPORTED','NOT_APPLICABLE'}
 
 
 def positive_record(project,row,locations,territory_codes=()):
@@ -68,6 +70,17 @@ def indicator_record(project,indicator_id,*,row=None,status=None,locations=(),te
             or row['decision'] not in DECISIONS):
         raise ValueError('Evaluación persistida incompatible')
     score=row.get('confidence_raw_score')
+    if row['decision']=='NOT_APPLICABLE':
+        if (row.get('assessment_version')!='ASSESSMENT_PROSPECTIVE_V2' or
+                row.get('applicability',{}).get('status')!='NOT_APPLICABLE' or
+                not row['applicability'].get('explanation','').strip() or not row['applicability'].get('evidence_indices') or
+                row.get('confidence_status')!='NOT_APPLICABLE' or score is not None or not locations):
+            raise ValueError('No aplicable requiere justificacion documental y confianza N/A')
+        value=dict(row,evidence_explanation=row['applicability']['explanation'])
+        indices=row['applicability']['evidence_indices']
+        if any(type(i) is not int or i<0 or i>=len(locations) for i in indices):
+            raise ValueError('Referencias de aplicabilidad sin localizacion')
+        return _evidence_record(project,value,[locations[i] for i in indices],territory_codes)
     if row.get('confidence_status')!='COMPUTED' or type(score) not in (int,float) or not math.isfinite(score) or not 0<=score<=100:
         raise ValueError('Confianza calculada verificable requerida')
     if row['decision']=='SUPPORTED':return positive_record(project,row,locations,territory_codes)
@@ -75,12 +88,14 @@ def indicator_record(project,indicator_id,*,row=None,status=None,locations=(),te
 
 
 def verify_records(records,contract=DEFAULT_CONTRACT):
-    if contract not in (POSITIVE_CONTRACT,ALL_CONTRACT,VALID_CONTRACT):raise ValueError('Contrato desconocido')
+    if contract not in (POSITIVE_CONTRACT,ALL_CONTRACT,*GENERAL_CONTRACTS):raise ValueError('Contrato desconocido')
     seen=set()
     for row in records:
-        if set(row) not in ([set(COLUMNS),set(GENERAL_COLUMNS)] if contract==VALID_CONTRACT else [set(COLUMNS)]):raise ValueError('Columnas del contrato final incompatibles')
+        if set(row) not in ([set(COLUMNS),set(GENERAL_COLUMNS)] if contract in GENERAL_CONTRACTS else [set(COLUMNS)]):raise ValueError('Columnas del contrato final incompatibles')
         state=row['estado_cumplimiento']
-        if contract==VALID_CONTRACT and state not in DECISIONS:raise ValueError('Salida principal requiere evaluacion valida')
+        if contract==PROSPECTIVE_CONTRACT and state not in ('SUPPORTED','INSUFFICIENT_EVIDENCE','NOT_APPLICABLE'):
+            raise ValueError('Contrato prospectivo requiere uno de sus tres estados semanticos')
+        if contract in GENERAL_CONTRACTS and state not in DECISIONS:raise ValueError('Salida principal requiere evaluacion valida')
         if contract==POSITIVE_CONTRACT and state!='SUPPORTED':
             raise ValueError('Contrato histórico: solo SUPPORTED')
         key=row[COLUMNS[0]],row['indicador_id']
@@ -95,6 +110,11 @@ def verify_records(records,contract=DEFAULT_CONTRACT):
             if any(row[k] is not None for k in COLUMNS[3:]):
                 raise ValueError('Estado técnico sin evaluación: evidencia y confianza NULL')
             continue
+        if state=='NOT_APPLICABLE':
+            if contract!=PROSPECTIVE_CONTRACT:raise ValueError('NOT_APPLICABLE requiere contrato prospectivo V3')
+            if row['confianza'] is not None or any(not row[k] for k in COLUMNS[3:6]):
+                raise ValueError('No aplicable requiere evidencia y confianza NULL (N/A)')
+            continue
         if type(row['confianza']) not in (int,float) or not math.isfinite(row['confianza']) or not 0<=row['confianza']<=100:
             raise ValueError('Confianza final inválida')
 
@@ -104,8 +124,8 @@ def render(root,target,projects=(),articles=(),*,contract=DEFAULT_CONTRACT):
     from openpyxl import load_workbook
     from openpyxl.styles import Alignment
     projects,articles=list(projects),list(articles)
-    columns=GENERAL_COLUMNS if contract==VALID_CONTRACT else COLUMNS
-    if contract==VALID_CONTRACT:
+    columns=GENERAL_COLUMNS if contract in GENERAL_CONTRACTS else COLUMNS
+    if contract in GENERAL_CONTRACTS:
         projects=[{c:r[c] for c in columns} for r in projects if r['estado_cumplimiento'] in DECISIONS]
         articles=[{c:r[c] for c in columns} for r in articles if r['estado_cumplimiento'] in DECISIONS]
     verify_records(projects,contract);verify_records(articles,contract)
@@ -114,7 +134,7 @@ def render(root,target,projects=(),articles=(),*,contract=DEFAULT_CONTRACT):
         if book.sheetnames!=SHEETS: raise ValueError('Hojas de plantilla final incompatibles')
         for sheet,records in zip(book,(projects,articles)):
             if [c.value for c in sheet[1]]!=COLUMNS: raise ValueError('Columnas de plantilla final incompatibles')
-            if contract==VALID_CONTRACT:sheet.delete_cols(7)
+            if contract in GENERAL_CONTRACTS:sheet.delete_cols(7)
             if any(c.value is not None for r in sheet.iter_rows(min_row=2) for c in r):
                 raise ValueError('La plantilla final contiene resultados')
             if sheet.max_row>1:sheet.delete_rows(2,sheet.max_row-1)
@@ -124,7 +144,11 @@ def render(root,target,projects=(),articles=(),*,contract=DEFAULT_CONTRACT):
                     cell.data_type='s' if isinstance(cell.value,str) else cell.data_type
                     cell.alignment=Alignment(wrap_text=True,vertical='top')
                 sheet.cell(sheet.max_row,len(columns)).number_format='0.00'
-            sheet.freeze_panes='A2';sheet.auto_filter.ref=f'A1:{"G" if contract==VALID_CONTRACT else "H"}{max(1,sheet.max_row)}'
+                if record['estado_cumplimiento']=='NOT_APPLICABLE':
+                    # Numeric scores keep their column/type; N/A is explicit in
+                    # Excel, while JSON NULL and an empty CSV field stay typed.
+                    sheet.cell(sheet.max_row,len(columns)).value='N/A'
+            sheet.freeze_panes='A2';sheet.auto_filter.ref=f'A1:{"G" if contract in GENERAL_CONTRACTS else "H"}{max(1,sheet.max_row)}'
         target=Path(target);target.parent.mkdir(parents=True,exist_ok=True)
         temporary=target.with_suffix('.pending.xlsx')
         book.save(temporary)
@@ -152,7 +176,7 @@ def render(root,target,projects=(),articles=(),*,contract=DEFAULT_CONTRACT):
             if check.sheetnames!=SHEETS:raise ValueError('Hojas exportadas incompatibles')
             for sheet,records in zip(check,(projects,articles)):
                 actual=list(sheet.values)
-                if list(actual[0])!=columns or actual[1:]!=[tuple(r[c] for c in columns) for r in records]:
+                if list(actual[0])!=columns or actual[1:]!=[tuple('N/A' if c=='confianza' and r['estado_cumplimiento']=='NOT_APPLICABLE' else r[c] for c in columns) for r in records]:
                     raise ValueError('Verificación Excel final fallida')
         finally:check.close()
         temporary.replace(target)
@@ -252,7 +276,7 @@ def persisted_records(root,run,*,contract=DEFAULT_CONTRACT):
                 row['evidence_source_fields'],row['evidence_texts'],row['evidence_stages'])]
             locations=evidence_locations(p,dict(evidence=evidence))
             consumer=indicator_record(p,iid,row=row,locations=locations)
-        if contract==ALL_CONTRACT or contract==VALID_CONTRACT and consumer['estado_cumplimiento'] in DECISIONS or consumer['estado_cumplimiento']=='SUPPORTED':records.append(consumer)
+        if contract==ALL_CONTRACT or contract in GENERAL_CONTRACTS and consumer['estado_cumplimiento'] in DECISIONS or consumer['estado_cumplimiento']=='SUPPORTED':records.append(consumer)
     verify_records(records,contract)
     return records,dict(run_id=run.name,status=coverage['status'],output_contract=contract,
         **({'evaluation_policy':execution['evaluation_policy']} if execution.get('evaluation_policy') else {}),
@@ -289,7 +313,7 @@ def recover_export(root,run,*,contract=ALL_CONTRACT):
     for record in records:
         record['territorio_region']=territories.get((record[COLUMNS[0]],record['indicador_id']))
     render(root,target,records,contract=contract)
-    columns=GENERAL_COLUMNS if contract==VALID_CONTRACT else COLUMNS
+    columns=GENERAL_COLUMNS if contract in GENERAL_CONTRACTS else COLUMNS
     result=write_results(run,columns,records,codes,filename=csv_target.name,
         territorial_filename=None,exclusive=True)
     for name,digest in original.items():

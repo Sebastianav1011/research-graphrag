@@ -622,7 +622,8 @@ def activate_run_measurement():
 def project_states(verified):
     if _active_run:
         for row in verified.get('projects',[]):
-            _safe(lambda row=row:_active_run.project_state(row['project_id'],'EXITOSO' if row['complete'] else 'PENDIENTE'))
+            state=('EXITOSO' if row['complete'] else 'BLOQUEADO' if row.get('blocked_indicators') or row.get('context_limits') else 'PENDIENTE')
+            _safe(lambda row=row,state=state:_active_run.project_state(row['project_id'],state))
 
 
 @contextmanager

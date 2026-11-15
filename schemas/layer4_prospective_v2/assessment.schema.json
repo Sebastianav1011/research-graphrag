@@ -1,0 +1,226 @@
+{
+  "type": "object",
+  "properties": {
+    "assessment_version": {
+      "const": "ASSESSMENT_PROSPECTIVE_V2",
+      "type": "string"
+    },
+    "decision": {
+      "type": "string",
+      "enum": [
+        "SUPPORTED",
+        "INSUFFICIENT_EVIDENCE",
+        "NOT_APPLICABLE"
+      ]
+    },
+    "support_strength": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4
+    },
+    "criterion_assessments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "criterion_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "support": {
+            "type": "string",
+            "enum": [
+              "CLEAR",
+              "PARTIAL",
+              "NOT_DEMONSTRATED"
+            ]
+          },
+          "evidence_indices": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "uniqueItems": true
+          },
+          "explanation": {
+            "type": "string",
+            "minLength": 1
+          },
+          "coverage": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4
+          },
+          "evidence_relation": {
+            "type": "string",
+            "enum": [
+              "PROJECT_CONTRIBUTION",
+              "CONTEXT_IDENTIFICATION",
+              "UNRELATED",
+              "NO_SUPPORT"
+            ]
+          }
+        },
+        "required": [
+          "criterion_id",
+          "support",
+          "evidence_indices",
+          "explanation",
+          "coverage",
+          "evidence_relation"
+        ],
+        "additionalProperties": false
+      },
+      "minItems": 1
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "field": {
+            "type": "string",
+            "enum": [
+              "title",
+              "keywords",
+              "summary",
+              "methodology",
+              "objectives",
+              "expected_results"
+            ]
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1
+          },
+          "stage": {
+            "type": "string",
+            "enum": [
+              "ACTIVITY_PROPOSED",
+              "ACTIVITY_EXECUTED",
+              "RESULT_EXPECTED",
+              "RESULT_DEMONSTRATED",
+              "CONTEXT",
+              "DESIGN_DOCUMENTED",
+              "MECHANISM_ESTABLISHED"
+            ]
+          }
+        },
+        "required": [
+          "field",
+          "text",
+          "stage"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "explanation": {
+      "type": "string",
+      "minLength": 1
+    },
+    "strength_rubric": {
+      "type": "object",
+      "properties": {
+        "directness": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4
+        },
+        "specificity": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4
+        },
+        "clarity": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4
+        },
+        "temporal_alignment": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4
+        },
+        "evidence_indices": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "uniqueItems": true
+        },
+        "explanation": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "directness",
+        "specificity",
+        "clarity",
+        "temporal_alignment",
+        "evidence_indices",
+        "explanation"
+      ],
+      "additionalProperties": false
+    },
+    "coverage_policy": {
+      "type": "string",
+      "const": "CRITERIA_COVERAGE_SK_V2_ESSENTIAL_MEAN"
+    },
+    "applicability": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "APPLICABLE",
+            "UNDETERMINED",
+            "NOT_APPLICABLE"
+          ]
+        },
+        "basis": {
+          "type": "string",
+          "enum": [
+            "RELEVANT_SCOPE",
+            "UNKNOWN",
+            "EXPLICIT_EXCLUSION",
+            "DOCUMENTED_SCOPE"
+          ]
+        },
+        "explanation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence_indices": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "status",
+        "basis",
+        "explanation",
+        "evidence_indices"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "assessment_version",
+    "decision",
+    "support_strength",
+    "criterion_assessments",
+    "evidence",
+    "explanation",
+    "strength_rubric",
+    "applicability",
+    "coverage_policy"
+  ],
+  "additionalProperties": false
+}

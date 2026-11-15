@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "THESIS_PROSPECTIVE_ASSESSMENTS_V3",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "Proyectos",
+    "Artículos"
+  ],
+  "$defs": {
+    "indicator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "proyecto/articulo_siap_id",
+        "indicador_id",
+        "estado_cumplimiento",
+        "parrafo_evidencia",
+        "fuente_evidencia",
+        "ubicacion_evidencia",
+        "confianza"
+      ],
+      "properties": {
+        "proyecto/articulo_siap_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "indicador_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "estado_cumplimiento": {
+          "type": "string",
+          "minLength": 1,
+          "enum": [
+            "SUPPORTED",
+            "INSUFFICIENT_EVIDENCE",
+            "NOT_APPLICABLE"
+          ]
+        },
+        "parrafo_evidencia": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fuente_evidencia": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ubicacion_evidencia": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "confianza": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 100
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "estado_cumplimiento": {
+                "const": "NOT_APPLICABLE"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "confianza": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "confianza": {
+                "type": "number"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "estado_cumplimiento": {
+                "enum": [
+                  "SUPPORTED",
+                  "NOT_APPLICABLE"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "parrafo_evidencia": {
+                "type": "string",
+                "minLength": 1
+              },
+              "fuente_evidencia": {
+                "type": "string",
+                "minLength": 1
+              },
+              "ubicacion_evidencia": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "properties": {
+    "Proyectos": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/indicator"
+      }
+    },
+    "Artículos": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/indicator"
+      }
+    }
+  }
+}

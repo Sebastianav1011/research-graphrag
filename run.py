@@ -64,6 +64,7 @@ def render_result(result):
               f"completamente evaluados: {summary['completed_projects']}",flush=True)
         print(f"Indicadores esperados: {summary['expected_assessments']}; evaluaciones validas: {summary['valid_assessments']}; "
               f"SUPPORTED: {summary['supported']}; INSUFFICIENT_EVIDENCE: {summary['insufficient_evidence']}; "
+              f"NOT_APPLICABLE: {summary.get('not_applicable',0)}; "
               f"NOT_SUPPORTED: {summary.get('not_supported',0)}",flush=True)
         print(f"Bloqueados: {summary['blocked_assessments']}; pendientes: {summary['pending_assessments']}; "
               f"filas exportadas: {summary.get('exported_rows',0)}",flush=True)
@@ -142,6 +143,8 @@ def confirm_action(kind, summary):
             policy=summary['evaluation_policy']
             print('Evaluacion: '+policy['evaluation_mode']+' | Contexto: '+policy['context_mode']+
                 ' | num_ctx: '+str(summary.get('num_ctx')),flush=True)
+            if policy.get('decision_policy'):
+                print('Politica de decision: '+policy['decision_policy'],flush=True)
         print('Proyectos: '+str(summary['project_count']),flush=True)
         if summary.get('project_ids'):
             print('IDs institucionales: '+', '.join(summary['project_ids']),flush=True)
@@ -376,8 +379,8 @@ def parser():
     result.add_argument('--count',type=int,help='Proyectos obligatorios de contract-create')
     result.add_argument('--require-evaluable',action='store_true',help='contract-create: muestrear solo proyectos con texto sustantivo autorizado; regla persistida')
     result.add_argument('--source', help='all, base, incoming o incoming/<entrega>; reanudar conserva la seleccion original')
-    result.add_argument('--evaluation-mode',choices=('prospective','demonstrated'),
-        help='Modo temporal: BASE nuevo usa prospective; resume conserva el modo sellado')
+    result.add_argument('--evaluation-mode',choices=('prospective','prospective-v1','prospective-v2','PROSPECTIVE_V1','PROSPECTIVE_V2','demonstrated'),
+        help='V2 y decision determinista por defecto en runs nuevos; prospective-v1 conserva V1; resume conserva el modo sellado')
     result.add_argument('--context-mode',choices=('full-descriptor','graphrag','descriptor-graph','retrieved-graph'),
         help='BASE usa por defecto fragmentos BGE-M3 y relaciones GraphRAG, sin descriptor completo')
     result.add_argument('--config', default='config/pipeline_manual.json')
@@ -494,14 +497,7 @@ def menu(base):
                     selection['knowledge_action']=('reuse','rebuild')[knowledge]
                     selection.update(evaluation_mode=base.evaluation_mode,context_mode='retrieved-graph')
                     break
-                try:
-                    temporal=choose('MODO DE EVALUACION',['Prospectivo','Demostrado'],back_label='Volver',
-                        default=0 if source.get('source')=='base' else 1)
-                    context=choose('MODO DE CONTEXTO',['Descriptor completo','GraphRAG / fragmentos'],back_label='Volver',
-                        default=0 if source.get('source')=='base' and temporal==0 else 1)
-                except Cancelled:continue
-                selection.update(evaluation_mode=('prospective','demonstrated')[temporal],
-                    context_mode=('full-descriptor','graphrag')[context])
+                selection.update(evaluation_mode=base.evaluation_mode,context_mode='graphrag')
                 break
             if selection is None:continue
             # A clean CLI request prevents advanced flags leaking into the menu.

@@ -336,6 +336,25 @@ def corrective_request(request, schema, settings, issues=None, previous=None, ve
     if not marker:
         raise ValueError('Solicitud correctiva sin INPUT_JSON')
     prefix = prefix.split('\nCORRECTIVE_JSON_RULES:\n', 1)[0]
+    from . import prospective_v2 as p2, assessment_v3 as v3
+    if version==p2.CORRECTION:
+        if request.get('assessment_version')!=p2.VERSION:
+            raise ValueError('Correccion prospectiva V2 con contrato incompatible')
+        # Always rebuild from immutable evidence, never append responses or
+        # narratives. Full semantic rejudgment is allowed; every original gate
+        # still applies. The previous invalid judgment is not an upper bound.
+        details=[{k:i[k] for k in ('rule','path','criterion_id') if k in i} for i in issues or []]
+        correction=('\nCorrige la respuesta completa. No ajustes juicios para obtener una decision prefijada. '
+            'Reevalua criterios y aplicabilidad desde las mismas citas. IDs exactos, evidence_refs={fragment_id,stage}; '
+            'NOT_DEMONSTRATED sin referencias; CLEAR=4, PARTIAL=1..3, NOT_DEMONSTRATED=0. '
+            'Fuerza referencia solo criterios positivos. Todos los REQUIRED y una alternativa por grupo CLEAR para SUPPORTED. '
+            'Usa el esquema cerrado; no escribas citas ni indices. Errores: '+json.dumps(details,ensure_ascii=False,separators=(',',':')))
+        concise=p2.instructions_for(request.get('prompt_version',p2.PROMPT))+v3.SK_INSTRUCTIONS.replace(v3.SK_VERSION,p2.VERSION).replace(
+            v3.SK_TEMPORAL_SCALE,v3.PROSPECTIVE_TEMPORAL_SCALE)+v3.SK_COHERENCE
+        options=[prefix+correction+'\n'+marker+payload,concise+correction+'\n'+marker+payload]
+        revised['prompt']=min(options,key=lambda p:rebudget(p,schema,settings,request.get('context_budget'))['estimated_input_tokens'])
+        revised['context_budget']=rebudget(revised['prompt'],schema,settings,request.get('context_budget'))
+        return revised
     from .evidence_references import active
     if active(request) and version in TARGETED_VERSIONS:
         prefix = prefix.split('\nREFERENCE_CORRECTION_V2:\n', 1)[0]
@@ -509,7 +528,7 @@ class OllamaAssessmentProvider:
     def __init__(self, run_directory, schema_path, input_factory, *, settings=None, client=None,
                  runtime=None, timeout=None, model=None, max_retries=0, max_indicators=3,
                  wrapper_validator=None, execution_id=None, stop_on_uncertain=True, output_adapter=None,
-                 token_limit_retries=0, corrective_retries=0, correction_version=None):
+                 token_limit_retries=0, corrective_retries=0, correction_version=None, wrapper_resolver=None):
         options = dict(settings or {})
         if timeout is not None:
             options['timeout_seconds'] = timeout
@@ -529,12 +548,14 @@ class OllamaAssessmentProvider:
         self.input_factory, self.client = input_factory, client or create_client(self.settings)
         self.runtime, self.max_indicators = runtime, max_indicators
         self.wrapper_validator = wrapper_validator or validate_wrapper
+        self.wrapper_resolver = wrapper_resolver
         self.output_adapter = output_adapter
         self.execution_id = execution_id or uuid.uuid4().hex
         self.calls, self.raw_outputs, self.last_output = [], [], None
 
     @measured_project
     def evaluate(self, project, indicators):
+        from . import prospective_v2 as p2
         # Retries are explicitly enabled by the live run plan. Other callers keep
         # their existing outer retry policy and do not multiply inference calls.
         retries = max(self.token_limit_retries, self.corrective_retries)
@@ -561,6 +582,10 @@ class OllamaAssessmentProvider:
                     revised = corrective_request(self.input_factory(project, indicators),
                         strict_json(self.schema.read_text(encoding='utf-8')), self.settings,
                         self.calls[-1]['validation_issues'], previous, self.correction_version)
+                    if self.correction_version==p2.CORRECTION and not revised['context_budget']['fits']:
+                        # Keep the actual failed validation, not a fictitious new
+                        # inference or semantic rejection. Nothing is dispatched.
+                        raise
                     revised_output = output
                     if revised.get('evidence_protocol') and revised['context_budget']['fits']:
                         # A previous token-limit retry may have raised the output
@@ -652,6 +677,7 @@ class OllamaAssessmentProvider:
             Draft202012Validator(schema).validate(parsed)
             validation_stage = 'semantic'
             from .evidence_references import active, materialize
+            from . import prospective_v2 as p2
             scoped, scope = [], getattr(self, 'scope', None)
             ids = [i['indicator_id'] for i in indicators]
             if active(request):
@@ -666,6 +692,11 @@ class OllamaAssessmentProvider:
                 try:
                     if active(request):
                         parsed = materialize(request, parsed)
+                    if request.get('decision_policy') == p2.DECISION_POLICY:
+                        if self.wrapper_resolver is None:
+                            raise ValueError('La politica determinista requiere su resolver validado')
+                        parsed, decision_receipt = self.wrapper_resolver(parsed)
+                        save('decision.json', decision_receipt)
                     self.wrapper_validator(parsed, project['project_id'], ids)
                 except AssessmentValidationError as exc:
                     raise AssessmentValidationError(exc.issues + scoped) if scoped else exc

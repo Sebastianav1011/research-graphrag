@@ -307,6 +307,7 @@ def planner(tmp_path,monkeypatch,corpus,tokenizer_stub):
         observed_character_ratio=.1,discovery_version=live.gd.VERSION,assessment_version=v3.VERSION,source_hashes={})
     frozen=root/'frozen.json';write(frozen,settings)
     for name in ('src/layer4_evaluation/live_execution.py','src/layer4_evaluation/indicators/ollama_provider.py',
+                 'src/layer4_evaluation/indicators/prospective_v2.py',
                  'src/layer4_evaluation/indicators/context_budget.py','outputs/runs/synthetic/prepared_hashes.json',
                  'outputs/runs/synthetic/workspace/outputs/layer3/publication/_manifest.json'):
         p=root/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_text('{}',encoding='utf-8')
@@ -467,9 +468,10 @@ def test_full_descriptor_refuses_ambiguous_or_wrong_source(corpus,corrupt):
             context_mode=v3.FULL_CONTEXT)
 
 
-def test_coordinator_seals_prospective_catalog_and_skips_retrieval_for_full_descriptor(planner,corpus,monkeypatch):
+@pytest.mark.parametrize('mode',['prospective-v1','prospective-v2'])
+def test_coordinator_seals_prospective_catalog_and_skips_retrieval_for_full_descriptor(planner,corpus,monkeypatch,mode):
     root,run,module=planner
-    policy=v3.evaluation_policy('prospective','full-descriptor')
+    policy=v3.evaluation_policy(mode,'full-descriptor')
     settings=corpus.settings|dict(num_ctx=24576)
     write(runner.run_file(run,'execution.json'),dict(llm=settings,evaluation_policy=policy))
     # All original, authorized fields must have an unambiguous section.
@@ -482,7 +484,8 @@ def test_coordinator_seals_prospective_catalog_and_skips_retrieval_for_full_desc
     assert plan['evaluation_policy']==policy and manifest['evaluation_policy_sha256']==policy['sha256']
     assert plan['runtime']['configuration']['num_ctx']==24576
     assert plan['catalog_derivation']['effective_catalog_sha256']==canonical_hash(plan['rubrics'])
-    assert all(r['evaluation_mode']==v3.PROSPECTIVE for r in plan['context_requests']['TEST_PROJECT'].values())
+    assert all(r['evaluation_mode']==policy['evaluation_mode'] for r in plan['context_requests']['TEST_PROJECT'].values())
+    assert plan['assessment_version']==(v3.P2_VERSION if mode=='prospective-v2' else v3.SK_VERSION)
     before=sha(directory/'plan.json')
     write(runner.run_file(run,'execution.json'),dict(llm=settings,evaluation_policy=v3.evaluation_policy('demonstrated','full-descriptor')))
     with pytest.raises(ValueError,match='Modos incompatibles'):runner.prepare_evaluation(root,run,['TEST'])
