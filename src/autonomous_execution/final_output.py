@@ -216,6 +216,8 @@ def project_records(root,run,territorial_codes=None,*,positive_only=False,output
             validate_context_evidence(bundle['request'],bundle['wrapper'])
             if resolve_codes is not None:
                 territorial_codes[project['siap_id'],iid]=resolve_codes(project,bundle['wrapper']['assessments'][0])
+                if hasattr(territorial_codes, 'audit'):
+                    territorial_codes.audit.extend(getattr(resolve_codes, 'audit', [])[-1:])
             decision=row['decision'];score=row['confidence_raw_score'];paragraph=row['evidence_explanation']
             fields=row['evidence_source_fields']
             if not fields:fields=[e['field'] for e in bundle.get('evidence_registry',{}).values()]
@@ -282,8 +284,8 @@ def export(root,run,*,output_contract=DEFAULT_CONTRACT):
     """New root-level projection only. Historical queue/manifests/logs stay intact."""
     root=Path(root).resolve();run=Path(run).resolve()
     if not run.is_relative_to(root/'outputs/runs'):raise ValueError('Run fuera de outputs/runs')
-    from layer4_evaluation.indicator_csv import write_results
-    codes_by_pair={}
+    from layer4_evaluation.indicator_csv import write_results, TerritoryAssignments
+    codes_by_pair=TerritoryAssignments()
     if output_contract not in (ALL_CONTRACT,POSITIVE_CONTRACT,VALID_CONTRACT):raise ValueError('Contrato desconocido')
     columns=GENERAL_COLUMNS if output_contract==VALID_CONTRACT else THESIS_COLUMNS
     records,audit=project_records(root,run,codes_by_pair,positive_only=output_contract==POSITIVE_CONTRACT,
@@ -304,7 +306,8 @@ def export(root,run,*,output_contract=DEFAULT_CONTRACT):
     target=file_path(run,'resultado_indicadores.xlsx' if output_contract in (ALL_CONTRACT,VALID_CONTRACT) else projection['filename'] if projection else 'resultado_final_indicadores.xlsx')
     target.parent.mkdir(parents=True,exist_ok=True)
     render(root,records,target,territories,contract=output_contract)
-    csv_result=write_results(run,columns,records,codes_by_pair)
+    csv_result=write_results(run,columns,records,codes_by_pair,
+        resolver=codes_by_pair)
     audit.update(path=str(target),sha256=s.sha(target),rows=len(records),sheets=list(SHEETS),columns={name:columns for name in THESIS_SHEETS},
         exported_rows=len(records),note=('Excel vacio: no hay evaluaciones SUPPORTED; las evaluaciones insuficientes y los errores se conservan en el recibo.'
             if not audit['supported'] else 'Excel vacio: ningun SUPPORTED supero los controles de exportacion; consultar export_exclusions.' if not records

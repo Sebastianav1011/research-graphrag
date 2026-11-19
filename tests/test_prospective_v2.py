@@ -131,7 +131,7 @@ def test_supported_required_and_reverse_decision_gates(prospective):
 def test_materialized_refs_keep_applicability_and_original_citations(prospective):
     x=prospective;project=dict(project_id='P',fields=x['fields'])
     request=cb.make_request(project,x['profile'],x['rubric'],x['fields'],evidence_references=True,
-        assessment_version=p2.VERSION,evaluation_mode=p2.MODE,prompt_version=p2.PROMPT,context_mode=v3.RETRIEVED_CONTEXT)
+        assessment_version=p2.VERSION,evaluation_mode=p2.MODE,prompt_version=p2.PROMPT_CONCISE_V4,context_mode=v3.RETRIEVED_CONTEXT)
     a=deepcopy(x['assessment']);a.pop('coverage_policy');a.pop('evidence')
     for c in [*a['criterion_assessments'],a['strength_rubric'],a['applicability']]:
         c['evidence_refs']=[dict(fragment_id='F000',stage='ACTIVITY_PROPOSED') for i in c.pop('evidence_indices')]
@@ -178,7 +178,7 @@ def test_invalid_assessment_never_becomes_semantic_rejection(prospective):
 
 def test_compact_retries_do_not_accumulate_context_or_freeze_invalid_scores(prospective):
     x=prospective;request=cb.make_request(dict(project_id='P',fields=x['fields']),x['profile'],x['rubric'],x['fields'],
-        evidence_references=True,assessment_version=p2.VERSION,evaluation_mode=p2.MODE,prompt_version=p2.PROMPT)
+        evidence_references=True,assessment_version=p2.VERSION,evaluation_mode=p2.MODE,prompt_version=p2.PROMPT_CONCISE_V4)
     schema=refs.response_schema(request,x['fields']);settings=transport.configuration({'num_ctx':16384,'context_margin_tokens':1024})
     request['context_budget']=cb.estimate(request['prompt'],schema,settings)
     issues=[dict(rule='SK_ZERO_SUPPORT:CANNOT_CLAIM_POSITIVE_CONCEPTUAL_SUPPORT',path='$.decision')]
@@ -213,7 +213,7 @@ def test_reference_48_catalog_is_derived_without_mutation():
         assert all('Interpretacion operativa PROSPECTIVE_V2' in c['rationale'] for c in r['criteria'])
         project=dict(project_id='P',fields=dict.fromkeys(v3.FIELDS,''))
         request=cb.make_request(project,profiles[iid],r,project['fields'],evidence_references=True,
-            assessment_version=p2.VERSION,evaluation_mode=p2.MODE,prompt_version=p2.PROMPT)
+            assessment_version=p2.VERSION,evaluation_mode=p2.MODE,prompt_version=p2.PROMPT_CONCISE_V4)
         assert 'una prevision de uso no satisface' not in request['prompt'].lower()
         assert 'favorable_evidence' not in request['payload']['indicators'][0]
     assert receipt['interpretations']['POL-02']['limitation'] and receipt['interpretations']['DIV-03']['limitation']
@@ -301,7 +301,7 @@ def test_reference_evidence_and_correction_fit_without_new_retrieval(rel):
     rubric=p2.derive(plan['rubrics'][iid])
     units=[dict(field=f['field'],text=f['text']) for f in saved['payload']['project']['fragments']]
     request=cb.make_request(project,plan['profiles'][iid],rubric,project['fields'],evidence_references=True,
-        evidence_units=units,assessment_version=p2.VERSION,evaluation_mode=p2.MODE,prompt_version=p2.PROMPT,context_mode=v3.RETRIEVED_CONTEXT)
+        evidence_units=units,assessment_version=p2.VERSION,evaluation_mode=p2.MODE,prompt_version=p2.PROMPT_CONCISE_V4,context_mode=v3.RETRIEVED_CONTEXT)
     schema=refs.response_schema(request,project['fields']);settings=plan['runtime']['configuration']
     request['context_budget']=cb.estimate(request['prompt'],schema,settings,tokenizer=tokenizer,cap=8000)
     assert request['context_budget']['fits'],request['context_budget']['estimated_input_tokens']
@@ -391,3 +391,7 @@ def test_main_export_keeps_na_and_technical_block_separate(prospective,tmp_path,
     with (run/'resultados/indicadores.csv').open(encoding='utf-8-sig') as stream:
         exported=list(csv.DictReader(stream,delimiter=';'))
     assert len(exported)==1 and exported[0]['estado_cumplimiento']=='NOT_APPLICABLE' and exported[0]['confianza']==''
+    with (run/'resultados/indicadores_territorios.csv').open(encoding='utf-8-sig',newline='') as stream:
+        reader=csv.DictReader(stream,delimiter=';'); territories=list(reader)
+    assert reader.fieldnames==indicator_csv.TERRITORIAL_COLUMNS
+    assert len(territories)==1 and territories[0]['codigo_dane']==territories[0]['codigo_municipio_dane']==''

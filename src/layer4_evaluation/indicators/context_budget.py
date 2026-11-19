@@ -163,6 +163,9 @@ def make_request(project, profile, rubric, fields, *, evidence_references=False,
             assessment_version=v3.SK_VERSION,evaluation_mode=v3.PROSPECTIVE,context_mode=context_mode,
             prompt_version=v3.PROSPECTIVE_PROMPT_V3)
         indicator=request['payload']['indicators'][0]
+        if prompt_version==p2.PROMPT:
+            return _derived_request(request,indicator,profile,rubric,fields,evidence_units,context_mode,
+                project.get('source_type','PROJECT'))
         # Official profiles remain sealed in the plan. Demonstrated-mode examples
         # are not instructions for this operational counterpart.
         for key in ('favorable_evidence','insufficient_evidence','relational_context'):
@@ -175,14 +178,25 @@ def make_request(project, profile, rubric, fields, *, evidence_references=False,
             'Etapas previstas no son etapas ejecutadas; una intencion vaga no acredita un mecanismo.')
         instructions+=v3.SK_INSTRUCTIONS.replace(v3.SK_VERSION,p2.VERSION).replace(v3.SK_TEMPORAL_SCALE,v3.PROSPECTIVE_TEMPORAL_SCALE)
         instructions+=v3.SK_COHERENCE+p2.instructions_for(prompt_version)
+        if prompt_version in (p2.PROMPT_INSTRUCTIONS_V2,p2.PROMPT_COHERENT_V3,p2.PROMPT_CONCISE_V4):
+            # Equivalent transport directions once; avoid stacking legacy and
+            # operational state instructions in the new semantic revision.
+            instructions=(p2.REFERENCE_PROTOCOL+v3.SK_INSTRUCTIONS.replace(v3.SK_VERSION,p2.VERSION)
+                .replace(v3.SK_TEMPORAL_SCALE,v3.PROSPECTIVE_TEMPORAL_SCALE)
+                +v3.SK_COHERENCE+p2.instructions_for(prompt_version))
         if context_mode==v3.RETRIEVED_CONTEXT:
             instructions+='\nFragmentos recuperados no exhaustivos: el silencio no establece no aplicabilidad ni ausencia en todo el documento.\n'
         request.update(assessment_version=p2.VERSION,evaluation_mode=p2.MODE,prompt_version=prompt_version,
             prompt=instructions+'\nINPUT_JSON:\n'+compact(request['payload']))
         if prompt_version == p2.PROMPT_V3:
             request['applicability_protocol'] = p2.COHERENT_APPLICABILITY
-        if prompt_version == p2.PROMPT:
+        if prompt_version in (p2.PROMPT_CRITERIA_V1,p2.PROMPT_INSTRUCTIONS_V2,p2.PROMPT_COHERENT_V3,p2.PROMPT_CONCISE_V4):
             request['decision_policy'] = p2.DECISION_POLICY
+        if prompt_version in (p2.PROMPT_INSTRUCTIONS_V2,p2.PROMPT_COHERENT_V3,p2.PROMPT_CONCISE_V4):
+            request['prompt']=request['prompt'].replace('4 requisito integro demostrado (CLEAR)',
+                '4 requisito integro respaldado en su etapa efectiva (CLEAR)')
+        if prompt_version in (p2.PROMPT_COHERENT_V3,p2.PROMPT_CONCISE_V4):
+            request['component_protocol']=p2.COMPONENT_PROTOCOL
         return request
     # Keep the frozen criterion explanations verbatim. Provenance/basis and
     # hashes remain in the sealed plan, without duplicating them in each prompt.
@@ -260,6 +274,49 @@ def make_request(project, profile, rubric, fields, *, evidence_references=False,
         raise ValueError('Version de prompt desconocida')
     prompt = criterion_instructions + instructions + '\n' + note + '\nINPUT_JSON:\n' + compact(payload)
     return dict(project_id=project['project_id'], input_version=VERSION, payload=payload, prompt=prompt, **protocol)
+
+
+def _derived_request(request, indicator, profile, rubric, fields, evidence_units, context_mode, source_type='PROJECT'):
+    """PROSPECTIVE_V2_DERIVED_COMPONENTS_V5 request (diagnostic C3, C5, C6, C8).
+
+    Same retrieved evidence, rubric roles and temporal requirements. Each
+    criterion carries its literal catalog basis instead of a generic rationale;
+    the catalog's insufficient-evidence text is kept. Title/keywords are not
+    citable fragments. No institutional meaning is added or changed.
+    """
+    from . import prospective_v2 as p2, evidence_references as refs
+    for key in ('favorable_evidence','relational_context'):
+        # favorable_evidence is phrased for achieved results (diagnostic C5).
+        indicator.pop(key,None)
+    indicator['insufficient_evidence']=profile.get('insufficient_evidence')
+    indicator['prospective_interpretation']=p2.INTERPRETATIONS.get(profile['indicator_id'])
+    indicator['prospective_limitation']=p2.LIMITATIONS.get(profile['indicator_id'])
+    basis={c['criterion_id']:c.get('basis') or [] for c in rubric['criteria']}
+    for criterion in indicator['rubric']['criteria']:
+        criterion.pop('rationale',None)
+        criterion['etapa_admitida']=p2.STAGE_MEANING[criterion['temporal_requirement']]
+        criterion['referencias_catalogo']=[b['text'] for b in basis[criterion['criterion_id']]]
+    units=evidence_units if evidence_units is not None else [dict(field=f,text=t) for f,t in fields.items()]
+    fragments=[]
+    for unit in units:
+        if unit['field'] in p2.ORIENTATION_FIELDS:continue
+        for fragment in refs.fragments_v2({unit['field']:unit['text']}):
+            fragments.append(fragment|dict(fragment_id=f'F{len(fragments):03d}'))
+    request['payload']['project']['fragments']=fragments
+    instructions=p2.INSTRUCTIONS_V5
+    if source_type=='ARTICLE':
+        # Same V5 evaluation; the payload declares the source type and the prompt
+        # states what an article can and cannot establish. PROJECT bytes unchanged.
+        request['payload']['project']['source_type']='ARTICLE'
+        instructions+=p2.ARTICLE_SOURCE_NOTE
+    elif source_type!='PROJECT':
+        raise ValueError('Tipo de fuente no evaluable: '+str(source_type))
+    if context_mode==v3.RETRIEVED_CONTEXT:
+        instructions+='\nFragmentos recuperados no exhaustivos: el silencio no establece no aplicabilidad ni ausencia en todo el documento.\n'
+    request.update(assessment_version=p2.VERSION,evaluation_mode=p2.MODE,prompt_version=p2.PROMPT,
+        decision_policy=p2.DECISION_POLICY,component_protocol=p2.DERIVED_PROTOCOL,
+        prompt=instructions+'\nINPUT_JSON:\n'+compact(request['payload']))
+    return request
 
 
 def sentence_span(text, fits):
@@ -375,7 +432,7 @@ def prepare_contexts(projects, profiles, rubrics, settings, candidates, chunks, 
             selected, omitted, seen = [], [], set()
             hits = []
             if candidate:
-                if candidate['source_type'] != 'PROJECT':
+                if candidate['source_type'] != project.get('source_type','PROJECT'):
                     raise ValueError('GraphRAG source domain mismatch')
                 for hit in candidate['discovery_chunks']:
                     c = chunk_index.get(hit['chunk_id'])

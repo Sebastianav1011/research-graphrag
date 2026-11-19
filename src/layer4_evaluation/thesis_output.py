@@ -13,6 +13,9 @@ PROSPECTIVE_CONTRACT='THESIS_PROSPECTIVE_ASSESSMENTS_V3'
 GENERAL_CONTRACTS=(VALID_CONTRACT,PROSPECTIVE_CONTRACT)
 GENERAL_COLUMNS=[c for c in COLUMNS if c!='territorio_region']
 DEFAULT_CONTRACT=VALID_CONTRACT
+# Articulos: bibliographic identity after the general columns (general contracts only).
+# The canonical article_id stays in the shared first column.
+ARTICLE_COLUMNS=['titulo','doi','eid']
 DECISIONS={'SUPPORTED','INSUFFICIENT_EVIDENCE','NOT_SUPPORTED','NOT_APPLICABLE'}
 
 
@@ -87,10 +90,14 @@ def indicator_record(project,indicator_id,*,row=None,status=None,locations=(),te
     return _evidence_record(project,row,locations,territory_codes)
 
 
-def verify_records(records,contract=DEFAULT_CONTRACT):
+def verify_records(records,contract=DEFAULT_CONTRACT,extra=()):
     if contract not in (POSITIVE_CONTRACT,ALL_CONTRACT,*GENERAL_CONTRACTS):raise ValueError('Contrato desconocido')
+    if extra and contract not in GENERAL_CONTRACTS:raise ValueError('Columnas de articulo solo en contratos generales')
     seen=set()
     for row in records:
+        if any(k not in row or (row[k] is not None and not isinstance(row[k],str)) for k in extra):
+            raise ValueError('Metadatos bibliograficos del articulo incompatibles')
+        row={k:v for k,v in row.items() if k not in extra}
         if set(row) not in ([set(COLUMNS),set(GENERAL_COLUMNS)] if contract in GENERAL_CONTRACTS else [set(COLUMNS)]):raise ValueError('Columnas del contrato final incompatibles')
         state=row['estado_cumplimiento']
         if contract==PROSPECTIVE_CONTRACT and state not in ('SUPPORTED','INSUFFICIENT_EVIDENCE','NOT_APPLICABLE'):
@@ -121,26 +128,33 @@ def verify_records(records,contract=DEFAULT_CONTRACT):
 
 def render(root,target,projects=(),articles=(),*,contract=DEFAULT_CONTRACT):
     """Fill the versioned repository template through the existing Excel writer."""
+    from copy import copy
     from openpyxl import load_workbook
     from openpyxl.styles import Alignment
     projects,articles=list(projects),list(articles)
     columns=GENERAL_COLUMNS if contract in GENERAL_CONTRACTS else COLUMNS
+    extra=ARTICLE_COLUMNS if contract in GENERAL_CONTRACTS else []
+    article_columns=columns+extra
     if contract in GENERAL_CONTRACTS:
         projects=[{c:r[c] for c in columns} for r in projects if r['estado_cumplimiento'] in DECISIONS]
-        articles=[{c:r[c] for c in columns} for r in articles if r['estado_cumplimiento'] in DECISIONS]
-    verify_records(projects,contract);verify_records(articles,contract)
+        articles=[{c:r.get(c) for c in article_columns} for r in articles if r['estado_cumplimiento'] in DECISIONS]
+    verify_records(projects,contract);verify_records(articles,contract,extra)
     book=load_workbook(Path(root)/TEMPLATE)
     try:
         if book.sheetnames!=SHEETS: raise ValueError('Hojas de plantilla final incompatibles')
-        for sheet,records in zip(book,(projects,articles)):
+        for sheet,records,sheet_columns in zip(book,(projects,articles),(columns,article_columns)):
             if [c.value for c in sheet[1]]!=COLUMNS: raise ValueError('Columnas de plantilla final incompatibles')
             if contract in GENERAL_CONTRACTS:sheet.delete_cols(7)
             if any(c.value is not None for r in sheet.iter_rows(min_row=2) for c in r):
                 raise ValueError('La plantilla final contiene resultados')
             if sheet.max_row>1:sheet.delete_rows(2,sheet.max_row-1)
+            for offset,name in enumerate(sheet_columns[len(columns):],len(columns)+1):
+                header=sheet.cell(1,offset,name)
+                header.font=copy(sheet.cell(1,1).font);header.fill=copy(sheet.cell(1,1).fill)
+                header.alignment=copy(sheet.cell(1,1).alignment);header.border=copy(sheet.cell(1,1).border)
             for record in records:
-                sheet.append([record[c] for c in columns])
-                for cell in sheet[sheet.max_row][:7]:
+                sheet.append([record[c] for c in sheet_columns])
+                for cell in sheet[sheet.max_row][:len(sheet_columns)]:
                     cell.data_type='s' if isinstance(cell.value,str) else cell.data_type
                     cell.alignment=Alignment(wrap_text=True,vertical='top')
                 sheet.cell(sheet.max_row,len(columns)).number_format='0.00'
@@ -148,7 +162,8 @@ def render(root,target,projects=(),articles=(),*,contract=DEFAULT_CONTRACT):
                     # Numeric scores keep their column/type; N/A is explicit in
                     # Excel, while JSON NULL and an empty CSV field stay typed.
                     sheet.cell(sheet.max_row,len(columns)).value='N/A'
-            sheet.freeze_panes='A2';sheet.auto_filter.ref=f'A1:{"G" if contract in GENERAL_CONTRACTS else "H"}{max(1,sheet.max_row)}'
+            from openpyxl.utils import get_column_letter
+            sheet.freeze_panes='A2';sheet.auto_filter.ref=f'A1:{get_column_letter(len(sheet_columns))}{max(1,sheet.max_row)}'
         target=Path(target);target.parent.mkdir(parents=True,exist_ok=True)
         temporary=target.with_suffix('.pending.xlsx')
         book.save(temporary)
@@ -174,9 +189,9 @@ def render(root,target,projects=(),articles=(),*,contract=DEFAULT_CONTRACT):
         check=load_workbook(temporary,read_only=True,data_only=True)
         try:
             if check.sheetnames!=SHEETS:raise ValueError('Hojas exportadas incompatibles')
-            for sheet,records in zip(check,(projects,articles)):
+            for sheet,records,sheet_columns in zip(check,(projects,articles),(columns,article_columns)):
                 actual=list(sheet.values)
-                if list(actual[0])!=columns or actual[1:]!=[tuple('N/A' if c=='confianza' and r['estado_cumplimiento']=='NOT_APPLICABLE' else r[c] for c in columns) for r in records]:
+                if list(actual[0])!=sheet_columns or actual[1:]!=[tuple('N/A' if c=='confianza' and r['estado_cumplimiento']=='NOT_APPLICABLE' else r[c] for c in sheet_columns) for r in records]:
                     raise ValueError('Verificación Excel final fallida')
         finally:check.close()
         temporary.replace(target)

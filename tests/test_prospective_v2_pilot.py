@@ -108,7 +108,7 @@ def test_all_48_prompts_have_no_global_execution_requirement():
     for iid, rubric in derived.items():
         fields = dict.fromkeys(v3.FIELDS, '')
         request = cb.make_request(dict(project_id='SYNTHETIC', fields=fields), plan['profiles'][iid], rubric, fields,
-            evidence_references=True, assessment_version=p2.VERSION, evaluation_mode=p2.MODE, prompt_version=p2.PROMPT)
+            evidence_references=True, assessment_version=p2.VERSION, evaluation_mode=p2.MODE, prompt_version=p2.PROMPT_CONCISE_V4)
         prompt = request['prompt']
         assert v3.SK_TEMPORAL_SCALE not in prompt and v3.DEMONSTRATED_STAGE_LINE not in prompt
         assert 'No exijas ejecucion, adopcion o impacto ya ocurrido.' in prompt

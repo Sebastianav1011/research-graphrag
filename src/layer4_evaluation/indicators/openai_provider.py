@@ -119,10 +119,13 @@ class OpenAIClient:
         api=self.settings['api'];ledger=Ledger(self.directory/'api-ledger.sqlite',api)
         # Use UTF-8 bytes as a conservative bound and reserve reasoning within max_output_tokens.
         input_bound=len(json.dumps(payload['messages'],ensure_ascii=False).encode())+len(json.dumps(payload['format']).encode())+2048
-        amount=cost(dict(input_tokens=input_bound,output_tokens=self.settings['num_predict']),api)*api['safety_factor']
+        # The transport's per-attempt allowance (a token-limit retry may raise it) is the
+        # cap actually sent and reserved; never silently resend the base cap.
+        limit=(payload.get('options') or {}).get('num_predict') or self.settings['num_predict']
+        amount=cost(dict(input_tokens=input_bound,output_tokens=limit),api)*api['safety_factor']
         schema=strict_schema(payload['format'])
         request=dict(model=self.settings['model'],input=payload['messages'],store=False,
-            reasoning=dict(effort=api['reasoning_effort']),max_output_tokens=self.settings['num_predict'],
+            reasoning=dict(effort=api['reasoning_effort']),max_output_tokens=limit,
             text=dict(format=dict(type='json_schema',name='indicator_assessment',strict=True,schema=schema)))
         write(self.attempt/'responses.request.json',request)
         request_id=uuid.uuid4().hex
@@ -144,6 +147,11 @@ class OpenAIClient:
                     remote_seconds+=time.perf_counter()-started
                     status=getattr(exc,'status_code',None)
                     code=getattr(exc,'code',None)
+                    # Diagnosis without content: exception class, HTTP status and API code only
+                    # (never the SDK message, headers or request text).
+                    write(self.attempt/'api.error.json',dict(attempt=attempt,exception_type=type(exc).__name__,
+                        status_code=status if isinstance(status,int) else None,code=code if isinstance(code,str) else None,
+                        seconds=round(time.perf_counter()-started,3)))
                     if status==429 and code not in ('insufficient_quota','billing_hard_limit_reached') and attempt<api['max_rate_retries']:
                         time.sleep(min(30,api['retry_seconds']*2**attempt));continue
                     rejected=status in (400,401,403,404,429)

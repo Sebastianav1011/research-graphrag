@@ -558,6 +558,147 @@ def test_retention_pins_checkpoints_backing_registered_versions(repo):
     assert rows['local/run_builder']['reason'].startswith('Pinned')
 
 
+@verified_execution
+def test_shared_publication_inside_execution(repo):
+    root, _ = repo
+    stage = builder(root, 'build-execution', shared=True)
+    before = tree_hash(stage)
+    manifest = store.register(root, stage, activate=True)
+    assert not stage.exists()
+    assert tree_hash(store.location(root, manifest)) == before
+    assert store.register(root, stage, activate=True) == manifest
+
+
+@pytest.mark.parametrize('winerror', [5, 32])
+@verified_execution
+def test_publication_denied_preserves_checkpoints_and_retries(repo, monkeypatch, caplog, winerror):
+    root, _ = repo
+    previous = store.register(root, builder(root, 'old'), activate=True)
+    prior = tree_hash(store.shared_root(root))
+    stage = builder(root, 'denied', shared=True)
+    sealed = tree_hash(stage)
+    described = store.describe(root, stage)
+    target = store.shared_root(root) / 'versions' / described['version_id'] / 'artifacts'
+    rename = os.rename
+    def denied(src, dst):
+        error = PermissionError(13, 'simulated access denied')
+        error.winerror = winerror
+        raise error
+    monkeypatch.setattr(store.os, 'rename', denied)
+    with pytest.raises(PermissionError) as caught:
+        store.register(root, stage, activate=True)
+    assert tree_hash(stage) == sealed and not target.exists()
+    assert store._promotion(root, stage).is_file()
+    assert all(tree_hash(store.shared_root(root))[name] == value for name, value in prior.items())
+    assert store.read_active(root)['version_id'] == previous['version_id']
+    assert f'winerror={winerror}' in caplog.text and 'operation=rename' in caplog.text
+    assert str(stage) in caught.value.__notes__[0] and str(target) in caught.value.__notes__[0]
+    monkeypatch.setattr(store.os, 'rename', rename)
+    manifest = store.register(root, stage, activate=True)
+    assert tree_hash(store.location(root, manifest)) == sealed
+    assert store.register(root, stage, activate=True) == manifest
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows real file lock')
+@verified_execution
+def test_external_file_lease_blocks_publication_until_released(repo):
+    from knowledge_verification import ReadLease
+    root, _ = repo
+    stage = builder(root, 'locked', shared=True)
+    target = stage / 'workspace/outputs/layer2/knowledge/source_chunks.parquet'
+    lease = ReadLease(snapshot([target]))
+    try:
+        with pytest.raises(PermissionError):
+            store.register(root, stage)
+        assert stage.exists() and not receipts.get()
+    finally:
+        lease.close()
+    manifest = store.register(root, stage)
+    assert store.location(root, manifest).is_dir()
+    assert receipts.get()  # Final artifacts still receive enforced read protection.
+
+
+def test_publication_lock_rejects_second_publisher_and_releases_on_error(repo):
+    root, _ = repo
+    stage = builder(root, 'concurrent', shared=True)
+    with pytest.raises(RuntimeError, match='interrupted'):
+        with store._publication_lock(root):
+            with pytest.raises(store.KnowledgeUnavailable, match='ocupada'):
+                store.register(root, stage)
+            assert not store._promotion(root, stage).exists()
+            raise RuntimeError('interrupted')
+    assert store.location(root, store.register(root, stage)).is_dir()
+
+
+def test_publication_lock_is_released_after_process_exit(repo):
+    import subprocess
+    import sys
+    root, _ = repo
+    script = ('import os, sys; sys.path.insert(0, sys.argv[1]); '
+              'from knowledge_store import _publication_lock; '
+              'lock = _publication_lock(sys.argv[2]); lock.__enter__(); os._exit(17)')
+    result = subprocess.run([sys.executable, '-B', '-c', script, str(Path(store.__file__).parent), str(root)],
+                            capture_output=True, text=True, timeout=15)
+    assert result.returncode == 17, result.stderr
+    stage = builder(root, 'after-crash', shared=True)
+    assert store.location(root, store.register(root, stage)).is_dir()
+
+
+def test_exact_fingerprint_match_and_mismatch_use_real_validator(repo):
+    from layer2_processing.checkpoints import verify_expected
+    root, _ = repo
+    expected = sha(root / KNOWLEDGE_CODE)
+    verify_expected(root, KNOWLEDGE_CODE, expected)
+    (root / KNOWLEDGE_CODE).write_text('VERSION = 2\n', encoding='utf-8')
+    with pytest.raises(ValueError, match='Fingerprint mismatch') as caught:
+        verify_expected(root, KNOWLEDGE_CODE, expected)
+    assert 'expected=' + expected in str(caught.value)
+    assert 'actual=' + sha(root / KNOWLEDGE_CODE) in str(caught.value)
+
+
+@pytest.mark.parametrize('existing', ['target', 'manifest'])
+def test_retry_never_overwrites_destination_created_after_failure(repo, monkeypatch, existing):
+    root, _ = repo
+    stage = builder(root, 'retry-conflict', shared=True)
+    def denied(*args):
+        raise PermissionError('simulated lock')
+    with monkeypatch.context() as patch:
+        patch.setattr(store.os, 'rename', denied)
+        with pytest.raises(PermissionError):
+            store.register(root, stage)
+    manifest = read(store._promotion(root, stage))['manifest']
+    path = (store.location(root, manifest) / 'keep' if existing == 'target' else
+            store.manifest_path(root, manifest['version_id']))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b'existing bytes')
+    sealed = tree_hash(stage)
+    with pytest.raises(store.KnowledgeUnavailable, match='existente|ya existe'):
+        store.register(root, stage)
+    assert tree_hash(stage) == sealed and path.read_bytes() == b'existing bytes'
+
+
+def test_interruption_after_rename_revalidates_target_before_registration(repo, monkeypatch):
+    root, _ = repo
+    stage = builder(root, 'interrupted', shared=True)
+    atomic = store._atomic_write
+    def interrupted(path, value):
+        if Path(path).name == 'manifest.json':
+            raise OSError('simulated manifest interruption')
+        return atomic(path, value)
+    with monkeypatch.context() as patch:
+        patch.setattr(store, '_atomic_write', interrupted)
+        with pytest.raises(OSError, match='interruption'):
+            store.register(root, stage)
+    manifest = read(store._promotion(root, stage))['manifest']
+    final = store.location(root, manifest)
+    assert not stage.exists() and final.is_dir()
+    (final / 'unexpected').write_bytes(b'tampering')
+    with pytest.raises(ValueError):
+        store.register(root, stage)
+    assert not store.manifest_path(root, manifest['version_id']).exists()
+    assert store.read_active(root) is None
+
+
 def test_shared_publication_renames_and_keeps_legacy_pin(repo):
     root, _ = repo
     old = builder(root, 'old')
@@ -596,6 +737,7 @@ def test_shared_publication_recovers_interruption_without_touching_previous(repo
     described = store.describe(root, stage)
     path = store.manifest_path(root, described['version_id'])
     replace = os.replace
+    rename = os.rename
     failed = []
     def interrupt(src, dst):
         dst = Path(dst)
@@ -604,6 +746,12 @@ def test_shared_publication_recovers_interruption_without_touching_previous(repo
             raise OSError('simulated interruption')
         return replace(src, dst)
     monkeypatch.setattr(store.os, 'replace', interrupt)
+    def interrupt_rename(src, dst):
+        if cut == 'rename' and not failed:
+            failed.append(True)
+            raise OSError('simulated interruption')
+        return rename(src, dst)
+    monkeypatch.setattr(store.os, 'rename', interrupt_rename)
     with pytest.raises(OSError, match='simulated'):
         store.register(root, stage, activate=True)
     assert (store.shared_root(root) / 'active.json').read_bytes() == previous
@@ -742,12 +890,12 @@ def test_shared_graph_reader_and_autonomous_pending_guard(repo, monkeypatch):
 def test_publication_receipt_corruption_fails_closed(repo, monkeypatch):
     root, _ = repo
     stage = builder(root, 'build-new', shared=True)
-    replace = os.replace
+    rename = os.rename
     def stop_rename(src, dst):
         if Path(dst).name == 'artifacts':
             raise OSError('simulated cut')
-        return replace(src, dst)
-    monkeypatch.setattr(store.os, 'replace', stop_rename)
+        return rename(src, dst)
+    monkeypatch.setattr(store.os, 'rename', stop_rename)
     with pytest.raises(OSError):
         store.register(root, stage)
     journal = store._promotion(root, stage)

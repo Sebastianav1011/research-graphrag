@@ -20,6 +20,7 @@ from .contracts import validate_wrapper
 from .performance import Measurement, span, record_call, measured_project
 from .selection import canonical_hash
 from .validation_diagnostics import AssessmentValidationError
+from . import prospective_v2 as _p2
 
 
 DEFAULTS = dict(provider='ollama', model='qwen3.5:4b-q4_K_M',
@@ -250,8 +251,13 @@ def targeted_baseline(attempt_directories, attempt_issues):
 # one of the model's own outputs; origins are written to repair.json and the
 # full assessment is revalidated with the unchanged rules.
 MERGE_CORRECTION_VERSION = 'TARGETED_REFERENCE_CORRECTION_V3_CRITERION_MERGE'
-TARGETED_VERSIONS = (TARGETED_CORRECTION_VERSION, MERGE_CORRECTION_VERSION)
-GLOBAL_FIELDS = ('decision', 'support_strength', 'strength_rubric', 'explanation')
+# PROSPECTIVE_V2_TARGETED_MERGE_V1 (diagnostic C2): the same criterion merge for the
+# derived prospective transport, with a localized corrective prompt.
+P2_TARGETED_VERSION = _p2.TARGETED_CORRECTION
+MERGE_VERSIONS = (MERGE_CORRECTION_VERSION, P2_TARGETED_VERSION)
+TARGETED_VERSIONS = (TARGETED_CORRECTION_VERSION, MERGE_CORRECTION_VERSION, P2_TARGETED_VERSION)
+# scope_exclusion exists only in the derived transport; other items never contain it.
+GLOBAL_FIELDS = ('decision', 'support_strength', 'strength_rubric', 'explanation', 'scope_exclusion')
 
 
 def has_global_issue(baseline, issues):
@@ -281,6 +287,86 @@ def merge_candidates(baseline, flagged, has_global, selection):
         item['criterion_assessments'] = deepcopy(criteria)
         yield (dict(selection, assessments=[item]),
                dict(criteria_origin=origin, global_fields_origin=source, flagged=sorted(flagged)))
+
+
+def merged_selection(baseline, flagged, has_global, selection, provenance):
+    """The transport-level merged selection that merged_attempt accepted."""
+    for candidate, origin in merge_candidates(baseline, flagged, has_global, selection):
+        if all(provenance.get(k) == v for k, v in origin.items()):
+            return candidate
+    raise ValueError('Fusion por criterio no reconstruible')
+
+
+P2_RULE_TEXT = {
+    'V3_CRITERION:CLEAR_REQUIRES_COMPATIBLE_SUBSTANTIVE_EVIDENCE': 'lo marcaste CLEAR, pero ninguna referencia en un campo '
+        'sustantivo tiene una etapa admitida ({stages}). Si algun fragmento afirma lo que exige este criterio para ESTE '
+        'proyecto, citalo con la etapa que la frase realmente afirma; si no, usa PARTIAL o NOT_DEMONSTRATED y explica la brecha.',
+    'P2_CRITERION:CONTEXT_ONLY_REFERENCES': 'tiene soporte positivo citando solo frases con etapa CONTEXT, pero exige una '
+        'accion, producto o resultado de este proyecto. Cita la frase que lo afirme con su etapa real o rebaja el soporte '
+        'explicando la brecha.',
+    'V3_CRITERION:UNSUPPORTED_CANNOT_CLAIM_EVIDENCE': 'es NOT_DEMONSTRATED pero conserva referencias. Si esas frases no lo '
+        'respaldan, vacia las referencias; si lo respaldan en parte, usa PARTIAL 1..3 solo con ellas.',
+    'SK_STRENGTH:ZERO_ANCHOR_MISMATCH': 'strength_rubric: hay criterios con respaldo positivo pero las cuatro dimensiones son 0. '
+        'Valora esas citas con las escalas; no cambies los criterios.',
+    'SK_ZERO_SUPPORT:CANNOT_CLAIM_POSITIVE_CONCEPTUAL_SUPPORT': 'strength_rubric: hay criterios positivos con fuerza nula. '
+        'Valora las citas positivas con las escalas; no cambies los criterios.',
+    'DERIVED_SCHEMA:CRITERION_COMPONENTS': 'support, coverage y referencias no concuerdan: CLEAR=4 con referencias; '
+        'PARTIAL=1..3 con referencias; NOT_DEMONSTRATED=0 sin referencias. Resuelve la contradiccion segun tu juicio, sin '
+        'convertir un NOT_DEMONSTRATED en CLEAR.',
+    'DERIVED_SCHEMA:SCOPE_EXCLUSION': 'scope_exclusion: claimed=false exige basis NONE y sin referencias; claimed=true exige '
+        'basis EXPLICIT_EXCLUSION o DOCUMENTED_SCOPE y la frase que delimita el alcance incompatible.',
+    'P2_APPLICABILITY:NOT_A_SUPPORT_ASSESSMENT': 'scope_exclusion: reclamaste una exclusion de alcance pero hay criterios con '
+        'respaldo positivo. Negar un logro o no hallar respaldo no excluye el alcance; si ninguna frase delimita un alcance '
+        'incompatible, usa claimed=false.',
+}
+
+
+def derived_schema_issue(issue, selection, request):
+    """C2: name the criterion (or scope) whose grammar coupling failed; None if not applicable."""
+    if request.get('component_protocol') != _p2.DERIVED_PROTOCOL or not selection:
+        return None
+    match = re.match(r'\$\.assessments\[0\]\.criterion_assessments\[(\d+)\]', issue.get('path', ''))
+    criteria = selection.get('assessments', [{}])[0].get('criterion_assessments', [])
+    if match and int(match[1]) < len(criteria):
+        index = int(match[1])
+        return dict(issue, path=f'$.criterion_assessments[{index}]', criterion_id=criteria[index].get('criterion_id'),
+                    rule='DERIVED_SCHEMA:CRITERION_COMPONENTS')
+    if issue.get('path', '').startswith('$.assessments[0].scope_exclusion'):
+        return dict(issue, path='$.scope_exclusion', rule='DERIVED_SCHEMA:SCOPE_EXCLUSION')
+    return None
+
+
+def _p2_targeted_prompt(prefix, marker, payload, issues, previous, request, schema, settings, budget):
+    """Localized correction: names criterion, field, admitted stages and the previous judgment."""
+    from .context_budget import rebudget
+    rubric = {c['criterion_id']: c for c in request['payload']['indicators'][0]['rubric']['criteria']}
+    before = {c['criterion_id']: c for c in
+              ((previous or {}).get('assessments') or [{}])[0].get('criterion_assessments', [])}
+
+    def line(issue, explain):
+        rule = issue.get('rule', '')
+        text = P2_RULE_TEXT.get(rule, 'incumple la regla ' + rule + '.')
+        cid = issue.get('criterion_id')
+        if not cid:
+            return '- ' + text
+        crit = rubric.get(cid, {})
+        text = text.format(stages=', '.join(crit.get('compatible_stages', [])))
+        prior = before.get(cid, {})
+        refs = ', '.join(f"{r['fragment_id']}:{r['stage']}" for r in prior.get('evidence_refs', [])) or 'ninguna'
+        summary = f"Tu juicio anterior: support={prior.get('support')}, coverage={prior.get('coverage')}, referencias=[{refs}]"
+        if explain and prior.get('explanation'):
+            summary += ', explicacion: «' + prior['explanation'][:300] + '»'
+        return (f"- Criterio {cid} («{crit.get('criterion', '')}», etapa {crit.get('temporal_requirement')}): "
+                f"{text} {summary}.")
+    closing = ('Solo se tomaran de esta respuesta los criterios y campos senalados; los demas criterios se conservaran '
+               'exactamente como los emitiste. No subas support ni coverage de un criterio senalado. Devuelve el JSON completo.')
+    prompt = None
+    for explain in (True, False):
+        lines = [line(i, explain) for i in issues or []]
+        prompt = prefix + '\nCORRECCION_LOCALIZADA_V1:\n' + '\n'.join(lines) + '\n' + closing + '\n' + marker + payload
+        if rebudget(prompt, schema, settings, budget)['fits']:
+            break
+    return prompt
 
 
 def merged_attempt(baseline, flagged, has_global, selection, request, validator):
@@ -337,20 +423,50 @@ def corrective_request(request, schema, settings, issues=None, previous=None, ve
         raise ValueError('Solicitud correctiva sin INPUT_JSON')
     prefix = prefix.split('\nCORRECTIVE_JSON_RULES:\n', 1)[0]
     from . import prospective_v2 as p2, assessment_v3 as v3
+    if version==P2_TARGETED_VERSION:
+        if request.get('component_protocol')!=p2.DERIVED_PROTOCOL:
+            raise ValueError('Correccion localizada P2 requiere el transporte derivado')
+        revised['prompt']=_p2_targeted_prompt(prefix,marker,payload,issues,previous,request,schema,settings,
+                                              request.get('context_budget'))
+        revised['context_budget']=rebudget(revised['prompt'],schema,settings,request.get('context_budget'))
+        return revised
     if version==p2.CORRECTION:
         if request.get('assessment_version')!=p2.VERSION:
             raise ValueError('Correccion prospectiva V2 con contrato incompatible')
         # Always rebuild from immutable evidence, never append responses or
         # narratives. Full semantic rejudgment is allowed; every original gate
         # still applies. The previous invalid judgment is not an upper bound.
-        details=[{k:i[k] for k in ('rule','path','criterion_id') if k in i} for i in issues or []]
+        details=[{k:i[k] for k in ('rule','path','criterion_id','criterion_ids') if k in i} for i in issues or []]
         correction=('\nCorrige la respuesta completa. No ajustes juicios para obtener una decision prefijada. '
             'Reevalua criterios y aplicabilidad desde las mismas citas. IDs exactos, evidence_refs={fragment_id,stage}; '
             'NOT_DEMONSTRATED sin referencias; CLEAR=4, PARTIAL=1..3, NOT_DEMONSTRATED=0. '
             'Fuerza referencia solo criterios positivos. Todos los REQUIRED y una alternativa por grupo CLEAR para SUPPORTED. '
             'Usa el esquema cerrado; no escribas citas ni indices. Errores: '+json.dumps(details,ensure_ascii=False,separators=(',',':')))
-        concise=p2.instructions_for(request.get('prompt_version',p2.PROMPT))+v3.SK_INSTRUCTIONS.replace(v3.SK_VERSION,p2.VERSION).replace(
+        if request.get('prompt_version') in (p2.PROMPT_COHERENT_V3,p2.PROMPT_CONCISE_V4):
+            hints=[]
+            rules={i.get('rule') for i in issues or []}
+            if 'P2_APPLICABILITY:SUBSTANTIVE_SCOPE_EVIDENCE_REQUIRED' in rules:
+                hints.append('applicability.evidence_refs: justifica alcance con una cita sustantiva real y su etapa; '
+                    'si no existe, UNDETERMINED/UNKNOWN con refs vacias es valido. No inventes alcance ni cambies a NA por ausencia.')
+            if 'V3_CRITERION:UNSUPPORTED_CANNOT_CLAIM_EVIDENCE' in rules:
+                hints.append('En los criterios ND señalados, explica la falta o negacion sin refs de soporte; '
+                    'no conviertas ND en positivo para mantener una referencia. Conserva respaldo contextual genuino donde el criterio lo permita.')
+            if 'support_strength:INCONSISTENT_DECISION' in rules:
+                hints.append('La fuerza global debe ser 1/2 si falta un esencial y hay respaldo parcial; '
+                    '0 sin criterios positivos. Las dimensiones S no sustituyen ese anclaje. No promociones criterios para conservar fuerza 3/4.')
+            if rules & {'SK_STRENGTH:ZERO_ANCHOR_MISMATCH','SK_ZERO_SUPPORT:CANNOT_CLAIM_POSITIVE_CONCEPTUAL_SUPPORT','SK_STRENGTH:POSITIVE_REQUIRES_EVIDENCE'}:
+                hints.append('Si mantienes algun CLEAR/PARTIAL, fuerza global y al menos una dimension deben ser positivas, '
+                    'con refs de fuerza de esos criterios; usa 1/2 si falta un esencial. Si realmente no existe respaldo, '
+                    'todos ND sin refs y fuerza/dimensiones cero. No rebajes contexto pertinente para resolver la contradiccion.')
+            if any(r and ('CONTEXT_ONLY_REFERENCES' in r or 'COMPATIBLE_SUBSTANTIVE' in r) for r in rules):
+                hints.append('Revisa la proposicion real: una accion prevista concreta admite ACTIVITY_PROPOSED; '
+                    'antecedentes generales siguen CONTEXT. No exijas ejecucion ni cambies una etapa para forzar soporte.')
+            correction+='\nDIAGNOSTICO LOCALIZADO V2: '+' '.join(hints)
+        concise=p2.instructions_for(request.get('prompt_version',p2.PROMPT_CONCISE_V4))+v3.SK_INSTRUCTIONS.replace(v3.SK_VERSION,p2.VERSION).replace(
             v3.SK_TEMPORAL_SCALE,v3.PROSPECTIVE_TEMPORAL_SCALE)+v3.SK_COHERENCE
+        if request.get('prompt_version') in (p2.PROMPT_COHERENT_V3,p2.PROMPT_CONCISE_V4):
+            concise=concise.replace('4 requisito integro demostrado (CLEAR)',
+                '4 requisito integro respaldado en su etapa efectiva (CLEAR)')
         options=[prefix+correction+'\n'+marker+payload,concise+correction+'\n'+marker+payload]
         revised['prompt']=min(options,key=lambda p:rebudget(p,schema,settings,request.get('context_budget'))['estimated_input_tokens'])
         revised['context_budget']=rebudget(revised['prompt'],schema,settings,request.get('context_budget'))
@@ -396,7 +512,10 @@ def context_guard(prompt, schema, settings, runtime=None, budget=None):
     if budget is not None:
         from .context_budget import rebudget
         actual = rebudget(prompt, schema, settings, budget)
-        if budget.get('tokenizer') and runtime:
+        # The pinned Qwen tokenizer must match the local model it calibrates. For the
+        # OpenAI API it is only a conservative size estimate (no Qwen runtime exists),
+        # so the drift check applies to the local provider; the budget check below does not change.
+        if budget.get('tokenizer') and runtime and runtime.get('provider') != 'openai':
             descriptor=budget['tokenizer']
             if any(descriptor[k]!=runtime[k] for k in ('model_metadata_sha256',)) or descriptor['model_digest']!=runtime['digest']:
                 raise OllamaError('RUNTIME_DRIFT','Tokenizer y plantilla no corresponden al modelo calibrado')
@@ -528,7 +647,8 @@ class OllamaAssessmentProvider:
     def __init__(self, run_directory, schema_path, input_factory, *, settings=None, client=None,
                  runtime=None, timeout=None, model=None, max_retries=0, max_indicators=3,
                  wrapper_validator=None, execution_id=None, stop_on_uncertain=True, output_adapter=None,
-                 token_limit_retries=0, corrective_retries=0, correction_version=None, wrapper_resolver=None):
+                 token_limit_retries=0, corrective_retries=0, correction_version=None, wrapper_resolver=None,
+                 retry_review=None):
         options = dict(settings or {})
         if timeout is not None:
             options['timeout_seconds'] = timeout
@@ -550,6 +670,10 @@ class OllamaAssessmentProvider:
         self.wrapper_validator = wrapper_validator or validate_wrapper
         self.wrapper_resolver = wrapper_resolver
         self.output_adapter = output_adapter
+        # An explicit trusted human sidecar can approve reinterpretation. It is
+        # never read from the model's JSON or manufactured during correction.
+        self.retry_review = retry_review
+        self.retry_baseline = None
         self.execution_id = execution_id or uuid.uuid4().hex
         self.calls, self.raw_outputs, self.last_output = [], [], None
 
@@ -562,6 +686,7 @@ class OllamaAssessmentProvider:
         output = self.settings['num_predict']
         request = self.input_factory(project, indicators)
         first, self.scope = len(self.calls), None
+        self.retry_baseline = None
         for attempt in range(retries + 1):
             try:
                 return self._evaluate_once(project, indicators, attempt=attempt, output=output, request=request)
@@ -569,6 +694,11 @@ class OllamaAssessmentProvider:
                 if attempt == retries:
                     raise
                 if exc.code == 'INVALID_ASSESSMENT' and attempt < self.corrective_retries:
+                    if any(i.get('rule','').startswith(('RETRY_REVIEW:', 'RETRY_INPUT:'))
+                           for i in self.calls[-1]['validation_issues']):
+                        # Another generation cannot supply independent approval
+                        # or repair a changed immutable input. Preserve the candidate.
+                        raise
                     if any(i.get('category') == 'INTERNAL_VALIDATION_ERROR' for i in self.calls[-1]['validation_issues']):
                         raise
                     previous = None
@@ -582,7 +712,7 @@ class OllamaAssessmentProvider:
                     revised = corrective_request(self.input_factory(project, indicators),
                         strict_json(self.schema.read_text(encoding='utf-8')), self.settings,
                         self.calls[-1]['validation_issues'], previous, self.correction_version)
-                    if self.correction_version==p2.CORRECTION and not revised['context_budget']['fits']:
+                    if self.correction_version in (p2.CORRECTION,P2_TARGETED_VERSION) and not revised['context_budget']['fits']:
                         # Keep the actual failed validation, not a fictitious new
                         # inference or semantic rejection. Nothing is dispatched.
                         raise
@@ -617,7 +747,7 @@ class OllamaAssessmentProvider:
 
     def _evaluate_once(self, project, indicators, *, attempt=0, output=None, request=None):
         self.last_output = None
-        if not 1 <= len(indicators) <= self.max_indicators or not re.fullmatch(r'[A-Za-z0-9_-]+', project['project_id']):
+        if not 1 <= len(indicators) <= self.max_indicators or not re.fullmatch(r'[A-Za-z0-9_-][A-Za-z0-9_.-]*', project['project_id']):  # ARTICLE IDs keep their EID dots; never '.'/'..'
             raise ValueError('Identificador de proyecto o lote invalido')
         request = request or self.input_factory(project, indicators)
         prompt = request['prompt']
@@ -649,6 +779,7 @@ class OllamaAssessmentProvider:
         save('request.json', payload)
         started = datetime.now(timezone.utc).isoformat()
         error, native, raw, issues, validation_stage = None, {}, '', [], 'transport'
+        retry_candidate = None
         measurement = Measurement()
         try:
             with span('inferencia'), measurement:
@@ -674,6 +805,30 @@ class OllamaAssessmentProvider:
             validation_stage = 'json'
             parsed = strict_json(raw)
             validation_stage = 'schema'
+            from . import prospective_v2 as p2
+            from .evidence_references import response_schema as reference_schema
+            if request.get('component_protocol')==p2.COMPONENT_PROTOCOL:
+                # A complete parseable semantic judgment remains the retry
+                # baseline even when the stricter decoding contract rejects its
+                # cross-field consistency. Otherwise grammar errors could erase
+                # an unfavorable first judgment and bypass V1 promotion review.
+                from copy import deepcopy
+                legacy_request=dict(request);legacy_request.pop('component_protocol')
+                Draft202012Validator(reference_schema(legacy_request,project['fields'])).validate(parsed)
+                retry_candidate=deepcopy(parsed)
+                save('selection.json',parsed)
+                if self.retry_baseline is None:
+                    self.retry_baseline=dict(selection=deepcopy(parsed),request=deepcopy(request),schema=deepcopy(schema))
+            if request.get('component_protocol')==p2.DERIVED_PROTOCOL:
+                # Same V1 safeguard for the derived transport: a complete judgment
+                # that only breaks the grammar coupling remains the retry baseline.
+                from copy import deepcopy
+                from .evidence_references import derived_baseline_schema
+                Draft202012Validator(derived_baseline_schema(request,project['fields'])).validate(parsed)
+                retry_candidate=deepcopy(parsed)
+                save('selection.json',parsed)
+                if self.retry_baseline is None:
+                    self.retry_baseline=dict(selection=deepcopy(parsed),request=deepcopy(request),schema=deepcopy(schema))
             Draft202012Validator(schema).validate(parsed)
             validation_stage = 'semantic'
             from .evidence_references import active, materialize
@@ -682,9 +837,26 @@ class OllamaAssessmentProvider:
             ids = [i['indicator_id'] for i in indicators]
             if active(request):
                 save('selection.json', parsed)
-            if active(request) and scope and self.correction_version == MERGE_CORRECTION_VERSION:
-                parsed, provenance = merged_attempt(*scope, parsed, request,
-                    lambda wrapper: self.wrapper_validator(wrapper, project['project_id'], ids))
+            retry_candidate = None
+            if active(request) and request.get('assessment_version') == p2.VERSION:
+                from copy import deepcopy
+                retry_candidate = deepcopy(parsed)
+                if self.retry_baseline is None:
+                    self.retry_baseline = dict(selection=deepcopy(parsed), request=deepcopy(request), schema=deepcopy(schema))
+            if active(request) and scope and self.correction_version in MERGE_VERSIONS:
+                resolving = request.get('decision_policy') == p2.DECISION_POLICY
+                def check(wrapper):
+                    if resolving:
+                        wrapper = self.wrapper_resolver(wrapper)[0]
+                    self.wrapper_validator(wrapper, project['project_id'], ids)
+                merged, provenance = merged_attempt(*scope, parsed, request, check)
+                if resolving:
+                    merged, decision_receipt = self.wrapper_resolver(merged)
+                    save('decision.json', decision_receipt)
+                if retry_candidate is not None:
+                    # V1 protection compares the accepted merge, not discarded criteria.
+                    retry_candidate = merged_selection(*scope, parsed, provenance)
+                parsed = merged
                 save('repair.json', provenance)
             else:
                 if active(request) and scope:
@@ -702,13 +874,38 @@ class OllamaAssessmentProvider:
                     raise AssessmentValidationError(exc.issues + scoped) if scoped else exc
                 if scoped:
                     raise AssessmentValidationError(scoped)
+            if retry_candidate is not None and attempt and self.retry_baseline is not None:
+                from .retry_review import compare, validate_review, fingerprint
+                baseline = self.retry_baseline
+                receipt = compare(baseline['selection'], retry_candidate, baseline['request'], request,
+                    baseline['schema'], schema, parsed['assessments'][0]['decision'])
+                review = self.retry_review
+                review_path = self.directory.parent / 'retry_review.json'
+                if review is None and review_path.is_file():
+                    try:review = strict_json(review_path.read_text(encoding='utf-8'))
+                    except (ValueError,UnicodeError):review = None
+                if not receipt['same_payload'] or not receipt['same_schema']:
+                    receipt['status'] = 'INPUT_DRIFT'
+                    save('retry_decision.json',receipt)
+                    raise AssessmentValidationError([dict(category='INVALID_FIELD_VALUE',path='$',
+                        rule='RETRY_INPUT:IMMUTABLE_CONDITIONS_CHANGED')])
+                if receipt['review_required']:
+                    if validate_review(receipt,review,retry_candidate,request):
+                        receipt.update(status='APPROVED_REINTERPRETATION',review_sha256=fingerprint(review),review=review)
+                    else:
+                        save('retry_decision.json',receipt)
+                        raise AssessmentValidationError([dict(category='INVALID_FIELD_VALUE',path='$',
+                            rule='RETRY_REVIEW:INDEPENDENT_ADJUDICATION_REQUIRED',
+                            criterion_ids=receipt['promoted_criteria'])])
+                save('retry_decision.json',receipt)
             save('response.json', parsed)
             self.last_output = parsed
         except OllamaError as exc:
             error = exc
         except AssessmentValidationError as exc:
-            issues = exc.issues
-            error = OllamaError('INVALID_ASSESSMENT', str(exc))
+            from .retry_review import diagnostic_details
+            issues = diagnostic_details(exc.issues, retry_candidate, request)
+            error = OllamaError('INVALID_ASSESSMENT', str(AssessmentValidationError(issues)))
         except ValidationError as exc:
             issues = [dict(category='INVALID_FIELD_VALUE', path='$' + ''.join(
                 f'[{p}]' if isinstance(p, int) else '.' + p for p in exc.absolute_path), rule=str(exc.validator))]
@@ -717,6 +914,9 @@ class OllamaAssessmentProvider:
                 issues[0]['missing_fields'] = missing
                 if len(missing) == 1:
                     issues[0]['path'] += '.' + missing[0]
+            localized = derived_schema_issue(issues[0], retry_candidate, request)
+            if localized:
+                issues = [localized]
             error = OllamaError('INVALID_ASSESSMENT', 'Campo o valor invalido: ' + issues[0]['path'] + '; regla=' + str(exc.validator))
         except (ValueError, TypeError):
             category = 'INVALID_JSON' if validation_stage == 'json' else 'INTERNAL_VALIDATION_ERROR'

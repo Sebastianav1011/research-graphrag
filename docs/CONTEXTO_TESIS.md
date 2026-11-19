@@ -88,9 +88,11 @@ outputs/shared/base/
 
 ## 5. Evaluación de indicadores
 
-`prepare_evaluation` resuelve IDs seleccionados contra `source_project_id` canónico; actualmente prepara lotes de hasta dos proyectos y una solicitud por indicador, con reintentos existentes. Evaluación automática de ARTICLE como objetivo independiente sigue pendiente; sus documentos/nodos sí enriquecen Knowledge y relaciones.
+`prepare_evaluation` resuelve IDs seleccionados contra `source_project_id` canónico; actualmente prepara lotes de hasta dos proyectos y una solicitud por indicador, con reintentos existentes.
 
-`scoped_retrieval.from_published_cache` valida la publicación, carga el índice SOURCE y consulta vectores REFERENCE ya cacheados; no genera embeddings al recuperar. `rank_project_passages` filtra fragmentos propios por `source_id`, tipo PROJECT y campos sustantivos, y ordena por el máximo coseno con las referencias del indicador. **Esta ruta no depende del corte de candidatos del ranking global publicado.** Una consulta cacheada ausente es error explícito, no permiso para crear embeddings o leer el descriptor como fallback.
+**ARTICLE como fuente independiente (V5, 18/11/2026; implementado, validación real pendiente).** `prepare_evaluation(..., source_type='ARTICLE')` usa `articulos.parquet` canónico y `indicators/article_sources.py`: identidad `article_id` canónica (también por EID, o DOI solo si es único; repetidos rechazados), solo el resumen es evidencia citable (`abstract` → `text__abstract`, con la columna original en la procedencia), título y palabras clave no citables, sin contexto relacional ni relaciones artículo–proyecto. Los artículos sin resumen quedan como bloqueados y registrados. Menú: tras elegir proyectos, `¿Desea procesar también artículos? (S/N):`; CLI `--articles`; la selección queda congelada para reanudar. Estado detallado, resultados de pruebas y comandos en `outputs/audits/consolidacion_v5_articulos/README.md` (sección 0).
+
+`scoped_retrieval.from_published_cache` valida la publicación, abre el índice SOURCE por `memmap` (`NumpyVectorIndex.open_mapped`, mismas verificaciones; solo se puntúan las filas propias y las de documentos relacionales alcanzables, `INDEX_ACCESS=MEMMAP_SELECTED_ROWS_FLOAT64_V1`; resultados idénticos a la puntuación completa) y consulta vectores REFERENCE ya cacheados; no genera embeddings al recuperar. `rank_project_passages` filtra fragmentos propios por `source_id`, tipo PROJECT y campos sustantivos, y ordena por el máximo coseno con las referencias del indicador. **Esta ruta no depende del corte de candidatos del ranking global publicado.** Una consulta cacheada ausente es error explícito, no permiso para crear embeddings o leer el descriptor como fallback.
 
 `project_relations` valida nodos/aristas contra el snapshot y `GraphRetriever.project_context` parte del nodo PROJECT con `canonical_id` exacto. Expansión acotada: hasta dos saltos, vecinos/nodos limitados y solo investigadores resueltos como puente. Los documentos externos alcanzables se ordenan con la misma consulta BGE; se seleccionan hasta tres caminos complementarios verificables. Sus textos no se convierten en evidencia propia del proyecto. Se deduplican fragmentos/caminos y se conservan las relaciones con procedencia.
 
@@ -253,6 +255,16 @@ No está demostrado de extremo a extremo que el proyecto y sus fragmentos estén
 Pruebas relevantes existentes: `tests/test_flexible_preprocessing.py`, `test_project_selection.py`, `test_scoped_identity.py`, `test_pipeline_scope_fixes.py`, `test_context_budget.py`, `test_evidence_references.py`, `tests/layer4_graphrag/test_graph.py`, `tests/layer5_experiment/test_assessment_v3.py`, `test_thesis_output.py`, `test_manual_pipeline.py`, `test_unified_runner.py` y `test_selection_console.py`.
 
 Antes de esta transferencia se ejecutaron tandas puntuales: 13 pruebas de identidad/relaciones, 4 de fuentes incompletas, 8 de reuse/rebuild y 10 de confianza/procedencia/exportación; esas cifras corresponden a sus momentos de ejecución, no a una certificación de toda la suite actual. No se ejecutó una regresión completa después de todos los cambios acumulados; hay expectativas históricas de salida/defaults que pueden necesitar ajuste explícito de contrato. No afirmar que todos los tests del repositorio están aprobados. Esta última tarea solo agrega documentación y prepara Git, sin correcciones funcionales adicionales.
+
+### Estado V5 al 18/11/2026 (artículos, optimización y menú)
+
+| Estado | Alcance |
+|---|---|
+| Implementado | Recuperación por `memmap` con puntuación de filas seleccionadas; artículos como fuentes independientes en el flujo principal; hoja `Artículos` con `titulo`/`doi`/`eid`; menú S/N de artículos y `--articles`; `scripts/evaluate_source.py` con reserva de memoria de 2.048 MiB. |
+| Validado | Equivalencia exacta de la optimización (mismos fragmentos, orden, referencias, caminos y prompts en 21844, 21736, 21869 y PREDICOL); `tests/test_v5_articles_optimization.py` 7/7; regresión secuencial de 8/30 módulos sin regresiones nuevas (solo los 6+1 fallos preexistentes); dos regresiones detectadas y corregidas (carga ligera en el coordinador revertida; guion del test de menú sin la nueva pregunta). |
+| Pendiente | Módulos 9–30 de la regresión; flujo principal real 21844 + PREDICOL con Excel; controles Qwen (no se conserva ninguna inferencia V5 nueva con nota de artículo); carga ligera de fragmentos en el coordinador. |
+
+Comandos exactos para continuar: `outputs/audits/consolidacion_v5_articulos/README.md`, sección 0.4.
 
 ## 13. Estabilización del 14/11/2026 (C1, M1, C2, M6)
 

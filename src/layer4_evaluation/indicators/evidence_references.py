@@ -118,6 +118,35 @@ def response_schema(request, fields):
                 node['required'] = list(keys)
     if version == v3.P2_VERSION:
         from . import prospective_v2 as p2
+        if request.get('component_protocol') == p2.DERIVED_PROTOCOL:
+            return _derived_schema(schema, request)
+        if request.get('component_protocol') == p2.COMPONENT_PROTOCOL:
+            # Encode existing gates in decoding, never repair a generated value.
+            # Judgment precedes references: choosing ND leaves only [] admissible,
+            # rather than forcing a positive label to retain an earlier reference.
+            node=criteria['items']
+            order=['criterion_id','explanation','support','coverage','evidence_relation','evidence_refs']
+            node['properties']={k:node['properties'][k] for k in order}
+            node['required']=order
+            branches=[]
+            for support in ('CLEAR','PARTIAL','NOT_DEMONSTRATED'):
+                branch=deepcopy(node);bp=branch['properties']
+                bp['support']=dict(type='string',const=support)
+                bp['coverage']=(dict(type='integer',minimum=1,maximum=3) if support=='PARTIAL'
+                    else dict(type='integer',const=4 if support=='CLEAR' else 0))
+                bp['evidence_refs']['maxItems' if support=='NOT_DEMONSTRATED' else 'minItems']=0 if support=='NOT_DEMONSTRATED' else 1
+                bp['evidence_relation']['enum']=(['NO_SUPPORT','UNRELATED'] if support=='NOT_DEMONSTRATED'
+                    else ['PROJECT_CONTRIBUTION','CONTEXT_IDENTIFICATION'])
+                branches.append(branch)
+            node['anyOf']=branches
+            app=item['properties']['applicability'];branches=[]
+            for status,bases in (('APPLICABLE',['RELEVANT_SCOPE']),('UNDETERMINED',['UNKNOWN']),
+                                 ('NOT_APPLICABLE',['EXPLICIT_EXCLUSION','DOCUMENTED_SCOPE'])):
+                branch=deepcopy(app);ap=branch['properties']
+                ap['status']=dict(type='string',const=status);ap['basis']['enum']=bases
+                ap['evidence_refs']['maxItems' if status=='UNDETERMINED' else 'minItems']=0 if status=='UNDETERMINED' else 1
+                branches.append(branch)
+            app['anyOf']=branches
         if request.get('applicability_protocol') == p2.COHERENT_APPLICABILITY:
             # Encode existing cross-field gates in the decoding grammar. Never
             # infer applicability or repair the model's decision in Python.
@@ -151,6 +180,110 @@ def response_schema(request, fields):
     return schema
 
 
+def _derived_schema(schema, request):
+    """PYTHON_DERIVED_COMPONENTS_V1 transport: only semantic judgments are generated.
+
+    evidence_relation, support_strength, decision, the global explanation, the
+    strength references and the scope references of APPLICABLE are derived by
+    prospective_v2.derive_components. Title/keywords fragment IDs are not citable.
+    """
+    from . import prospective_v2 as p2
+    item = schema['properties']['assessments']['items']
+    props = item['properties']
+    citable = [f['fragment_id'] for f in request['payload']['project']['fragments']
+               if f['field'] not in p2.ORIENTATION_FIELDS]
+    refs = dict(type='array', items=v3._object(dict(
+        fragment_id=dict(type='string', enum=citable) if citable else dict(type='string'),
+        stage=dict(type='string', enum=v3.STAGES))))
+    if not citable:
+        refs['maxItems'] = 0
+    criterion = props['criterion_assessments']['items']
+    cp = criterion['properties']
+    order = ['criterion_id', 'explanation', 'support', 'coverage', 'evidence_refs']
+    base = {k: (deepcopy(refs) if k == 'evidence_refs' else cp[k]) for k in order}
+    criterion.clear()
+    branches = []
+    for support in ('CLEAR', 'PARTIAL', 'NOT_DEMONSTRATED'):
+        bp = deepcopy(base)
+        bp['support'] = dict(type='string', const=support)
+        bp['coverage'] = (dict(type='integer', minimum=1, maximum=3) if support == 'PARTIAL'
+                          else dict(type='integer', const=4 if support == 'CLEAR' else 0))
+        bp['evidence_refs']['maxItems' if support == 'NOT_DEMONSTRATED' else 'minItems'] = (
+            0 if support == 'NOT_DEMONSTRATED' else 1)
+        branches.append(dict(type='object', properties=bp, required=list(order), additionalProperties=False))
+    criterion['anyOf'] = branches
+    strength = props['strength_rubric']
+    strength_order = ['explanation', *v3.STRENGTH_DIMENSIONS]
+    strength['properties'] = {k: strength['properties'][k] for k in strength_order}
+    strength['required'] = list(strength_order)
+    text = dict(type='string', minLength=1)
+    scope_branches = []
+    for claimed, bases in ((False, ['NONE']), (True, ['EXPLICIT_EXCLUSION', 'DOCUMENTED_SCOPE'])):
+        sp = dict(explanation=text, claimed=dict(type='boolean', const=claimed),
+                  basis=dict(type='string', enum=bases), evidence_refs=deepcopy(refs))
+        sp['evidence_refs']['minItems' if claimed else 'maxItems'] = 1 if claimed else 0
+        scope_branches.append(dict(type='object', properties=sp, required=list(sp), additionalProperties=False))
+    item_order = ['indicator_id', 'assessment_version', 'criterion_assessments', 'strength_rubric', 'scope_exclusion']
+    props['scope_exclusion'] = dict(anyOf=scope_branches)
+    item['properties'] = {k: props[k] for k in item_order}
+    item['required'] = list(item_order)
+    return schema
+
+
+def derived_baseline_schema(request, fields):
+    """Same derived transport without cross-field coupling.
+
+    A complete parseable judgment that violates only the support/coverage/reference
+    coupling stays the retry baseline (V1 protection), exactly as for
+    COHERENT_REFERENCE_COMPONENTS_V2. It is never accepted as an assessment.
+    """
+    schema = response_schema(request, fields)
+    item = schema['properties']['assessments']['items']['properties']
+    criterion = item['criterion_assessments']['items']
+    loose = deepcopy(criterion['anyOf'][0])
+    loose['properties']['support'] = dict(type='string', enum=['CLEAR', 'PARTIAL', 'NOT_DEMONSTRATED'])
+    loose['properties']['coverage'] = dict(type='integer', minimum=0, maximum=4)
+    loose['properties']['evidence_refs'].pop('minItems', None)
+    item['criterion_assessments']['items'] = loose
+    scope = deepcopy(item['scope_exclusion']['anyOf'][1])
+    scope['properties']['claimed'] = dict(type='boolean')
+    scope['properties']['basis'] = dict(type='string', enum=['NONE', 'EXPLICIT_EXCLUSION', 'DOCUMENTED_SCOPE'])
+    scope['properties']['evidence_refs'].pop('minItems', None)
+    item['scope_exclusion'] = scope
+    return schema
+
+
+QUOTE_PAIRS = {'«': '»', '“': '”', '"': '"', '(': ')'}
+
+
+def fragments_v2(fields):
+    """C8: sentence intervals that never split inside quotations or parentheses.
+
+    Same untouched text and ordering as fragments(); only cut points inside an
+    open quote/parenthesis are skipped, so a negated or attributed statement keeps
+    its scope in a single fragment.
+    """
+    result = []
+    for field, text in sorted(fields.items()):
+        text = text or ''
+        # open_after[i]: a quote/parenthesis is still open after text[:i].
+        stack, open_after = [], [False]
+        for char in text:
+            if stack and char == QUOTE_PAIRS[stack[-1]]:
+                stack.pop()
+            elif char in QUOTE_PAIRS:
+                stack.append(char)
+            open_after.append(bool(stack))
+        balanced = not stack  # Unbalanced text keeps the historical cut points.
+        cuts = [m.end() for m in re.finditer(r'[.!?]["”’»)\]]*\s+|(?:\r?\n){2,}', text)
+                if not (balanced and open_after[m.end()])]
+        ends = [0, *cuts, len(text)]
+        for start, end in zip(ends, ends[1:]):
+            if text[start:end].strip():
+                result.append(dict(fragment_id=f'F{len(result):03d}', field=field, text=text[start:end]))
+    return result
+
+
 def materialize(request, wrapper):
     """Resolve exact IDs; never repair support, stages or decisions."""
     if not active(request):
@@ -165,10 +298,12 @@ def materialize(request, wrapper):
         evidence, positions = [], {}
         judgments = [(f'$.criterion_assessments[{ci}]', criterion)
                      for ci, criterion in enumerate(item['criterion_assessments'])]
-        if 'strength_rubric' in item:
+        if 'evidence_refs' in item.get('strength_rubric', {}):
             judgments.append(('$.strength_rubric', item['strength_rubric']))
         if 'applicability' in item:
             judgments.append(('$.applicability', item['applicability']))
+        if 'scope_exclusion' in item:
+            judgments.append(('$.scope_exclusion', item['scope_exclusion']))
         for path, criterion in judgments:
             indices = []
             for ref in criterion.pop('evidence_refs'):
@@ -188,4 +323,8 @@ def materialize(request, wrapper):
                     indices.append(positions[key])
             criterion['evidence_indices'] = indices
         item['evidence'] = evidence
+    from . import prospective_v2 as p2
+    if request.get('component_protocol') == p2.DERIVED_PROTOCOL:
+        criteria = request['payload']['indicators'][0]['rubric']['criteria']
+        result['assessments'] = [p2.derive_components(item, criteria) for item in result['assessments']]
     return result

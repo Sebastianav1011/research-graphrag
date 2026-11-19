@@ -150,7 +150,7 @@ def test_transport_and_audit_replay_share_resolver_and_keep_original(provider_ca
     x = partial(prospective)
     project = dict(project_id='P',siap_id='SYNTHETIC',fields=x['fields'])
     request = cb.make_request(project,x['profile'],x['rubric'],x['fields'], evidence_references=True,
-        assessment_version=p2.VERSION,evaluation_mode=p2.MODE,prompt_version=p2.PROMPT)
+        assessment_version=p2.VERSION,evaluation_mode=p2.MODE,prompt_version=p2.PROMPT_CONCISE_V4)
     plan = dict(assessment_version=p2.VERSION,evaluation_policy=v3.evaluation_policy(base=True),
         profiles={x['profile']['indicator_id']:x['profile']},rubrics={x['profile']['indicator_id']:x['rubric']})
     schema = refs.response_schema(request,x['fields'])

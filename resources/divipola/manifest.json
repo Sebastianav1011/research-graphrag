@@ -1,0 +1,25 @@
+{
+  "version": "DIVIPOLA_MGN_2025",
+  "source": "https://portalgis.dane.gov.co/mparcgis/rest/services/Divipola/Serv_DIVIPOLA_MGN_2025/FeatureServer",
+  "retrieved_at": "2026-11-17T23:20:07.622420+00:00",
+  "files": {
+    "departments.csv": {
+      "rows": 33,
+      "sha256": "98aaed7097a6f6220663125b8c862e311a72110ae1b3b569918db315cca62d70",
+      "source_url": "https://portalgis.dane.gov.co/mparcgis/rest/services/Divipola/Serv_DIVIPOLA_MGN_2025/FeatureServer/319/query",
+      "fields": "DPTO_CCDGO,DPTO_CNMBRE"
+    },
+    "municipalities.csv": {
+      "rows": 1122,
+      "sha256": "dbe60a97300a63a0ca3b572f2a6995138d276cbdaf4e0df7dd404599a5aa2932",
+      "source_url": "https://portalgis.dane.gov.co/mparcgis/rest/services/Divipola/Serv_DIVIPOLA_MGN_2025/FeatureServer/317/query",
+      "fields": "DPTO_CCDGO,MPIO_CDPMP,MPIO_CNMBRE,MPIO_TIPO,DPTO_CNMBRE"
+    },
+    "settlements.csv": {
+      "rows": 8420,
+      "sha256": "51d20bbd3056fd6d9c5b899cdd7ea1996366ca6e49fcef7748efcf8717541d94",
+      "source_url": "https://portalgis.dane.gov.co/mparcgis/rest/services/Divipola/Serv_DIVIPOLA_MGN_2025/FeatureServer/305/query",
+      "fields": "DPTO_CCDGO,MPIO_CDPMP,ZU_CDIVI,ZU_CNMBRE,CLAS_CCDGO"
+    }
+  }
+}

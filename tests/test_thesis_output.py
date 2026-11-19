@@ -80,7 +80,9 @@ def test_valid_output_keeps_seven_numeric_columns_and_technical_states_only_in_a
         assert reader.fieldnames==output.GENERAL_COLUMNS and len(values)==4
         assert values[0]['confianza']=='0'
     with (tmp_path/'resultados/indicadores_territorios.csv').open(encoding='utf-8-sig',newline='') as stream:
-        assert list(csv.DictReader(stream,delimiter=';'))[0]['codigo_dane']=='05'
+        rows=list(csv.DictReader(stream,delimiter=';'))
+        assert rows[0]['departamento']=='Antioquia' and rows[0]['municipio']==''
+        assert rows[0]['codigo_dane']=='05' and rows[0]['codigo_municipio_dane']=='' and len(rows)==4
 
 
 @pytest.mark.parametrize('decision',['SUPPORTED','INSUFFICIENT_EVIDENCE','NOT_SUPPORTED'])

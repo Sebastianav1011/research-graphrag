@@ -132,9 +132,16 @@ def execute_with_console(engine, **kwargs):
 
 def confirm_action(kind, summary):
     if kind=='knowledge_rebuild':
-        print(summary['message'],flush=True)
+        mismatch='Fingerprint mismatch' in summary['message']
+        if mismatch:
+            print('\nADVERTENCIA: KNOWLEDGE EXISTENTE INCOMPATIBLE\n\n'
+                'El Knowledge guardado no coincide con la configuración actual.\n\n'
+                'Motivo: Fingerprint mismatch.\n\n'
+                'El conocimiento existente no puede reutilizarse de forma segura.\n',flush=True)
+        else:print(summary['message'],flush=True)
         if not sys.stdin.isatty():return False
-        try:return input('Reconstruir conocimiento completo de BASE [si/NO]: ').strip().lower() in ('si','sí')
+        try:return input('¿Deseas reconstruir el Knowledge para continuar? (s/N): ' if mismatch else
+            'Reconstruir conocimiento completo de BASE [si/NO]: ').strip().lower() in ('si','sí')
         except EOFError:return False
     if kind=='run':
         print('\nRun ID: '+summary['run_id'],flush=True)
@@ -148,6 +155,9 @@ def confirm_action(kind, summary):
         print('Proyectos: '+str(summary['project_count']),flush=True)
         if summary.get('project_ids'):
             print('IDs institucionales: '+', '.join(summary['project_ids']),flush=True)
+        if summary.get('article_count'):
+            print('Articulos: '+str(summary['article_count'])+' (evaluados por separado; solo su resumen es evidencia)',flush=True)
+            print('Articulos (EID original): '+', '.join(summary['article_ids']),flush=True)
         print('Fuentes: '+('base' if all('/base/' in name or '/reference/' in name for name in summary['sources'])
             else ', '.join(summary['sources']))+f" ({len(summary['sources'])} archivos)",flush=True)
         contract=summary.get('contract')
@@ -192,6 +202,16 @@ def selected_projects(args):
     ids = [value.strip() for value in ids]
     if not ids or any(not value for value in ids) or len(ids) != len(set(ids)):
         raise ValueError('Los identificadores deben ser unicos y no vacios; no se convierten a numeros')
+    return ids
+
+
+def selected_article_ids(args):
+    """Optional ARTICLE IDs (canonical ID, EID or unique DOI), exact text, order kept."""
+    if getattr(args,'articles',None) is None:
+        return None
+    ids=[value.strip() for value in args.articles.split(',')]
+    if not ids or any(not value for value in ids) or len(ids)!=len(set(ids)):
+        raise ValueError('--articles requiere identificadores de articulo unicos y no vacios, separados por comas')
     return ids
 
 
@@ -321,6 +341,7 @@ def dispatch_pipeline(args):
             limit=args.limit, all_projects=args.all_projects, seed=args.seed, dry_run=args.dry_run,
             selection_manifest=args.selection_manifest, approve_build=args.approve_build, authorize=args.authorize_llm,
             confirm_all=args.confirm_all,indicator_ids=selected_indicators(args),
+            article_ids=selected_article_ids(args),
             single_authorization=True,
             evaluation_mode=args.evaluation_mode,context_mode=args.context_mode,knowledge_action=args.knowledge_action,
             interactive=not args.non_interactive)
@@ -347,6 +368,7 @@ def dispatch_pipeline(args):
             run_id=args.run_id, stage=args.stage if args.command == 'stage' else None,
             through=args.through, resume=args.command == 'resume', approve_build=args.approve_build,
             authorize=args.authorize_llm, project_ids=selected_projects(args),indicator_ids=selected_indicators(args),
+            article_ids=selected_article_ids(args),
             input_file=args.input_file, delivery=args.delivery,
             single_authorization=True,
             evaluation_mode=args.evaluation_mode,context_mode=args.context_mode,knowledge_action=args.knowledge_action,
@@ -405,6 +427,7 @@ def parser():
     result.add_argument('--policy', default='config/autonomous.json', help='Politica para prepare; despues queda congelada')
     result.add_argument('--reuse-run', help='En prepare autonomo: reutiliza un run autorizado validado, sin inferencias')
     result.add_argument('--indicators', help='run/resume: subconjunto de indicadores del catalogo (IDs separados por comas, p. ej. DIV-04,POL-01,AMB-01) para una validacion acotada; queda congelado en el run. En prepare --autonomous conserva su uso de depuracion')
+    result.add_argument('--articles', help='run: articulos BASE a evaluar ademas de los proyectos (ID canonico, EID o DOI unico, separados por comas); cada fuente se evalua por separado con V5 y queda congelado en el run')
     result.add_argument('--manifest-sha256', help='Hash del manifiesto revisado; obligatorio para authorize')
     result.add_argument('--partial', action='store_true', help='Exportacion explicitamente incompleta del modo autonomo')
     result.add_argument('--background', action='store_true', help='Inicia el worker autonomo autorizado en segundo plano, sin ventana')
@@ -460,6 +483,93 @@ def menu_selection(root, seed, config_path='config/pipeline_manual.json'):
         else:print('Opcion invalida.')
 
 
+def describe_projects(selection):
+    if selection.get('all_projects'):return 'todos los proyectos de la base'
+    if selection.get('limit'):return str(selection['limit'])
+    if selection.get('project_id'):return str(len(selection['project_id']))
+    if selection.get('contract'):return 'segun el contrato '+Path(selection['contract']).name
+    return 'segun la fuente seleccionada'
+
+
+def ask_yes_no(question):
+    while True:
+        answer=input(question).strip().casefold()
+        if answer in ('s','si','sí'):return True
+        if answer in ('n','no'):return False
+        print('Respuesta invalida. Escribir S o N.')
+
+
+def menu_articles(root, seed):
+    """Optional ARTICLE selection after the projects; None returns to the previous question.
+
+    Articles are shown and returned by their original source identifier: the `eid`
+    exactly as in produccion-limpio.csv (literal DOI only when the source has no EID).
+    The canonical ART_ key is internal and is resolved later by the coordinator."""
+    import random
+    from layer4_evaluation.indicators import article_sources
+    print('Leyendo el inventario de articulos del conocimiento BASE activo...',flush=True)
+    inventory=article_sources.inventory(root)
+    by_id={a['article_id']:a for a in inventory}
+    def shown(a):
+        # A DOI shared by several canonical articles cannot identify one; keep the key then.
+        try:
+            return a['original_id'] if article_sources.resolve(inventory,[a['original_id']])==[a['article_id']] else a['article_id']
+        except ValueError:
+            return a['article_id']
+    evaluable=[a for a in inventory if a['has_abstract']]
+    available=sorted(a['original_id'] for a in evaluable if a.get('original_id_type')=='EID')
+    print(f'Articulos disponibles: {len(inventory)} ({len(evaluable)} con resumen evaluable; {len(available)} de ellos con EID).')
+    while True:
+        print('\n1. Seleccionar cantidad de articulos.\n2. Seleccionar articulos especificos por EID.\n'
+              '3. Consultar articulos disponibles.\n0. Volver.')
+        choice=input('Opcion: ').strip()
+        if choice=='0':return None
+        if choice=='1':
+            while True:
+                value=input(f'Cantidad de articulos con resumen y EID (1-{len(available)}; 0: volver): ').strip()
+                if value=='0':break
+                if value.isascii() and value.isdigit() and 0<int(value)<=len(available):
+                    return sorted(random.Random(seed).sample(available,int(value)))
+                print('Ingrese una cantidad entera positiva dentro del rango.')
+        elif choice=='2':
+            while True:
+                value=input('EID de los articulos separados por comas, p. ej. 2-s2.0-85089837524 (0: volver): ').strip()
+                if value=='0':break
+                try:
+                    ids=article_sources.resolve(inventory,[v for v in value.split(',')])
+                except ValueError as exc:
+                    render_error(exc);continue
+                without=[by_id[a]['original_id'] for a in ids if not by_id[a]['has_abstract']]
+                if without:
+                    print('Sin resumen (no se evaluaran; quedaran registrados): '+', '.join(without))
+                no_eid=[by_id[a]['original_id'] for a in ids if by_id[a].get('original_id_type')!='EID']
+                if no_eid:
+                    print('Sin EID en la fuente (se identifican por su DOI original): '+', '.join(no_eid))
+                return [shown(by_id[a]) for a in ids]
+        elif choice=='3':
+            while True:
+                value=input('Texto a buscar en el titulo, EID o DOI (0: volver): ').strip().casefold()
+                if value=='0':break
+                found=[a for a in inventory if value and value in ' '.join(str(a.get(k) or '') for k in ('title','original_id','eid','doi')).casefold()]
+                for a in found[:20]:
+                    print(f"{a['original_id']} | {a.get('publication_year') or ''} | {'con resumen' if a['has_abstract'] else 'SIN RESUMEN'} | {(a.get('title') or '')[:90]}")
+                print(f'{len(found)} coincidencias' + (' (se muestran 20)' if len(found)>20 else '') + '.')
+        else:print('Opcion invalida.')
+
+
+def menu_sources(selection, root, seed):
+    """After the project selection: optional articles. Returns False to go back."""
+    while True:
+        if not ask_yes_no('¿Desea procesar también artículos? (S/N): '):
+            return True
+        articles=menu_articles(root,seed)
+        if articles is None:continue
+        print(f'\nProyectos seleccionados: {describe_projects(selection)}. Articulos seleccionados: {len(articles)}.')
+        if ask_yes_no('¿Confirmar selección de fuentes? (S/N): '):
+            selection['articles']=','.join(articles)
+            return True
+
+
 def menu(base):
     from model_access import label,change_model,preferences
     from autonomous_execution.prepare_menu import choose,select_source,Cancelled
@@ -496,6 +606,8 @@ def menu(base):
                     except Cancelled:continue
                     selection['knowledge_action']=('reuse','rebuild')[knowledge]
                     selection.update(evaluation_mode=base.evaluation_mode,context_mode='retrieved-graph')
+                    # Optional ARTICLE sources, chosen before any inference starts.
+                    menu_sources(selection,ROOT,base.seed)
                     break
                 selection.update(evaluation_mode=base.evaluation_mode,context_mode='graphrag')
                 break
