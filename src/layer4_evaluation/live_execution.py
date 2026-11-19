@@ -620,6 +620,9 @@ def execute(args):
             require(state['new_calls']<plan['maximum_calls'] and state['total_tokens']+reservation<=plan['total_token_reservation_cap'],'Presupuesto de ejecucion agotado')
             context_guard(request['prompt'], schema, settings, runtime, request.get('context_budget'))
             require(client.inspect() == runtime, 'RUNTIME_DRIFT: cambio de modelo o servidor antes de la llamada')
+            if hasattr(client,'budget_check'):
+                # Before any call folder or claim: an indicator stopped for budget stays pending and resumable.
+                client.budget_check(directory,[dict(role='user',content=request['prompt'])],schema,calls=1+corrective_retries)
             number=len(list((directory/'calls'/p['project_id']).glob('assessment_*')))+1 if bounded else len(st['rows'])//3+1
             out=directory/'calls'/p['project_id']/('discovery' if phase=='discovery' else 'assessment_'+str(number))
             out.mkdir(parents=True,exist_ok=True)
@@ -671,6 +674,10 @@ def execute(args):
             verify_hashes(out,record['artifact_hashes']);check(directory)
             write(out/'verification.json',result);emit(result)
             state=verify_run(directory);write(directory/'status.json',summary(state))
+            if error and re.search(r'API_(BUDGET|BALANCE|AUTHENTICATION|PERMISSIONS)', error):
+                # Account-level stop (budget, no balance, credentials): never keep sending the
+                # remaining indicators; the coordinator exports what was completed.
+                raise ValueError(re.search(r'API_[A-Z_]+', error).group(0)+': '+error+'. Ejecucion detenida; se exporta lo completado.')
             if status!='PASS' and not (bounded and plan.get('isolate_indicator_errors')):
                 raise ValueError(status+': '+str(record['error'])+'. Sin reintento automatico. Revisar los artefactos privados de '+str(out)+'; se conservan las publicaciones anteriores.')
         return summary(state)

@@ -19,6 +19,24 @@ def defaults(root=ROOT):
     return json.loads((Path(root)/'config/openai.json').read_text(encoding='utf-8'))
 
 
+# A defined budget keeps a safety margin: no new call is dispatched once the
+# remaining amount (budget - margin - spent/uncertain) cannot cover it, so the run
+# stops cleanly and exports. No budget (None) means no internal limit; the OpenAI
+# account limit and balance still apply and stop the run cleanly when reached.
+BUDGET_MARGIN_FRACTION = 0.05
+BUDGET_MARGIN_MIN_USD = 0.10
+
+
+def budget_margin(budget):
+    return max(budget * BUDGET_MARGIN_FRACTION, BUDGET_MARGIN_MIN_USD)
+
+
+def request_bound(messages, schema, output_tokens, settings):
+    """Same conservative per-call reservation used by OpenAIClient.request."""
+    input_bound = len(json.dumps(messages, ensure_ascii=False).encode()) + len(json.dumps(schema).encode()) + 2048
+    return cost(dict(input_tokens=input_bound, output_tokens=output_tokens), settings) * settings['safety_factor']
+
+
 def cost(usage,settings):
     # output_tokens already includes reasoning; cached input charged conservatively
     # at standard input rate. Never add reasoning a second time.
@@ -46,7 +64,8 @@ class Ledger:
             used=db.execute('SELECT COALESCE(SUM(COALESCE(cost,reserved)),0) FROM requests').fetchone()[0]
             active=db.execute("SELECT COUNT(*) FROM requests WHERE state='IN_FLIGHT'").fetchone()[0]
             if active>=self.settings['max_concurrency']:raise OllamaError('API_CONCURRENCY','Limite de solicitudes en curso')
-            if used+amount>self.settings['budget_usd']:raise OllamaError('API_BUDGET','Reserva preventiva excede presupuesto; exportar parcial')
+            budget=self.settings.get('budget_usd')
+            if budget is not None and used+amount>budget:raise OllamaError('API_BUDGET','Reserva preventiva excede presupuesto; exportar parcial')
             db.execute('INSERT INTO requests(id,project,state,reserved) VALUES(?,?,?,?)',(key,project,'IN_FLIGHT',amount))
 
     def dispatched(self,key):
@@ -66,7 +85,7 @@ class Ledger:
         result=dict(provider='openai',model='gpt-6.1-terra',calls=sum(row[-1] for row in rows),requests=len(rows),input_tokens=0,output_tokens=0,
             reasoning_tokens=0,cached_tokens=0,estimated_cost_usd=0.,reserved_uncertain_usd=0.,projects={},
             token_details_reported_requests=dict(reasoning_tokens=0,cached_tokens=0),
-            budget_usd=self.settings['budget_usd'],pricing=self.settings,remote_hardware='NOT_AVAILABLE')
+            budget_usd=self.settings.get('budget_usd'),pricing=self.settings,remote_hardware='NOT_AVAILABLE')
         for project,state,reserved,spent,raw,_,attempts in rows:
             if spent is None:result['reserved_uncertain_usd']+=reserved
             else:
@@ -78,7 +97,9 @@ class Ledger:
                     result['token_details_reported_requests'][name]+=1
         for name,reported in result['token_details_reported_requests'].items():
             if rows and not reported:result[name]=None
-        result['available_usd']=max(0,result['budget_usd']-result['estimated_cost_usd']-result['reserved_uncertain_usd'])
+        result['available_usd']=(None if result['budget_usd'] is None else
+            max(0,result['budget_usd']-result['estimated_cost_usd']-result['reserved_uncertain_usd']))
+        result['budget_margin_usd']=None if result['budget_usd'] is None else budget_margin(result['budget_usd'])
         return result
 
 
@@ -89,6 +110,21 @@ class OpenAIClient:
     def attach(self,directory):
         directory=Path(directory)
         self.directory=next((p for p in [directory,*directory.parents] if (run_file(p, 'model.binding.json')).exists()),directory)
+
+    def budget_check(self,directory,messages,schema,calls=1):
+        """Before any dispatch claim: stop (API_BUDGET) when budget minus margin cannot cover the next indicator."""
+        from .ollama_provider import OllamaError
+        api=self.settings['api'];budget=api.get('budget_usd')
+        if budget is None:return None
+        self.attach(directory)
+        spent=Ledger(self.directory/'api-ledger.sqlite',api).summary()
+        used=spent['estimated_cost_usd']+spent['reserved_uncertain_usd']
+        need=request_bound(messages,schema,self.settings['num_predict'],api)*max(1,calls)
+        left=budget-budget_margin(budget)-used
+        if need>left:
+            raise OllamaError('API_BUDGET',f'Presupuesto operativo alcanzado: gastado/incierto USD {used:.4f}, margen USD {budget_margin(budget):.2f}; '
+                'no se despachan mas solicitudes. Se exporta lo completado y lo pendiente queda reanudable')
+        return left
 
     def inspect(self):
         from importlib.metadata import version,PackageNotFoundError

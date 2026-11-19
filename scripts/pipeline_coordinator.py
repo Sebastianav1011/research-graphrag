@@ -1521,7 +1521,8 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
             if model_binding['llm']['provider']=='openai' and any(evaluation_dir(run).glob('batch_*')):
                 try:
                     partial_result=export(root,run)
-                    if 'API_BUDGET' in str(exc):return progress('PARTIAL',result=partial_result,reason='API_BUDGET')
+                    stop=next((code for code in ('API_BUDGET','API_BALANCE') if code in str(exc)),None)
+                    if stop:return progress('PARTIAL',result=partial_result,reason=stop)
                 except Exception:write(run/'partial_export.pending.json',dict(reason='Reintentar export explicito; comprobar recibos'))
             progress('FAILED_OR_BLOCKED', error=str(exc), error_type=type(exc).__name__)
             raise

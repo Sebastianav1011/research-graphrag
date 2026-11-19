@@ -165,7 +165,13 @@ def confirm_action(kind, summary):
         print('Procesamiento autonomo: '+' -> '.join(summary['stages']),flush=True)
         print('Destino: '+str(summary.get('destination')),flush=True)
         if summary['provider']=='openai':
-            print('Envio externo a OpenAI. Presupuesto maximo: USD '+str(summary['budget_usd']),flush=True)
+            budget=summary['budget_usd']
+            if budget is None:
+                print('Envio externo a OpenAI. Presupuesto: sin limite interno (solo aplica el saldo o limite de tu cuenta OpenAI).',flush=True)
+            else:
+                from layer4_evaluation.indicators.openai_provider import budget_margin
+                print(f'Envio externo a OpenAI. Presupuesto maximo: USD {budget:.2f}; se dejan de enviar solicitudes al llegar a '
+                      f'USD {budget-budget_margin(budget):.2f} (margen USD {budget_margin(budget):.2f}) y se exporta el Excel con lo completado.',flush=True)
         else:print('Procesamiento local de los textos seleccionados.',flush=True)
         if not sys.stdin.isatty():
             print('Sin terminal interactiva: no se autoriza automaticamente.')
@@ -304,7 +310,10 @@ def dispatch(args):
             run=engine.find_run(ROOT,runs,args.run_id)
             return request_stop(run) if args.command=='stop' else export_only(ROOT,run,engine)
         finally:options.reset(token)
-    token=options.set(dict(provider=args.provider,budget_usd=args.budget_usd,contract=contract))
+    if getattr(args,'unlimited_budget',False) and args.budget_usd is not None:
+        raise ValueError('Elegir --budget-usd o --sin-limite, no ambos')
+    token=options.set(dict(provider=args.provider,budget_usd=args.budget_usd,contract=contract,
+        unlimited_budget=bool(getattr(args,'unlimited_budget',False))))
     try:
         if args.run_id:
             _,_,runs=engine.configuration(ROOT,args.config)
@@ -393,7 +402,8 @@ def parser():
     result.add_argument('stage', nargs='?', choices=STAGES)
     result.add_argument('--run-id', help='Identificador nuevo o existente; obligatorio para stage/resume')
     result.add_argument('--provider',choices=('ollama','openai'),help='Proveedor; queda congelado por ejecucion')
-    result.add_argument('--budget-usd',type=float,help='Presupuesto operativo API explicito; recomendado 15 USD')
+    result.add_argument('--budget-usd',type=float,help='Presupuesto operativo API en USD (con margen de seguridad); alternativa: --sin-limite')
+    result.add_argument('--sin-limite',dest='unlimited_budget',action='store_true',help='OpenAI sin limite interno: solo aplica el saldo o limite de la cuenta')
     result.add_argument('--contract',help='JSON compartido en data/contratos; requiere ejecucion nueva')
     result.add_argument('--selection-run',help='Repite IDs obligatorios y adicionales de otro run con contrato; sin copiar respuestas')
     result.add_argument('--additional-count',type=int,default=0,help='Limite explicito de proyectos adicionales')
@@ -620,19 +630,37 @@ def menu(base):
             args.autonomous=True
             for key,value in (source | selection).items():setattr(args,key,value)
             if args.provider=='openai' and args.budget_usd is None:
-                import math
-                while True:
-                    try:
-                        args.budget_usd=float(input('Presupuesto operativo maximo USD (15): ').strip() or '15')
-                        if math.isfinite(args.budget_usd) and args.budget_usd>0:break
-                    except ValueError:pass
-                    print('Presupuesto positivo requerido.')
+                args.budget_usd,args.unlimited_budget=choose_budget()
             render_result(dispatch(args))
         except EOFError:
             print('Entrada cerrada (EOF). No se inicio otra ejecucion.',flush=True)
             return 2
         except Exception as exc:
             render_error(exc)
+
+
+def choose_budget():
+    """Operating budget for an OpenAI run: (None, True) without internal limit or (USD, False)."""
+    import math
+    from layer4_evaluation.indicators.openai_provider import budget_margin
+    print('\nPRESUPUESTO DE LA EJECUCION (OpenAI)\n1. Sin limite interno (solo aplica el saldo o limite de tu cuenta OpenAI)\n2. Definir presupuesto en USD')
+    while True:
+        choice=input('Opcion: ').strip()
+        if choice=='1':
+            print('Sin limite interno. Si OpenAI rechaza por saldo o limite de la cuenta, la ejecucion se detiene y se exporta el Excel con lo completado.')
+            return None,True
+        if choice=='2':
+            while True:
+                value=input('Presupuesto maximo USD: ').strip().replace(',','.')
+                try:amount=float(value)
+                except ValueError:amount=-1
+                if math.isfinite(amount) and amount>0:
+                    margin=budget_margin(amount)
+                    print(f'Se dejaran de enviar solicitudes al llegar a USD {amount-margin:.2f} (margen de seguridad USD {margin:.2f}); '
+                          'se exporta el Excel con lo completado y lo pendiente queda reanudable.')
+                    return amount,False
+                print('Ingrese un monto positivo en USD, por ejemplo 20.')
+        print('Opcion invalida.')
 
 
 def confirm_start():

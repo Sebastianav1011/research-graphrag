@@ -52,3 +52,61 @@ def test_tokenizer_drift_check_applies_to_local_model_only(monkeypatch):
     local = dict(provider='ollama', digest='other', model_metadata_sha256='qwen-meta', template_bytes=0)
     with pytest.raises(op.OllamaError, match='RUNTIME_DRIFT'):
         op.context_guard('p', {}, settings, local, budget)
+
+
+def test_unlimited_budget_has_no_internal_cap_and_still_records_spend(tmp_path):
+    from layer4_evaluation.indicators.openai_provider import Ledger
+    api = configuration(dict(provider='openai', api=dict(retry_seconds=0)))['api']
+    assert 'budget_usd' not in api
+    ledger = Ledger(tmp_path / 'api-ledger.sqlite', api)
+    ledger.reserve('a', 'P', 1e6)  # no internal cap: only the OpenAI account limit applies
+    ledger.finish('a', dict(input_tokens=1000, output_tokens=100))
+    summary = ledger.summary()
+    assert summary['budget_usd'] is None and summary['available_usd'] is None and summary['estimated_cost_usd'] > 0
+
+
+def test_defined_budget_keeps_a_margin_and_stops_before_any_claim(tmp_path):
+    import pytest as _pytest
+    from layer4_evaluation.indicators.ollama_provider import OllamaError
+    from layer4_evaluation.indicators.openai_provider import Ledger, budget_margin
+    settings = configuration(dict(provider='openai', api=dict(budget_usd=1, retry_seconds=0)))
+    assert budget_margin(1) == 0.10 and budget_margin(40) == 2.0
+    client = OpenAIClient(settings, sdk=object(), root=tmp_path)
+    messages, schema = [dict(role='user', content='x' * 2000)], {'type': 'object'}
+    assert client.budget_check(tmp_path, messages, schema) > 0
+    Ledger(tmp_path / 'api-ledger.sqlite', settings['api']).reserve('spent', 'P', 0.89)  # 0.89 + margin 0.10 leaves 0.01, less than one request
+    with _pytest.raises(OllamaError, match='API_BUDGET'):
+        client.budget_check(tmp_path, messages, schema)
+    unlimited = OpenAIClient(configuration(dict(provider='openai', api=dict(retry_seconds=0))), sdk=object(), root=tmp_path)
+    assert unlimited.budget_check(tmp_path, messages, schema) is None
+
+
+def test_menu_asks_unlimited_or_defined_budget_without_default(monkeypatch, capsys):
+    import run
+    answers = iter(['1'])
+    monkeypatch.setattr('builtins.input', lambda prompt='': next(answers))
+    assert run.choose_budget() == (None, True)
+    answers = iter(['', '9', '2', '', 'abc', '-3', '20'])  # Enter alone is never accepted as an amount
+    monkeypatch.setattr('builtins.input', lambda prompt='': next(answers))
+    assert run.choose_budget() == (20.0, False)
+    assert 'USD 19.00' in capsys.readouterr().out
+
+
+def test_binding_records_unlimited_or_defined_budget(tmp_path):
+    from experiment_runtime import binding, options
+    from pathlib import Path
+    import pytest as _pytest
+    root = Path(__file__).resolve().parents[1]  # real config/openai.json (read-only)
+    for requested, expected in ((dict(provider='openai', unlimited_budget=True), None), (dict(provider='openai', budget_usd=12.5), 12.5)):
+        token = options.set(requested)
+        try:
+            run_dir = tmp_path / str(expected); run_dir.mkdir()
+            assert binding(root, run_dir, {})['llm']['api'].get('budget_usd') == expected
+        finally:
+            options.reset(token)
+    token = options.set(dict(provider='openai', unlimited_budget=True, budget_usd=5))
+    try:
+        with _pytest.raises(ValueError, match='no ambos'):
+            (tmp_path / 'both').mkdir(); binding(root, tmp_path / 'both', {})
+    finally:
+        options.reset(token)
