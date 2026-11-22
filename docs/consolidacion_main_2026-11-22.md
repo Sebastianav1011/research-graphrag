@@ -99,6 +99,16 @@ El primer bloqueo se reprodujo tanto con el `run.py` actual como con el de
 diagnóstica temporal permitió observar `StopIteration`. Esa protección no se
 incorpora al repositorio ni se cuenta como prueba aprobada.
 
+Un segundo intento sin `test_contract_startup.py` alcanzó al menos el 74 % antes
+de interrumpirse por falta prolongada de progreso visible. Se intentó aislar el
+tramo restante con salida detallada; también se interrumpió, sin resultado global,
+durante la familia `test_minimal_evaluation.py`, que depende de ejecuciones
+históricas privadas. No se atribuye una causa técnica definitiva a esa lentitud.
+Los logs parciales no se cuentan como una suite completada. Las verificaciones
+focalizadas terminadas suman **499 aprobadas y 40 omitidas**; aparte constan las
+fallas de intake y de selección manual descritas aquí. No son el total de fallas
+de los intentos amplios.
+
 La prueba manual por ID, con las opciones de documento y Knowledge actuales,
 termina pero falla al esperar una llamada al evaluador simulado que no ocurre.
 No se debilita esa aserción. Requiere revisar el fixture de ejecución V5; el
