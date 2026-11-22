@@ -343,7 +343,8 @@ def test_cli_autonomous_flag_uses_same_complete_executor(stable,monkeypatch):
 
 def test_manual_ids_validate_then_use_all_existing_stages(stable,monkeypatch,capsys):
     e=stable
-    answers=iter(['1','2','2','003,003','003,NO_EXISTE','003,001','S','0'])
+    # '1' after the ID option: document type 'Solo proyectos' (asked before the IDs).
+    answers=iter(['1','2','2','1','003,003','003,NO_EXISTE','003,001','2','S','0'])
     monkeypatch.setattr('builtins.input',lambda prompt:next(answers))
     assert console.main([])==0
     output=capsys.readouterr().out

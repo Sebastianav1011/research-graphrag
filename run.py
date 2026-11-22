@@ -460,6 +460,13 @@ def menu_selection(root, seed, config_path='config/pipeline_manual.json'):
                 if value.isascii() and value.isdigit() and int(value)>0:return dict(limit=int(value),seed=seed)
                 print('Ingrese una cantidad entera positiva.')
         elif choice=='2':
+            # Specific documents: projects only, or projects and articles in the same run.
+            # (Articles without any project are not supported by the current coordinator.)
+            print('\nTipo de documentos:\n1. Solo proyectos.\n2. Proyectos y articulos.\n0. Volver.')
+            kind=input('Opcion: ').strip()
+            if kind=='0':continue
+            if kind not in ('1','2'):
+                print('Opcion invalida.');continue
             from layer2_processing.preprocessing.project_selection import select
             population=None
             while True:
@@ -475,7 +482,14 @@ def menu_selection(root, seed, config_path='config/pipeline_manual.json'):
                     if missing:
                         print('IDs no encontrados en base: '+', '.join(missing))
                         continue
-                    return dict(project_id=ids)
+                    if kind=='1':
+                        return dict(project_id=ids,document_types='PROJECTS')
+                    from layer4_evaluation.indicators import article_sources
+                    print('Leyendo el inventario de articulos del conocimiento BASE activo...',flush=True)
+                    articles=ask_article_ids(article_sources.inventory(root))
+                    if articles is None:continue
+                    print(f'Seleccion: {len(ids)} proyectos y {len(articles)} articulos; cada documento se evalua por separado.')
+                    return dict(project_id=ids,articles=','.join(articles),document_types='PROJECTS_AND_ARTICLES')
                 except ValueError as exc:
                     render_error(exc)
         elif choice=='4':
@@ -519,13 +533,6 @@ def menu_articles(root, seed):
     from layer4_evaluation.indicators import article_sources
     print('Leyendo el inventario de articulos del conocimiento BASE activo...',flush=True)
     inventory=article_sources.inventory(root)
-    by_id={a['article_id']:a for a in inventory}
-    def shown(a):
-        # A DOI shared by several canonical articles cannot identify one; keep the key then.
-        try:
-            return a['original_id'] if article_sources.resolve(inventory,[a['original_id']])==[a['article_id']] else a['article_id']
-        except ValueError:
-            return a['article_id']
     evaluable=[a for a in inventory if a['has_abstract']]
     available=sorted(a['original_id'] for a in evaluable if a.get('original_id_type')=='EID')
     print(f'Articulos disponibles: {len(inventory)} ({len(evaluable)} con resumen evaluable; {len(available)} de ellos con EID).')
@@ -542,20 +549,8 @@ def menu_articles(root, seed):
                     return sorted(random.Random(seed).sample(available,int(value)))
                 print('Ingrese una cantidad entera positiva dentro del rango.')
         elif choice=='2':
-            while True:
-                value=input('EID de los articulos separados por comas, p. ej. 2-s2.0-85089837524 (0: volver): ').strip()
-                if value=='0':break
-                try:
-                    ids=article_sources.resolve(inventory,[v for v in value.split(',')])
-                except ValueError as exc:
-                    render_error(exc);continue
-                without=[by_id[a]['original_id'] for a in ids if not by_id[a]['has_abstract']]
-                if without:
-                    print('Sin resumen (no se evaluaran; quedaran registrados): '+', '.join(without))
-                no_eid=[by_id[a]['original_id'] for a in ids if by_id[a].get('original_id_type')!='EID']
-                if no_eid:
-                    print('Sin EID en la fuente (se identifican por su DOI original): '+', '.join(no_eid))
-                return [shown(by_id[a]) for a in ids]
+            ids=ask_article_ids(inventory)
+            if ids is not None:return ids
         elif choice=='3':
             while True:
                 value=input('Texto a buscar en el titulo, EID o DOI (0: volver): ').strip().casefold()
@@ -565,6 +560,32 @@ def menu_articles(root, seed):
                     print(f"{a['original_id']} | {a.get('publication_year') or ''} | {'con resumen' if a['has_abstract'] else 'SIN RESUMEN'} | {(a.get('title') or '')[:90]}")
                 print(f'{len(found)} coincidencias' + (' (se muestran 20)' if len(found)>20 else '') + '.')
         else:print('Opcion invalida.')
+
+
+def ask_article_ids(inventory):
+    """Article EIDs typed by the user (exact 2-s2.0-... values); None returns to the previous menu."""
+    from layer4_evaluation.indicators import article_sources
+    by_id={a['article_id']:a for a in inventory}
+    def shown(a):
+        # A DOI shared by several canonical articles cannot identify one; keep the key then.
+        try:
+            return a['original_id'] if article_sources.resolve(inventory,[a['original_id']])==[a['article_id']] else a['article_id']
+        except ValueError:
+            return a['article_id']
+    while True:
+        value=input('EID de los articulos separados por comas, p. ej. 2-s2.0-85089837524 (0: volver): ').strip()
+        if value=='0':return None
+        try:
+            ids=article_sources.resolve(inventory,[v for v in value.split(',')])
+        except ValueError as exc:
+            render_error(exc);continue
+        without=[by_id[a]['original_id'] for a in ids if not by_id[a]['has_abstract']]
+        if without:
+            print('Sin resumen (no se evaluaran; quedaran registrados): '+', '.join(without))
+        no_eid=[by_id[a]['original_id'] for a in ids if by_id[a].get('original_id_type')!='EID']
+        if no_eid:
+            print('Sin EID en la fuente (se identifican por su DOI original): '+', '.join(no_eid))
+        return [shown(by_id[a]) for a in ids]
 
 
 def menu_sources(selection, root, seed):
@@ -617,7 +638,8 @@ def menu(base):
                     selection['knowledge_action']=('reuse','rebuild')[knowledge]
                     selection.update(evaluation_mode=base.evaluation_mode,context_mode='retrieved-graph')
                     # Optional ARTICLE sources, chosen before any inference starts.
-                    menu_sources(selection,ROOT,base.seed)
+                    if not selection.pop('document_types',None):
+                        menu_sources(selection,ROOT,base.seed)
                     break
                 selection.update(evaluation_mode=base.evaluation_mode,context_mode='graphrag')
                 break

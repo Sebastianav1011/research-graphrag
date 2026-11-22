@@ -191,3 +191,21 @@ def test_original_identifier_is_the_exact_source_eid_or_literal_doi():
                                                                        'ART_DOI_abc': '10.15446/rsap.V25n4.107594'}
     # The original EID still resolves to the same internal source (checkpoint compatibility).
     assert article_sources.resolve([with_eid, without], ['2-s2.0-85089837524', 'ART_DOI_abc']) == ['ART_2-s2.0-85089837524', 'ART_DOI_abc']
+
+
+def test_specific_ids_menu_offers_projects_or_projects_and_articles(monkeypatch):
+    import run
+    from types import SimpleNamespace
+    from layer2_processing.preprocessing import project_selection
+    inventory = [dict(article_id='ART_2-s2.0-1', eid='2-s2.0-1', doi='10.1/a', title='Uno', publication_year=2025, has_abstract=True,
+                      original_id='2-s2.0-1', original_id_type='EID')]
+    monkeypatch.setattr(article_sources, 'inventory', lambda root: inventory)
+    monkeypatch.setattr(run, 'coordinator', lambda: SimpleNamespace(selected_configuration=lambda *a, **k: ({}, None, None)))
+    monkeypatch.setattr(project_selection, 'select', lambda *a, **k: dict(project_ids=['21736', '21869']))
+    answers = iter(['2', '1', '21736,21869'])
+    monkeypatch.setattr('builtins.input', lambda prompt='': next(answers))
+    assert run.menu_selection(ROOT, 42) == dict(project_id=['21736', '21869'], document_types='PROJECTS')
+    answers = iter(['2', '2', '21736,21869', '2-s2.0-1'])
+    monkeypatch.setattr('builtins.input', lambda prompt='': next(answers))
+    assert run.menu_selection(ROOT, 42) == dict(project_id=['21736', '21869'], articles='2-s2.0-1',
+                                                document_types='PROJECTS_AND_ARTICLES')
