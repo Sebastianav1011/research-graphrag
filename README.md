@@ -2,6 +2,10 @@
 
 Fuentes institucionales → procesamiento y conocimiento → GraphRAG → evaluación → Power BI externo.
 
+La implementación vigente está en `main`. La [arquitectura actual](docs/architecture/arquitectura_vigente.md)
+describe las capas, los módulos activos y las rutas; las versiones experimentales
+se conservan para trazabilidad y no sustituyen el flujo principal de `run.py`.
+
 ## Inicio rápido
 
 Requisitos: Git, conexión a los índices de paquetes y **uv (Astral)**. El proyecto
@@ -138,7 +142,10 @@ Después de preparar dependencias con `uv sync --locked`, abrir `uv run python r
 1. En **Cambiar modelo**, elegir Ollama local y comprobar `qwen3.5:4b-q4_K_M`
    en el encabezado. Ollama y los pesos locales deben estar disponibles.
 2. Elegir **Ejecutar sistema → Fuente de datos → Base**.
-3. Elegir **Seleccionar proyectos específicos por ID** e introducir IDs separados por comas.
+3. Elegir **Seleccionar proyectos específicos por ID**, seleccionar **Solo proyectos**
+   o **Proyectos y artículos** e introducir los IDs separados por comas. En el
+   segundo caso, indicar también los EID de artículos; cada documento se evalúa
+   por separado. El coordinador requiere al menos un proyecto.
 4. En **CONOCIMIENTO BASE**, elegir **Reutilizar conocimiento existente** o
    **Reconstruir conocimiento completo**. Para la campaña, elegir reutilización.
 5. En BASE, el menú fija `retrieved-graph` y usa modo prospectivo por defecto;

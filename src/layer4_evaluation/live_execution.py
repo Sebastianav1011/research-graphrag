@@ -23,7 +23,7 @@ from layer4_evaluation.indicators import assessment_v3 as v3, global_discovery_v
 from layer4_evaluation.indicators.ollama_provider import (
     OllamaClient, OllamaAssessmentProvider, context_guard, configuration as llm_configuration, create_client,
     CORRECTION_VERSION, TARGETED_CORRECTION_VERSION, corrective_request, targeted_baseline, scope_issues,
-    TARGETED_VERSIONS, MERGE_CORRECTION_VERSION, targeted_scope, merged_attempt)
+    TARGETED_VERSIONS, MERGE_CORRECTION_VERSION, MERGE_VERSIONS, targeted_scope, merged_attempt)
 
 from layer4_evaluation.indicators.experiment_inputs import read, sha256, verify_hashes
 
@@ -285,7 +285,9 @@ def verify_run(directory,*,recover=False):
                             # Local retries already used the sealed corrective /
                             # output budget. Resume alone supplies no new evidence
                             # or capacity; do not reset that finite allowance.
-                            if plan['runtime']['provider'] != 'ollama':
+                            independent_review = any(i.get('rule','').startswith(('RETRY_REVIEW:', 'RETRY_INPUT:'))
+                                for i in record['calls'][-1].get('validation_issues',[]))
+                            if plan['runtime']['provider'] != 'ollama' and not independent_review:
                                 state['retryable_indicators']+=cp['indicator_ids']
                     continue
                 require(native['successful_transport'] and native['response_sha256']==sha256(attempt/'response.json') and
@@ -305,11 +307,16 @@ def verify_run(directory,*,recover=False):
                     runs=out/cp['phase']/('ollama_runs' if local else 'codex_runs')/pid
                     baseline,flagged,broad=targeted_scope([runs/('attempt_'+str(n+1)) for n in range(len(record['calls'])-1)],
                         [c['validation_issues'] for c in record['calls'][:-1]])
-                    if cp['correction_version']==MERGE_CORRECTION_VERSION and baseline is not None and flagged is not None:
+                    if cp['correction_version'] in MERGE_VERSIONS and baseline is not None and flagged is not None:
                         # Rebuild the criterion merge from the persisted outputs and require
-                        # the same accepted assessment and provenance.
+                        # the same accepted assessment and provenance. Prospective merges are
+                        # checked after the same deterministic decision as at dispatch.
                         wrapper,provenance=merged_attempt(baseline,flagged,broad,read(attempt/'selection.json'),request,
-                            lambda w: check_wrapper(plan,p,request,pid,cp['indicator_ids'],w))
+                            lambda w: check_wrapper(plan,p,request,pid,cp['indicator_ids'],resolve_wrapper(plan,p,request,w)[0]))
+                        if request.get('decision_policy') == p2.DECISION_POLICY:
+                            wrapper,decision_receipts=resolve_wrapper(plan,p,request,wrapper)
+                            require(read(attempt/'decision.json')==decision_receipts,
+                                'Decision derivada de la fusion no reproducible')
                         require(wrapper==record['wrapper'] and read(attempt/'repair.json')==provenance,
                             'Fusion por criterio no reproducible')
                         merged=True
@@ -408,6 +415,7 @@ def runnable_indicator(state, iid, attempted):
 
 def check_wrapper(plan,p,request,pid,ids,wrapper):
     """Assessment gate shared by dispatch and audit replay (criterion merges included)."""
+    validate_context_binding(request)
     v3.validate_wrapper(wrapper,pid,ids,p['fields'],plan['assessment_version'])
     validate_context_evidence(request, wrapper)
     for item in wrapper['assessments']:
@@ -425,14 +433,20 @@ def resolve_wrapper(plan, project, request, wrapper):
         return wrapper, []
     require(plan['evaluation_policy'].get('decision_policy') == p2.DECISION_POLICY,
         'Politica de decision distinta del plan sellado')
+    validate_context_binding(request)
     ids = [i['indicator_id'] for i in request['payload']['indicators']]
     v3.validate_wrapper(wrapper, project['project_id'], ids, project['fields'], plan['assessment_version'])
     validate_context_evidence(request, wrapper)
     resolved, receipts = [], []
+    derived = request.get('component_protocol') == p2.DERIVED_PROTOCOL
     for item in wrapper['assessments']:
         iid = item['indicator_id']
         assessment, receipt = p2.resolve_decision(project['fields'], plan['profiles'][iid],
             {k:v for k,v in item.items() if k != 'indicator_id'}, plan['rubrics'][iid])
+        if derived:
+            # The model emitted no decision: record which fields Python derived.
+            receipt.update(original_decision=None, original_explanation=None, changed=False,
+                           derived_fields=list(p2.DERIVED_FIELDS), component_protocol=p2.DERIVED_PROTOCOL)
         resolved.append(dict(indicator_id=iid, **assessment))
         receipts.append(dict(indicator_id=iid, **receipt))
     return dict(wrapper, assessments=resolved), receipts
@@ -440,6 +454,59 @@ def resolve_wrapper(plan, project, request, wrapper):
 
 def materialize_output(plan, project, request, selection):
     return resolve_wrapper(plan, project, request, refs.materialize(request, selection))
+
+
+def review_persisted_retry(plan, project, request, attempt_directory, review):
+    """Revalidate a hash-bound human review without inference or run writes.
+
+    Returns a candidate and receipt for a separately versioned continuation;
+    never rewrites the blocked call, its status, or the original export.
+    """
+    from .indicators.retry_review import compare, fingerprint, validate_review
+    from jsonschema import Draft202012Validator
+    directory=Path(attempt_directory)
+    saved=read(directory/'retry_decision.json')
+    candidate=read(directory/'selection.json')
+    native=read(directory/'request.json')
+    baseline=None
+    for path in sorted(directory.parent.glob('attempt_*/selection.json')):
+        value=read(path)
+        if fingerprint(value)==saved['binding']['baseline_sha256']:
+            baseline=value;baseline_native=read(path.parent/'request.json');break
+    if baseline is None:
+        raise AssessmentValidationError([dict(category='INVALID_FIELD_VALUE',path='$',rule='RETRY_REVIEW:BASELINE_NOT_VERIFIABLE')])
+    Draft202012Validator(native['format']).validate(candidate)
+    sent=dict(request,prompt=native['messages'][0]['content'])
+    first=dict(request,prompt=baseline_native['messages'][0]['content'])
+    validate_context_binding(first);validate_context_binding(sent)
+    wrapper,decisions=materialize_output(plan,project,sent,candidate)
+    check_wrapper(plan,project,sent,project['project_id'],[a['indicator_id'] for a in wrapper['assessments']],wrapper)
+    receipt=compare(baseline,candidate,first,sent,baseline_native['format'],native['format'],wrapper['assessments'][0]['decision'])
+    if (receipt['binding']!=saved['binding'] or not receipt['same_payload'] or not receipt['same_schema'] or
+            not receipt['review_required'] or not validate_review(receipt,review,candidate,sent)):
+        raise AssessmentValidationError([dict(category='INVALID_FIELD_VALUE',path='$',rule='RETRY_REVIEW:INDEPENDENT_ADJUDICATION_REQUIRED')])
+    receipt.update(status='APPROVED_REINTERPRETATION',review=review,review_sha256=fingerprint(review),
+        original_attempt=str(directory),decision_receipts=decisions,
+        original_call_sha256=sha256(directory/'call.json'),
+        validation_code_hashes={str(path):sha256(path) for path in
+            (Path(__file__),Path(p2.__file__),Path(v3.__file__),Path(refs.__file__),
+             Path(__file__).parent/'indicators/retry_review.py')})
+    return wrapper,receipt
+
+
+def validate_context_binding(request):
+    if request.get('input_version') != CONTEXT_VERSION:
+        return
+    # Check what was actually sent, not merely a mutable registry beside it.
+    # No semantic entailment is inferred from this transport integrity check.
+    marker = 'INPUT_JSON:\n'
+    try:
+        sent = json.loads(request['prompt'].split(marker,1)[1])
+    except (KeyError,IndexError,TypeError,ValueError):
+        sent = None
+    if sent != request.get('payload'):
+        raise AssessmentValidationError([dict(category='EVIDENCE_NOT_VERIFIABLE',path='$.payload',
+            rule='CONTEXT_PAYLOAD_PROMPT_MISMATCH: el registro no coincide con el contexto enviado')])
 
 
 def validate_context_evidence(request, wrapper):
@@ -553,6 +620,9 @@ def execute(args):
             require(state['new_calls']<plan['maximum_calls'] and state['total_tokens']+reservation<=plan['total_token_reservation_cap'],'Presupuesto de ejecucion agotado')
             context_guard(request['prompt'], schema, settings, runtime, request.get('context_budget'))
             require(client.inspect() == runtime, 'RUNTIME_DRIFT: cambio de modelo o servidor antes de la llamada')
+            if hasattr(client,'budget_check'):
+                # Before any call folder or claim: an indicator stopped for budget stays pending and resumable.
+                client.budget_check(directory,[dict(role='user',content=request['prompt'])],schema,calls=1+corrective_retries)
             number=len(list((directory/'calls'/p['project_id']).glob('assessment_*')))+1 if bounded else len(st['rows'])//3+1
             out=directory/'calls'/p['project_id']/('discovery' if phase=='discovery' else 'assessment_'+str(number))
             out.mkdir(parents=True,exist_ok=True)
@@ -604,6 +674,10 @@ def execute(args):
             verify_hashes(out,record['artifact_hashes']);check(directory)
             write(out/'verification.json',result);emit(result)
             state=verify_run(directory);write(directory/'status.json',summary(state))
+            if error and re.search(r'API_(BUDGET|BALANCE|AUTHENTICATION|PERMISSIONS)', error):
+                # Account-level stop (budget, no balance, credentials): never keep sending the
+                # remaining indicators; the coordinator exports what was completed.
+                raise ValueError(re.search(r'API_[A-Z_]+', error).group(0)+': '+error+'. Ejecucion detenida; se exporta lo completado.')
             if status!='PASS' and not (bounded and plan.get('isolate_indicator_errors')):
                 raise ValueError(status+': '+str(record['error'])+'. Sin reintento automatico. Revisar los artefactos privados de '+str(out)+'; se conservan las publicaciones anteriores.')
         return summary(state)

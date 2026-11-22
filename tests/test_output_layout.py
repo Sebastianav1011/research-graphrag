@@ -18,6 +18,8 @@ OUTPUT_DIRECTORIES={
     'shared':'registro de conocimiento BASE compartido (knowledge_store)',
     'historico':'copias de exportacion por run y evidencias compactadas (run_storage/run_retention)',
     'reviews':'revisiones humanas manuales; no las escribe el pipeline',
+    'audits':'auditorias y diagnosticos por tarea; escriben scripts/benchmark_scoped_retrieval.py y tests/semantic_validation/harness.py; las leen tests de validacion semantica; no las escribe run.py',
+    'pilotos':'pilotos controlados de scripts/pilot_prospective_v2.py (unica raiz permitida); fixtures de tests/test_prospective_v2_*; no las escribe run.py',
 }
 REQUIRED_OUTPUT_DIRECTORIES={'layer2','layer3','layer4','runs'}
 

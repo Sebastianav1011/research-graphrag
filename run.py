@@ -132,9 +132,16 @@ def execute_with_console(engine, **kwargs):
 
 def confirm_action(kind, summary):
     if kind=='knowledge_rebuild':
-        print(summary['message'],flush=True)
+        mismatch='Fingerprint mismatch' in summary['message']
+        if mismatch:
+            print('\nADVERTENCIA: KNOWLEDGE EXISTENTE INCOMPATIBLE\n\n'
+                'El Knowledge guardado no coincide con la configuración actual.\n\n'
+                'Motivo: Fingerprint mismatch.\n\n'
+                'El conocimiento existente no puede reutilizarse de forma segura.\n',flush=True)
+        else:print(summary['message'],flush=True)
         if not sys.stdin.isatty():return False
-        try:return input('Reconstruir conocimiento completo de BASE [si/NO]: ').strip().lower() in ('si','sí')
+        try:return input('¿Deseas reconstruir el Knowledge para continuar? (s/N): ' if mismatch else
+            'Reconstruir conocimiento completo de BASE [si/NO]: ').strip().lower() in ('si','sí')
         except EOFError:return False
     if kind=='run':
         print('\nRun ID: '+summary['run_id'],flush=True)
@@ -148,6 +155,9 @@ def confirm_action(kind, summary):
         print('Proyectos: '+str(summary['project_count']),flush=True)
         if summary.get('project_ids'):
             print('IDs institucionales: '+', '.join(summary['project_ids']),flush=True)
+        if summary.get('article_count'):
+            print('Articulos: '+str(summary['article_count'])+' (evaluados por separado; solo su resumen es evidencia)',flush=True)
+            print('Articulos (EID original): '+', '.join(summary['article_ids']),flush=True)
         print('Fuentes: '+('base' if all('/base/' in name or '/reference/' in name for name in summary['sources'])
             else ', '.join(summary['sources']))+f" ({len(summary['sources'])} archivos)",flush=True)
         contract=summary.get('contract')
@@ -155,7 +165,13 @@ def confirm_action(kind, summary):
         print('Procesamiento autonomo: '+' -> '.join(summary['stages']),flush=True)
         print('Destino: '+str(summary.get('destination')),flush=True)
         if summary['provider']=='openai':
-            print('Envio externo a OpenAI. Presupuesto maximo: USD '+str(summary['budget_usd']),flush=True)
+            budget=summary['budget_usd']
+            if budget is None:
+                print('Envio externo a OpenAI. Presupuesto: sin limite interno (solo aplica el saldo o limite de tu cuenta OpenAI).',flush=True)
+            else:
+                from layer4_evaluation.indicators.openai_provider import budget_margin
+                print(f'Envio externo a OpenAI. Presupuesto maximo: USD {budget:.2f}; se dejan de enviar solicitudes al llegar a '
+                      f'USD {budget-budget_margin(budget):.2f} (margen USD {budget_margin(budget):.2f}) y se exporta el Excel con lo completado.',flush=True)
         else:print('Procesamiento local de los textos seleccionados.',flush=True)
         if not sys.stdin.isatty():
             print('Sin terminal interactiva: no se autoriza automaticamente.')
@@ -192,6 +208,16 @@ def selected_projects(args):
     ids = [value.strip() for value in ids]
     if not ids or any(not value for value in ids) or len(ids) != len(set(ids)):
         raise ValueError('Los identificadores deben ser unicos y no vacios; no se convierten a numeros')
+    return ids
+
+
+def selected_article_ids(args):
+    """Optional ARTICLE IDs (canonical ID, EID or unique DOI), exact text, order kept."""
+    if getattr(args,'articles',None) is None:
+        return None
+    ids=[value.strip() for value in args.articles.split(',')]
+    if not ids or any(not value for value in ids) or len(ids)!=len(set(ids)):
+        raise ValueError('--articles requiere identificadores de articulo unicos y no vacios, separados por comas')
     return ids
 
 
@@ -284,7 +310,10 @@ def dispatch(args):
             run=engine.find_run(ROOT,runs,args.run_id)
             return request_stop(run) if args.command=='stop' else export_only(ROOT,run,engine)
         finally:options.reset(token)
-    token=options.set(dict(provider=args.provider,budget_usd=args.budget_usd,contract=contract))
+    if getattr(args,'unlimited_budget',False) and args.budget_usd is not None:
+        raise ValueError('Elegir --budget-usd o --sin-limite, no ambos')
+    token=options.set(dict(provider=args.provider,budget_usd=args.budget_usd,contract=contract,
+        unlimited_budget=bool(getattr(args,'unlimited_budget',False))))
     try:
         if args.run_id:
             _,_,runs=engine.configuration(ROOT,args.config)
@@ -321,6 +350,7 @@ def dispatch_pipeline(args):
             limit=args.limit, all_projects=args.all_projects, seed=args.seed, dry_run=args.dry_run,
             selection_manifest=args.selection_manifest, approve_build=args.approve_build, authorize=args.authorize_llm,
             confirm_all=args.confirm_all,indicator_ids=selected_indicators(args),
+            article_ids=selected_article_ids(args),
             single_authorization=True,
             evaluation_mode=args.evaluation_mode,context_mode=args.context_mode,knowledge_action=args.knowledge_action,
             interactive=not args.non_interactive)
@@ -347,6 +377,7 @@ def dispatch_pipeline(args):
             run_id=args.run_id, stage=args.stage if args.command == 'stage' else None,
             through=args.through, resume=args.command == 'resume', approve_build=args.approve_build,
             authorize=args.authorize_llm, project_ids=selected_projects(args),indicator_ids=selected_indicators(args),
+            article_ids=selected_article_ids(args),
             input_file=args.input_file, delivery=args.delivery,
             single_authorization=True,
             evaluation_mode=args.evaluation_mode,context_mode=args.context_mode,knowledge_action=args.knowledge_action,
@@ -371,7 +402,8 @@ def parser():
     result.add_argument('stage', nargs='?', choices=STAGES)
     result.add_argument('--run-id', help='Identificador nuevo o existente; obligatorio para stage/resume')
     result.add_argument('--provider',choices=('ollama','openai'),help='Proveedor; queda congelado por ejecucion')
-    result.add_argument('--budget-usd',type=float,help='Presupuesto operativo API explicito; recomendado 15 USD')
+    result.add_argument('--budget-usd',type=float,help='Presupuesto operativo API en USD (con margen de seguridad); alternativa: --sin-limite')
+    result.add_argument('--sin-limite',dest='unlimited_budget',action='store_true',help='OpenAI sin limite interno: solo aplica el saldo o limite de la cuenta')
     result.add_argument('--contract',help='JSON compartido en data/contratos; requiere ejecucion nueva')
     result.add_argument('--selection-run',help='Repite IDs obligatorios y adicionales de otro run con contrato; sin copiar respuestas')
     result.add_argument('--additional-count',type=int,default=0,help='Limite explicito de proyectos adicionales')
@@ -405,6 +437,7 @@ def parser():
     result.add_argument('--policy', default='config/autonomous.json', help='Politica para prepare; despues queda congelada')
     result.add_argument('--reuse-run', help='En prepare autonomo: reutiliza un run autorizado validado, sin inferencias')
     result.add_argument('--indicators', help='run/resume: subconjunto de indicadores del catalogo (IDs separados por comas, p. ej. DIV-04,POL-01,AMB-01) para una validacion acotada; queda congelado en el run. En prepare --autonomous conserva su uso de depuracion')
+    result.add_argument('--articles', help='run: articulos BASE a evaluar ademas de los proyectos (ID canonico, EID o DOI unico, separados por comas); cada fuente se evalua por separado con V5 y queda congelado en el run')
     result.add_argument('--manifest-sha256', help='Hash del manifiesto revisado; obligatorio para authorize')
     result.add_argument('--partial', action='store_true', help='Exportacion explicitamente incompleta del modo autonomo')
     result.add_argument('--background', action='store_true', help='Inicia el worker autonomo autorizado en segundo plano, sin ventana')
@@ -427,6 +460,13 @@ def menu_selection(root, seed, config_path='config/pipeline_manual.json'):
                 if value.isascii() and value.isdigit() and int(value)>0:return dict(limit=int(value),seed=seed)
                 print('Ingrese una cantidad entera positiva.')
         elif choice=='2':
+            # Specific documents: projects only, or projects and articles in the same run.
+            # (Articles without any project are not supported by the current coordinator.)
+            print('\nTipo de documentos:\n1. Solo proyectos.\n2. Proyectos y articulos.\n0. Volver.')
+            kind=input('Opcion: ').strip()
+            if kind=='0':continue
+            if kind not in ('1','2'):
+                print('Opcion invalida.');continue
             from layer2_processing.preprocessing.project_selection import select
             population=None
             while True:
@@ -442,7 +482,14 @@ def menu_selection(root, seed, config_path='config/pipeline_manual.json'):
                     if missing:
                         print('IDs no encontrados en base: '+', '.join(missing))
                         continue
-                    return dict(project_id=ids)
+                    if kind=='1':
+                        return dict(project_id=ids,document_types='PROJECTS')
+                    from layer4_evaluation.indicators import article_sources
+                    print('Leyendo el inventario de articulos del conocimiento BASE activo...',flush=True)
+                    articles=ask_article_ids(article_sources.inventory(root))
+                    if articles is None:continue
+                    print(f'Seleccion: {len(ids)} proyectos y {len(articles)} articulos; cada documento se evalua por separado.')
+                    return dict(project_id=ids,articles=','.join(articles),document_types='PROJECTS_AND_ARTICLES')
                 except ValueError as exc:
                     render_error(exc)
         elif choice=='4':
@@ -458,6 +505,100 @@ def menu_selection(root, seed, config_path='config/pipeline_manual.json'):
                     return dict(contract=paths[int(value)-1].relative_to(root).as_posix())
                 print('Contrato invalido.')
         else:print('Opcion invalida.')
+
+
+def describe_projects(selection):
+    if selection.get('all_projects'):return 'todos los proyectos de la base'
+    if selection.get('limit'):return str(selection['limit'])
+    if selection.get('project_id'):return str(len(selection['project_id']))
+    if selection.get('contract'):return 'segun el contrato '+Path(selection['contract']).name
+    return 'segun la fuente seleccionada'
+
+
+def ask_yes_no(question):
+    while True:
+        answer=input(question).strip().casefold()
+        if answer in ('s','si','sí'):return True
+        if answer in ('n','no'):return False
+        print('Respuesta invalida. Escribir S o N.')
+
+
+def menu_articles(root, seed):
+    """Optional ARTICLE selection after the projects; None returns to the previous question.
+
+    Articles are shown and returned by their original source identifier: the `eid`
+    exactly as in produccion-limpio.csv (literal DOI only when the source has no EID).
+    The canonical ART_ key is internal and is resolved later by the coordinator."""
+    import random
+    from layer4_evaluation.indicators import article_sources
+    print('Leyendo el inventario de articulos del conocimiento BASE activo...',flush=True)
+    inventory=article_sources.inventory(root)
+    evaluable=[a for a in inventory if a['has_abstract']]
+    available=sorted(a['original_id'] for a in evaluable if a.get('original_id_type')=='EID')
+    print(f'Articulos disponibles: {len(inventory)} ({len(evaluable)} con resumen evaluable; {len(available)} de ellos con EID).')
+    while True:
+        print('\n1. Seleccionar cantidad de articulos.\n2. Seleccionar articulos especificos por EID.\n'
+              '3. Consultar articulos disponibles.\n0. Volver.')
+        choice=input('Opcion: ').strip()
+        if choice=='0':return None
+        if choice=='1':
+            while True:
+                value=input(f'Cantidad de articulos con resumen y EID (1-{len(available)}; 0: volver): ').strip()
+                if value=='0':break
+                if value.isascii() and value.isdigit() and 0<int(value)<=len(available):
+                    return sorted(random.Random(seed).sample(available,int(value)))
+                print('Ingrese una cantidad entera positiva dentro del rango.')
+        elif choice=='2':
+            ids=ask_article_ids(inventory)
+            if ids is not None:return ids
+        elif choice=='3':
+            while True:
+                value=input('Texto a buscar en el titulo, EID o DOI (0: volver): ').strip().casefold()
+                if value=='0':break
+                found=[a for a in inventory if value and value in ' '.join(str(a.get(k) or '') for k in ('title','original_id','eid','doi')).casefold()]
+                for a in found[:20]:
+                    print(f"{a['original_id']} | {a.get('publication_year') or ''} | {'con resumen' if a['has_abstract'] else 'SIN RESUMEN'} | {(a.get('title') or '')[:90]}")
+                print(f'{len(found)} coincidencias' + (' (se muestran 20)' if len(found)>20 else '') + '.')
+        else:print('Opcion invalida.')
+
+
+def ask_article_ids(inventory):
+    """Article EIDs typed by the user (exact 2-s2.0-... values); None returns to the previous menu."""
+    from layer4_evaluation.indicators import article_sources
+    by_id={a['article_id']:a for a in inventory}
+    def shown(a):
+        # A DOI shared by several canonical articles cannot identify one; keep the key then.
+        try:
+            return a['original_id'] if article_sources.resolve(inventory,[a['original_id']])==[a['article_id']] else a['article_id']
+        except ValueError:
+            return a['article_id']
+    while True:
+        value=input('EID de los articulos separados por comas, p. ej. 2-s2.0-85089837524 (0: volver): ').strip()
+        if value=='0':return None
+        try:
+            ids=article_sources.resolve(inventory,[v for v in value.split(',')])
+        except ValueError as exc:
+            render_error(exc);continue
+        without=[by_id[a]['original_id'] for a in ids if not by_id[a]['has_abstract']]
+        if without:
+            print('Sin resumen (no se evaluaran; quedaran registrados): '+', '.join(without))
+        no_eid=[by_id[a]['original_id'] for a in ids if by_id[a].get('original_id_type')!='EID']
+        if no_eid:
+            print('Sin EID en la fuente (se identifican por su DOI original): '+', '.join(no_eid))
+        return [shown(by_id[a]) for a in ids]
+
+
+def menu_sources(selection, root, seed):
+    """After the project selection: optional articles. Returns False to go back."""
+    while True:
+        if not ask_yes_no('¿Desea procesar también artículos? (S/N): '):
+            return True
+        articles=menu_articles(root,seed)
+        if articles is None:continue
+        print(f'\nProyectos seleccionados: {describe_projects(selection)}. Articulos seleccionados: {len(articles)}.')
+        if ask_yes_no('¿Confirmar selección de fuentes? (S/N): '):
+            selection['articles']=','.join(articles)
+            return True
 
 
 def menu(base):
@@ -496,6 +637,9 @@ def menu(base):
                     except Cancelled:continue
                     selection['knowledge_action']=('reuse','rebuild')[knowledge]
                     selection.update(evaluation_mode=base.evaluation_mode,context_mode='retrieved-graph')
+                    # Optional ARTICLE sources, chosen before any inference starts.
+                    if not selection.pop('document_types',None):
+                        menu_sources(selection,ROOT,base.seed)
                     break
                 selection.update(evaluation_mode=base.evaluation_mode,context_mode='graphrag')
                 break
@@ -508,19 +652,37 @@ def menu(base):
             args.autonomous=True
             for key,value in (source | selection).items():setattr(args,key,value)
             if args.provider=='openai' and args.budget_usd is None:
-                import math
-                while True:
-                    try:
-                        args.budget_usd=float(input('Presupuesto operativo maximo USD (15): ').strip() or '15')
-                        if math.isfinite(args.budget_usd) and args.budget_usd>0:break
-                    except ValueError:pass
-                    print('Presupuesto positivo requerido.')
+                args.budget_usd,args.unlimited_budget=choose_budget()
             render_result(dispatch(args))
         except EOFError:
             print('Entrada cerrada (EOF). No se inicio otra ejecucion.',flush=True)
             return 2
         except Exception as exc:
             render_error(exc)
+
+
+def choose_budget():
+    """Operating budget for an OpenAI run: (None, True) without internal limit or (USD, False)."""
+    import math
+    from layer4_evaluation.indicators.openai_provider import budget_margin
+    print('\nPRESUPUESTO DE LA EJECUCION (OpenAI)\n1. Sin limite interno (solo aplica el saldo o limite de tu cuenta OpenAI)\n2. Definir presupuesto en USD')
+    while True:
+        choice=input('Opcion: ').strip()
+        if choice=='1':
+            print('Sin limite interno. Si OpenAI rechaza por saldo o limite de la cuenta, la ejecucion se detiene y se exporta el Excel con lo completado.')
+            return None,True
+        if choice=='2':
+            while True:
+                value=input('Presupuesto maximo USD: ').strip().replace(',','.')
+                try:amount=float(value)
+                except ValueError:amount=-1
+                if math.isfinite(amount) and amount>0:
+                    margin=budget_margin(amount)
+                    print(f'Se dejaran de enviar solicitudes al llegar a USD {amount-margin:.2f} (margen de seguridad USD {margin:.2f}); '
+                          'se exporta el Excel con lo completado y lo pendiente queda reanudable.')
+                    return amount,False
+                print('Ingrese un monto positivo en USD, por ejemplo 20.')
+        print('Opcion invalida.')
 
 
 def confirm_start():

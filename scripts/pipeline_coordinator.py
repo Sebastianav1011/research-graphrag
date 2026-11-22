@@ -244,7 +244,20 @@ def pinned_tokenizer(root):
     return descriptor|dict(path=str(path))
 
 
-def prepare_evaluation(root, run, selected):
+API_DATA_MINIMIZATION = 'API_DATA_MINIMIZATION_V1'
+
+
+def pseudonymize_researchers(candidate):
+    """Replace RESEARCHER labels (personal names) in the relational context sent to an external API."""
+    context = candidate.get('relational_context')
+    if not context:
+        return candidate
+    entities = [dict(e, label='Investigador (seudonimizado)') if e.get('entity_type') == 'RESEARCHER' else e
+                for e in context['entities']]
+    return dict(candidate, relational_context=dict(context, entities=entities))
+
+
+def prepare_evaluation(root, run, selected, source_type='PROJECT'):
     from layer4_evaluation.indicators.context_budget import VERSION as context_version, prepare_contexts
     from layer4_evaluation.indicators import assessment_v3 as v3
     state = check(root, run)
@@ -254,29 +267,44 @@ def prepare_evaluation(root, run, selected):
     policy=requested.get('evaluation_policy',state['configuration'].get('evaluation_policy',{}))
     provider_config = llm_configuration(requested.get('llm', state['configuration'].get('llm')))
     workspace = knowledge_workspace(run)  # Read-only knowledge; evaluation writes under evaluation_dir(run).
-    projects = pq.read_table(workspace / 'outputs/layer2/canonical/proyectos.parquet').to_pylist()
-    if not selected:
+    if source_type not in ('PROJECT','ARTICLE'):raise ValueError('Tipo de fuente no evaluable: '+str(source_type))
+    articles=source_type=='ARTICLE'
+    if articles:
+        # ARTICLE: same V5 components; canonical article_id identity, abstract evidence.
+        from layer4_evaluation.indicators import article_sources
+        canonical={a['article_id']:a for a in pq.read_table(workspace / 'outputs/layer2/canonical/articulos.parquet').to_pylist()}
+        if not 1 <= len(selected) <= 2 or len(set(selected)) != len(selected):
+            raise ValueError('Seleccionar uno o dos identificadores unicos')
+        if any(a not in canonical for a in selected):
+            raise ValueError('Articulo no presente en el Knowledge de esta ejecucion')
+        chosen=[canonical[a] for a in selected]
+    else:
+        projects = pq.read_table(workspace / 'outputs/layer2/canonical/proyectos.parquet').to_pylist()
+    if not articles and not selected:
         if len(projects) > 2:
             raise ValueError('Seleccionar uno o dos --project-id; IDs en preprocess/review.json o canonical')
         selected = [p['source_project_id'] for p in projects]
     if not 1 <= len(selected) <= 2 or len(set(selected)) != len(selected):
         raise ValueError('Seleccionar uno o dos identificadores unicos')
-    chosen = [p for pid in selected for p in projects if p['source_project_id'] == pid]
+    if not articles:
+        chosen = [p for pid in selected for p in projects if p['source_project_id'] == pid]
     if len(chosen) != len(selected):
         raise ValueError('Identificador no presente en esta ejecucion')
     quarantine=state.get('scope_quarantine',{})
-    blocked=[p for p in selected if p in quarantine.get('affected_projects',{}) or quarantine.get('primary_article_conflicts')]
+    blocked=[] if articles else [p for p in selected if p in quarantine.get('affected_projects',{}) or quarantine.get('primary_article_conflicts')]
     if blocked:
         write(run_file(run, 'evaluation_readiness.json'),dict(status='BLOCKED_ARTICLE_QUARANTINE',projects=blocked,
             report=str(run/'preprocess/scope_validation.json'),note='Sin inferencias ni clasificacion; cuarentena conservada'))
         raise ValueError('Cuarentena relevante para proyectos seleccionados: '+', '.join(blocked)+'; consultar preprocess/scope_validation.json')
     sections = pq.read_table(workspace / 'outputs/layer2/knowledge/source_sections.parquet').to_pylist()
+    if articles:sections=article_sources.mapped(sections,set(selected))
     unavailable = []
     for project in chosen:
-        fields = {s['field_name']: s['text_original'] or '' for s in sections if s['source_id'] == project['project_id']}
+        source_id=project['article_id'] if articles else project['project_id']
+        fields = {s['field_name']: s['text_original'] or '' for s in sections if s['source_id'] == source_id}
         if not any(value.strip() for field, value in fields.items() if field in substantive_fields(fields)):
-            unavailable.append(dict(project_id=project['project_id'], source_project_id=project['source_project_id'],
-                status='NO_AUTHORIZED_SUBSTANTIVE_TEXT', record_source=project['record_source'], source_row=project['source_row']))
+            unavailable.append(dict(project_id=source_id, source_project_id=source_id if articles else project['source_project_id'],
+                source_type=source_type,status='NO_AUTHORIZED_SUBSTANTIVE_TEXT', record_source=project['record_source'], source_row=project['source_row']))
     if unavailable:
         write(run_file(run, 'evaluation_readiness.json'), dict(status='BLOCKED_NO_EVIDENCE', projects=unavailable,
             note='Sin clasificacion de indicadores ni inferencias; conservar metadatos y aportar evidencia autorizada'))
@@ -333,7 +361,7 @@ def prepare_evaluation(root, run, selected):
     selected_profiles={iid:settings['profiles'][iid] for iid in sorted(wanted)} if wanted else settings['profiles']
     directory.mkdir(parents=True)
     inputs = []
-    for p in chosen:
+    for p in (() if articles else chosen):
         matches = [s for s in sections if s['source_id'] == p['project_id']]
         fields = {f: next((s['text_original'] or '' for s in matches if s['field_name'] == f), '') for f in PROJECT_FIELDS}
         fields.update({s['field_name']: s['text_original'] or '' for s in matches if s['field_name'].startswith('text__')})
@@ -343,6 +371,8 @@ def prepare_evaluation(root, run, selected):
         inputs.append(dict(project_id=p['project_id'], siap_id=p['source_project_id'], identity_type='SIAP_PROPORCIONADO',
             fields=fields, field_provenance=field_provenance, input_path=p['record_source'],
             input_row=p['source_row'], missing_fields=[f for f, v in fields.items() if not v]))
+    if articles:
+        inputs=[article_sources.article_input(a,sections,PROJECT_FIELDS) for a in chosen]
     review = dict(projects=inputs, llm=provider_config,
         warnings=['Una solicitud por indicador, con fragmentos originales recuperados por GraphRAG. Se revisan los 48 indicadores.',
                   'Presupuesto aproximado de entrada incluye esquema; las omisiones y limitaciones constan en context_selection.json. No se truncan citas.'], inference_performed=False)
@@ -364,12 +394,21 @@ def prepare_evaluation(root, run, selected):
     else:
         from layer4_evaluation.indicators.scoped_retrieval import from_published_cache
         source_chunks=pq.read_table(workspace / 'outputs/layer2/knowledge/source_chunks.parquet').to_pylist()
-        if policy.get('context_mode')==v3.RETRIEVED_CONTEXT:
+        if articles:
+            source_chunks=article_sources.mapped(source_chunks,set(selected))
+            review['warnings'][0]+=' ARTICULO: solo el resumen es evidencia citable; sin contexto relacional ni evidencia de otras fuentes.'
+        if policy.get('context_mode')==v3.RETRIEVED_CONTEXT and not articles:
             from layer4_evaluation.indicators.scoped_retrieval import project_relations
             relational_contexts=project_relations(workspace,inputs)
         # Keep existing cached retrieval unchanged in fragment mode.
         scoped_candidates,retrieval_report=from_published_cache(workspace,inputs,selected_profiles,source_chunks,
             **({'relational_contexts':relational_contexts} if relational_contexts is not None else {}))
+        if provider_config['provider']=='openai':
+            # API_DATA_MINIMIZATION_V1: researcher names are relational context only,
+            # never evidence; the external provider receives a pseudonymous label.
+            # Ranking already ran locally; IDs, paths and provenance digests are unchanged.
+            scoped_candidates=[pseudonymize_researchers(c) for c in scoped_candidates]
+            retrieval_report=dict(retrieval_report,data_minimization=API_DATA_MINIMIZATION)
     # Retrieved contexts are budgeted with the pinned, hash-verified Qwen
     # tokenizer; RUNTIME_DRIFT is enforced by the transport before each call.
     tokenizer=pinned_tokenizer(root) if policy.get('context_mode')==v3.RETRIEVED_CONTEXT else None
@@ -406,6 +445,7 @@ def prepare_evaluation(root, run, selected):
     plan = {k: settings[k] for k in ('profiles', 'rubrics', 'rules', 'budgets', 'observed_character_ratio', 'discovery_version', 'assessment_version')}
     for path in (root/'src/layer4_evaluation/indicators/openai_provider.py',
                  root/'src/layer4_evaluation/indicators/evidence_references.py',
+                 root/'src/layer4_evaluation/indicators/retry_review.py',
                  root/'src/layer4_evaluation/indicators/token_budget.py',root/'config/qwen_tokenizer.json',
                  root/'src/layer4_evaluation/indicators/scoped_retrieval.py',run_file(run, 'model.binding.json')):
         if path.exists():source_hashes[path.relative_to(root).as_posix()]=sha(path)
@@ -416,12 +456,19 @@ def prepare_evaluation(root, run, selected):
         coverage_policy=v3.PARTIAL_COVERAGE,
         request_protocol=context_version, context_requests=requests,
         isolate_indicator_errors=True,
-        corrective_retries=2, correction_protocol=v3.p2.CORRECTION if assessment_version==v3.P2_VERSION else MERGE_CORRECTION_VERSION,
+        # Derived prospective plans (prompt V5) use one localized retry with criterion
+        # merge (diagnostic C2); sealed older policies keep their own protocol.
+        corrective_retries=1 if policy.get('instructions_version')==v3.p2.PROMPT else 2,
+        correction_protocol=(v3.p2.TARGETED_CORRECTION if policy.get('instructions_version')==v3.p2.PROMPT else
+            v3.p2.CORRECTION) if assessment_version==v3.P2_VERSION else MERGE_CORRECTION_VERSION,
         token_limit_retries=provider_config['token_limit_retries'] if provider_config['provider']=='ollama' else 0,
         runtime=dict(provider=provider_config['provider'], configuration=provider_config), requested_model=provider_config['model'],
         maximum_calls=len(selected_profiles) * len(inputs), total_token_reservation_cap=170000 * len(inputs), timeout_seconds=provider_config['timeout_seconds'],
         source_hashes=source_hashes, territories=[], run_id=run.name)
     if policy:plan.update(evaluation_policy=policy,catalog_derivation=derivation)
+    if assessment_version==v3.P2_VERSION:
+        from layer4_evaluation.indicators.retry_review import VERSION as retry_review_policy
+        plan['retry_review_policy']=retry_review_policy
     if wanted:plan['indicator_selection']=sorted(wanted)
     if policy.get('context_mode') in (v3.FULL_CONTEXT,v3.BASE_CONTEXT):
         resources=read(root/'config/autonomous.json') if (root/'config/autonomous.json').exists() else {}
@@ -440,12 +487,30 @@ def prepare_evaluation(root, run, selected):
     return batch
 
 
-def evaluate(root, run, selected, authorize=False, execute=False):
-    batch = prepare_evaluation(root, run, selected)
+def evaluate(root, run, selected, authorize=False, execute=False, source_type='PROJECT'):
+    batch = prepare_evaluation(root, run, selected, source_type)
     module = engine(root, run)
     if not execute:
         return dict(status='REVIEW_REQUIRED', review=str(module.BASE / batch / 'review.txt'), batch=batch, inference_calls=0)
     return module.execute(SimpleNamespace(run=batch, authorize=authorize))
+
+
+def selected_articles(run, requested):
+    """Canonical article IDs of the request, resolved against this run's Knowledge (read-only)."""
+    if not requested:
+        return [], {}
+    from layer4_evaluation.indicators import article_sources
+    workspace = knowledge_workspace(run)
+    canonical = pq.read_table(workspace / 'outputs/layer2/canonical/articulos.parquet').to_pylist()
+    ids = article_sources.resolve(canonical, requested)
+    by_id = {a['article_id']: a for a in canonical}
+    sections = pq.read_table(workspace / 'outputs/layer2/knowledge/source_sections.parquet',
+        filters=[('source_id', 'in', ids)]).to_pylist()
+    with_text = {s['source_id'] for s in sections if s['field_name'] in article_sources.FIELD_MAP and (s['text_original'] or '').strip()}
+    blocked = {a: ['NO_AUTHORIZED_SUBSTANTIVE_TEXT'] for a in ids if a not in with_text}
+    for a in blocked:
+        blocked[a].append('ARTICULO_SIN_RESUMEN: ' + str(by_id[a].get('doi') or by_id[a].get('eid') or a))
+    return ids, blocked
 
 
 def batch_name(selected):
@@ -485,6 +550,23 @@ def export(root, run, *, offline=False, output_contract=None):
     target_projects = set(request['project_ids']) if request.get('selection') and request.get('project_ids') is not None else all_projects
     if not target_projects or not target_projects <= all_projects:
         raise ValueError('Seleccion de exportacion vacia o ausente del canonical')
+    # ARTICLE sources: separate sheet; same verified assessments, contract and checks.
+    target_articles = set(request.get('article_ids_canonical') or [])
+    blocked_articles = request.get('blocked_articles') or {}
+    article_rows, article_records, complete_articles = [], {}, set()
+    # Results show the article's original source identifier (exact CSV `eid`; literal DOI
+    # only when the source has none). The canonical ART_ key stays internal (Knowledge,
+    # checkpoints, transport) and is kept alongside as articulo_id_interno.
+    decision_receipts = {}
+    original_ids = {}
+    if target_articles:
+        from layer4_evaluation.indicators import article_sources
+        original_ids = article_sources.original_identifiers([a for a in pq.read_table(
+            knowledge_workspace(run) / 'outputs/layer2/canonical/articulos.parquet',
+            columns=['article_id', 'eid', 'doi', 'provenance_json']).to_pylist() if a['article_id'] in target_articles])
+    repeated = {v for v in original_ids.values() if list(original_ids.values()).count(v) > 1}
+    original_ids = {k: (k if v in repeated else v) for k, v in original_ids.items()}  # a shared DOI never merges sources
+    shown_id = lambda aid: original_ids.get(aid, aid)
     for directory in sorted(module.BASE.glob('batch_*')):
         plan, state = module.check(directory), module.verify_run(directory)
         if plan.get('evaluation_policy',{})!=request.get('evaluation_policy',{}):
@@ -493,13 +575,17 @@ def export(root, run, *, offline=False, output_contract=None):
         errors.extend(state['errors'])
         for s in state['projects']:
             p = next(p for p in plan['projects'] if p['project_id'] == s['project_id'])
-            if p['siap_id'] not in target_projects:
+            article = p.get('source_type') == 'ARTICLE'
+            if p['siap_id'] not in (target_articles if article else target_projects):
                 raise ValueError('Evaluacion fuera de la seleccion: no se publica un Excel mezclado')
-            selected.add(p['siap_id'])
-            if s['rows']:evaluated_projects.add(p['siap_id'])
-            if s['blocked_indicators'] or s.get('context_limits'):blocked_results.add(p['siap_id'])
-            if any(error.startswith(s['project_id']+':') for error in state['errors']):blocked_results.add(p['siap_id'])
-            if s['complete']:
+            if article:
+                if s['complete']:complete_articles.add(p['siap_id'])
+            else:
+                selected.add(p['siap_id'])
+            if s['rows'] and not article:evaluated_projects.add(p['siap_id'])
+            if not article and (s['blocked_indicators'] or s.get('context_limits')):blocked_results.add(p['siap_id'])
+            if not article and any(error.startswith(s['project_id']+':') for error in state['errors']):blocked_results.add(p['siap_id'])
+            if s['complete'] and not article:
                 complete_projects.add(p['siap_id'])
             valid_ids={r['indicator_id'] for r in s['rows']}
             decisions={r['indicator_id']:r['decision'] for r in s['rows']}
@@ -510,8 +596,9 @@ def export(root, run, *, offline=False, output_contract=None):
             for iid in expected_ids:
                 status=('VALID' if iid in valid_ids else s['blocked_indicators'].get(iid) or
                     s.get('context_limits',{}).get(iid) or 'PENDING')
-                coverage.append(dict(siap_id=p['siap_id'],indicator_id=iid,status=status,
-                    decision=decisions.get(iid),project_complete=s['complete']))
+                coverage.append(dict(siap_id=shown_id(p['siap_id']) if article else p['siap_id'],indicator_id=iid,status=status,
+                    decision=decisions.get(iid),project_complete=s['complete'],
+                    **({'source_type':'ARTICLE','articulo_id_interno':p['siap_id']} if article else {})))
                 if plan.get('assessment_version')==module.v3.P2_VERSION:
                     attempts=[u for u in state['usage'] if u['project_id']==s['project_id'] and iid in u.get('indicator_ids',[])]
                     saved_row=next((r for r in s['rows'] if r['indicator_id']==iid),None)
@@ -530,7 +617,17 @@ def export(root, run, *, offline=False, output_contract=None):
                 assessment = module.assessment_from_row(row)
                 if module.v3.validate(p['fields'], plan['profiles'][iid], assessment, plan['rubrics'][iid]):
                     raise ValueError('Assessment guardado invalido')
-                valid_results.append(dict(row,siap_id=p['siap_id']))
+                if row.get('assessment_version') == module.v3.P2_VERSION:
+                    # Final accreditation (BALANCED_CRITERIA_DECISION_V2) from the stored, validated
+                    # criterion judgments; the V5 decision and every artifact stay unchanged.
+                    from layer4_evaluation.indicators import decision_v2
+                    from layer4_evaluation.indicators.prospective_v2 import EXTERNAL_RECORD_CRITERIA
+                    final, receipt = decision_v2.final_decision(row, plan['rubrics'][iid], EXTERNAL_RECORD_CRITERIA.get(iid, ()))
+                    row = dict(row, decision=final, decision_v5=row['decision'], final_decision=receipt,
+                               evidence_explanation=decision_v2.explanation(receipt, row.get('evidence_explanation') or ''))
+                    decision_receipts[(p['siap_id'], iid)] = receipt
+                valid_results.append(dict(row,siap_id=shown_id(p['siap_id']) if article else p['siap_id'],**({'source_type':'ARTICLE',
+                    'articulo_id_interno':p['siap_id'],'bibliographic':p.get('bibliographic')} if article else {})))
                 if output_contract==POSITIVE_CONTRACT and row['decision']!='SUPPORTED':
                     continue  # Negatives and partial support remain in verified diagnostics.
                 locations = module.evidence_locations(p, assessment)
@@ -545,7 +642,8 @@ def export(root, run, *, offline=False, output_contract=None):
                     if value is not None or row['confidence_status']!='NOT_APPLICABLE':raise ValueError('No aplicable requiere confianza N/A')
                 elif type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 100:
                     raise ValueError('Confianza guardada invalida')
-                codes=resolve_codes(p,assessment)
+                # Territories are project-level outputs; articles carry no territory codes.
+                codes=() if article else resolve_codes(p,dict(assessment,indicator_id=iid))
                 try:consumer=indicator_record(p,iid,row=row,locations=locations,territory_codes=codes)
                 except (ValueError,KeyError,TypeError) as exc:
                     if output_contract in (ALL_CONTRACT,*GENERAL_CONTRACTS):raise
@@ -553,6 +651,20 @@ def export(root, run, *, offline=False, output_contract=None):
                     continue
                 record=[consumer[c] for c in COLUMNS]
                 pair = (record[0], record[1])
+                if article:
+                    info=p.get('bibliographic') or {}
+                    consumer.update(titulo=info.get('title'),doi=info.get('doi'),eid=info.get('eid'))
+                    consumer['proyecto/articulo_siap_id']=shown_id(p['siap_id'])
+                    record=[consumer[c] for c in COLUMNS];pair=(record[0], record[1])
+                    if pair in article_records and article_records[pair]!=consumer:
+                        raise ValueError('Resultados contradictorios entre lotes')
+                    if pair not in article_records:
+                        article_records[pair]=consumer;article_rows.append(record)
+                        lineage.append(dict(siap_id=shown_id(p['siap_id']),articulo_id_interno=p['siap_id'],source_type='ARTICLE',indicator_id=iid,batch=directory.name,
+                            evidence=locations,raw_fields={e['field']:p['field_provenance'][e['field']]['raw_sources'] for e in locations},
+                            field_mapping=p.get('field_mapping'),
+                            context_status=plan.get('context_requests',{}).get(p['project_id'],{}).get(iid,{}).get('context_selection',{}).get('status')))
+                    continue
                 previous = next((r for r in rows if (r[0], r[1]) == pair), None)
                 if previous and (previous != record or csv_records[pair]['estado_cumplimiento'] != row['decision']):
                     raise ValueError('Resultados contradictorios entre lotes')
@@ -565,12 +677,22 @@ def export(root, run, *, offline=False, output_contract=None):
                         raw_fields={e['field']: p['field_provenance'][e['field']]['raw_sources'] for e in locations},
                         context_status=context.get('status'),evidence_limited=context.get('evidence_limited'),
                         **({'truncation':context['truncation']} if 'truncation' in context else {})))
+    for item in coverage:
+        receipt = decision_receipts.get((item.get('articulo_id_interno') or item['siap_id'], item['indicator_id']))
+        if receipt:
+            item.update(decision=receipt['decision'], decision_v5=receipt['decision_v5'], final_decision_rule=receipt['rule'],
+                        evidence_nature=receipt['evidence_nature'])
     # Prepared batches may not yet have run when a cooperative interruption occurs.
     covered={(c['siap_id'],c['indicator_id']) for c in coverage}
     for pid in sorted(target_projects):
         for iid in sorted(indicator_ids):
             if (pid,iid) not in covered:
                 coverage.append(dict(siap_id=pid,indicator_id=iid,status='PENDING',decision=None,project_complete=False))
+    for aid in sorted(target_articles):
+        for iid in sorted(indicator_ids):
+            if (shown_id(aid),iid) not in covered:
+                coverage.append(dict(siap_id=shown_id(aid),articulo_id_interno=aid,indicator_id=iid,source_type='ARTICLE',decision=None,project_complete=False,
+                    status='NO_AUTHORIZED_SUBSTANTIVE_TEXT' if aid in blocked_articles else 'PENDING'))
     if output_contract==ALL_CONTRACT:
         for item in coverage:
             pair=item['siap_id'],item['indicator_id']
@@ -581,23 +703,32 @@ def export(root, run, *, offline=False, output_contract=None):
         if len({(c['siap_id'],c['indicator_id']) for c in coverage})!=len(coverage):
             raise ValueError('Cobertura duplicada entre lotes')
     rows.sort(key=lambda r: (r[0], r[1]))
-    if any(isinstance(c, str) and (len(c) > 32767 or re.search(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', c)) for r in rows for c in r):
+    article_rows.sort(key=lambda r: (r[0], r[1]))
+    if any(isinstance(c, str) and (len(c) > 32767 or re.search(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', c)) for r in rows+article_rows for c in r):
         raise ValueError('Texto no representable en Excel; no se trunca evidencia')
     output = run_file(run, 'resultado_indicadores.xlsx')
-    render_thesis(root,output,[csv_records[(r[0],r[1])] for r in rows],contract=output_contract)
+    render_thesis(root,output,[csv_records[(r[0],r[1])] for r in rows],
+        [article_records[(r[0],r[1])] for r in article_rows],contract=output_contract)
     csv_result = write_results(run, consumer_columns,
-                               [csv_records[(r[0], r[1])] for r in rows], codes_by_pair)
+                               [csv_records[(r[0], r[1])] for r in rows], codes_by_pair, resolver=resolve_codes)
     coverage_path=run/'resultados/estado_indicadores.json'
-    write(coverage_path,dict(status='COMPLETE' if target_projects==complete_projects else 'PARTIAL',
+    write(coverage_path,dict(status='COMPLETE' if target_projects==complete_projects and target_articles==complete_articles else 'PARTIAL',
         note='VALID identifica evaluaciones verificadas; los demas estados no son evaluaciones completas.',indicators=coverage))
     valid_path=run/'resultados/evaluaciones_validas.json'
-    write(valid_path,dict(status='COMPLETE' if target_projects==complete_projects else 'PARTIAL',assessments=valid_results))
-    result = dict(status='COMPLETE' if target_projects == complete_projects and not errors and not export_exclusions else 'PARTIAL', excel=str(output),
+    write(valid_path,dict(status='COMPLETE' if target_projects==complete_projects and target_articles==complete_articles else 'PARTIAL',assessments=valid_results))
+    articles_complete = target_articles == complete_articles
+    result = dict(status='COMPLETE' if target_projects == complete_projects and articles_complete and not errors and not export_exclusions else 'PARTIAL', excel=str(output),
+        selected_articles=len(target_articles),completed_articles=len(complete_articles),blocked_articles=sorted(shown_id(a) for a in blocked_articles),
+        exported_article_rows=len(article_rows),
         preprocessed_projects=len(all_projects), scoped_projects=len(target_projects), pending_projects=sorted(target_projects - processed), errors=errors,
         selected_projects=len(target_projects), processed_projects=len(processed), completed_projects=len(complete_projects), represented_projects=len({r[0] for r in rows}),
         relationships=len(rows), territories=0, excel_sha256=sha(output), power_bi_desktop_tested=False)
     result['csv'] = csv_result
     if request.get('evaluation_policy'):result['evaluation_policy']=request['evaluation_policy']
+    from layer4_evaluation.indicators import decision_v2
+    result.update(final_decision_policy=decision_v2.VERSION,
+        final_decisions={k: sum(1 for r in decision_receipts.values() if r['decision'] == k) for k in ('SUPPORTED', 'INSUFFICIENT_EVIDENCE', 'NOT_APPLICABLE')},
+        decisions_changed_from_v5=sum(1 for r in decision_receipts.values() if r['changed']))
     result.update(output_contract=output_contract,sheets=SHEETS,columns=consumer_columns,
         template=TEMPLATE.as_posix(),template_sha256=sha(root/TEMPLATE),positive_results_only=output_contract==POSITIVE_CONTRACT)
     result['indicator_statuses']=str(coverage_path)
@@ -803,7 +934,7 @@ def review_summary(module, directory):
                 note='Revisar review.txt y autorizar solo estos textos. No se muestran textos institucionales en consola.')
 
 
-def execution_approval(root, run, config, metadata, model_binding, target, confirm):
+def execution_approval(root, run, config, metadata, model_binding, target, confirm, article_ids=None):
     """One exact approval for new execution and identical resumptions, before work."""
     import getpass
     from layer2_processing.pipeline import code_hashes
@@ -812,6 +943,7 @@ def execution_approval(root, run, config, metadata, model_binding, target, confi
         sources=metadata['sources'],llm=model_binding['llm'],contract=model_binding.get('contract'),
         configuration={k:v for k,v in config.items() if k not in ('processing_scope','project_selection')},
         code_and_configuration=code_hashes(root),through=target)
+    if article_ids:scope['article_ids']=list(article_ids)  # Project-only scopes keep their fingerprint.
     path=run/'estado/run.authorization.json'
     fingerprint=digest(scope)
     if path.exists():
@@ -823,6 +955,7 @@ def execution_approval(root, run, config, metadata, model_binding, target, confi
     summary=dict(run_id=run.name,provider=llm['provider'],model=llm['model'],project_count=len(scope['project_ids']),
         evaluation_policy=config.get('evaluation_policy'),num_ctx=llm.get('num_ctx'),
         project_ids=list(scope['project_ids']),
+        **({'article_count':len(article_ids),'article_ids':list(article_ids)} if article_ids else {}),
         sources=list(scope['sources']),contract=scope['contract'],stages=list(STAGES[:STAGES.index(target)+1]),
         destination='OpenAI API: '+llm.get('api',{}).get('base_url','https://api.openai.com/v1') if external else llm.get('endpoint'),
         budget_usd=llm.get('api',{}).get('budget_usd') if external else None,
@@ -854,7 +987,7 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
                      project_ids=None, notify=None, dataset=None, input_file=None, delivery=None, confirm=None,
                      limit=None, all_projects=False, seed=42, dry_run=False, selection_manifest=None,confirm_all=False,
                      single_authorization=False,evaluation_mode=None,context_mode=None,knowledge_action=None,
-                     indicator_ids=None):
+                     indicator_ids=None,article_ids=None):
     """Central reusable orchestration API. Layer checkpoints remain authoritative."""
     root = Path(root).resolve()
     sampling = limit is not None or all_projects or selection_manifest is not None
@@ -891,6 +1024,11 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
         raise ValueError('Seleccionar identificadores institucionales unicos y no vacios')
     if project_ids is not None and delivery is not None and not sampling:
         raise ValueError('Elegir proyectos o entrega como modalidad de seleccion; --file admite --projects')
+    # Optional ARTICLE selection: evaluated independently after the projects,
+    # frozen in execution.json exactly like the indicator subset.
+    if article_ids is not None and (not article_ids or any(not isinstance(a, str) or not a.strip() for a in article_ids)
+            or len(article_ids) != len(set(article_ids))):
+        raise ValueError('Seleccionar identificadores de articulo unicos y no vacios')
     if dataset is not None and dataset not in ('prueba_controlada', 'prueba_en_vivo'):
         raise ValueError('Conjunto de pruebas desconocido')
     if stage is not None and stage not in STAGES or through is not None and through not in STAGES:
@@ -937,6 +1075,8 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
             restart += ' --source ' + quoted(source)
     if project_ids:
         restart += ' --projects ' + quoted(','.join(project_ids))
+    if article_ids:
+        restart += ' --articles ' + quoted(','.join(article_ids))
 
     def progress(status, **detail):
         checkpoint = False
@@ -1023,7 +1163,7 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
                         approval_metadata = metadata if sampling else select(root,raw,config,seed=seed,
                             project_ids=project_ids,all_projects=project_ids is None)
                         approval=execution_approval(root,run,dict(config,llm=model_binding['llm']),
-                            approval_metadata,model_binding,target,confirm)
+                            approval_metadata,model_binding,target,confirm,article_ids)
                         if approval is None:return dict(status='CANCELLED',inference_calls=0,run_id=name)
                     run.mkdir(parents=True, exist_ok=False)
                     write(run_file(run,'model.binding.json'), model_binding)
@@ -1031,7 +1171,8 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
                         llm=model_binding['llm'], evaluation_contract=model_binding.get('contract'),
                         **({'evaluation_policy':policy} if policy else {}),
                         source=source,input_file=input_file,delivery=delivery,
-                        **({'indicator_ids':list(indicator_ids)} if indicator_ids is not None else {})))
+                        **({'indicator_ids':list(indicator_ids)} if indicator_ids is not None else {}),
+                        **({'article_ids':list(article_ids)} if article_ids is not None else {})))
                     write(run_file(run,'run.json'), dict(status='REGISTERED',run_id=name,dataset=dataset or 'raw',
                         raw_path=raw.relative_to(root).as_posix(),configuration=dict(config,llm=model_binding['llm']),
                         started_at=datetime.now(timezone.utc).isoformat()))
@@ -1060,6 +1201,10 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
             if (resume or previous_request) and indicator_ids is not None and indicator_ids != saved_indicators:
                 raise ValueError('Seleccion de indicadores distinta; reanudar con la seleccion original o crear otro run')
             indicator_ids = saved_indicators if indicator_ids is None else indicator_ids
+            saved_articles = previous_request.get('article_ids')
+            if (resume or previous_request) and article_ids is not None and article_ids != saved_articles:
+                raise ValueError('Seleccion de articulos distinta; reanudar con la seleccion original o crear otro run')
+            article_ids = saved_articles if article_ids is None else article_ids
             selection = previous_request.get('selection') or dict(
                 mode='file' if input_file is not None else 'delivery' if delivery is not None else 'projects' if project_ids is not None else 'source',
                 files=config.get('selected_input_paths', []))
@@ -1074,13 +1219,16 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
                 llm=model_binding['llm'], evaluation_contract=model_binding.get('contract'),
                 **({'evaluation_policy':policy} if policy else {}),
                 source=source,input_file=input_file,delivery=delivery,
-                **({'indicator_ids':list(indicator_ids)} if indicator_ids is not None else {}))
+                **({'indicator_ids':list(indicator_ids)} if indicator_ids is not None else {}),
+                **({'article_ids':list(article_ids)} if article_ids is not None else {}))
+            for key in ('article_ids_canonical','blocked_articles'):
+                if key in previous_request:request[key]=previous_request[key]
             config['llm'] = model_binding['llm']
             if single_authorization and not dry_run and approval is None:
                 from layer2_processing.preprocessing.project_selection import select
                 approval_metadata=config.get('project_selection') or select(root,raw,config,seed=seed,
                     project_ids=project_ids,all_projects=project_ids is None)
-                approval=execution_approval(root,run,config,approval_metadata,model_binding,target,confirm)
+                approval=execution_approval(root,run,config,approval_metadata,model_binding,target,confirm,article_ids)
                 if approval is None:return progress('REVIEW_REQUIRED',message='Autorizar el alcance completo antes de continuar')
                 write(run/'estado/run.authorization.json',approval)
                 from layer4_evaluation.indicators.performance import activate_run_measurement
@@ -1235,24 +1383,40 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
                             projects_without_evidence=unavailable,
                             note='No se infieren indicadores ni cumplimiento de proyectos sin texto sustantivo; no se sustituyen IDs'))
                         request['blocked_projects']=blocked
+                        articles,blocked_articles=selected_articles(run,request.get('article_ids'))
+                        if articles:
+                            request.update(article_ids_canonical=articles,blocked_articles=blocked_articles)
+                            readiness=read(run_file(run, 'evaluation_readiness.json'))
+                            readiness.update(blocked_articles=blocked_articles,
+                                status='PARTIAL' if blocked or blocked_articles else 'READY')
+                            write(run_file(run, 'evaluation_readiness.json'),readiness)
                         write(run_file(run, 'execution.json'), request)
                         eligible=[p for p in selected if p not in blocked]
+                        eligible_articles=[a for a in articles if a not in blocked_articles]
+                        if blocked_articles:
+                            progress('INPUT_SUMMARY',summary=dict(blocked_articles=blocked_articles,eligible_articles=eligible_articles,
+                                note='Articulos sin resumen: no se evaluan ni se asignan estados de cumplimiento'))
                         if blocked:
                             progress('INPUT_SUMMARY',summary=dict(blocked_projects=blocked,eligible_projects=eligible,
                                 report=str(run_file(run, 'evaluation_readiness.json')),note='No se evaluan proyectos bloqueados ni se asignan estados de cumplimiento; el resultado del conjunto permanecera parcial'))
-                        if not eligible:
+                        if not eligible and not eligible_articles:
                             return progress('BLOCKED_INPUT',blocked_projects=blocked,report=str(run_file(run, 'evaluation_readiness.json')))
                         module = engine(root, run)
-                        batches = [eligible[i:i+2] for i in range(0, len(eligible), 2)]
+                        # Each source is evaluated independently with its own evidence;
+                        # projects first, then optional articles, same V5 batches.
+                        batches = ([(eligible[i:i+2],'PROJECT') for i in range(0, len(eligible), 2)] +
+                                   [(eligible_articles[i:i+2],'ARTICLE') for i in range(0, len(eligible_articles), 2)])
                         reviews, pending, authorized_batches = [], [], set()
                         completed_projects=completed_indicators=processed_projects=0
                         evaluation_partial=False
                         batch_states={}
-                        for batch in batches:
+                        for batch,kind in batches:
                             directory = module.BASE / batch_name(batch)
                             review_path = directory / 'review.txt'
                             reviewed = sha(review_path) if review_path.is_file() else None
-                            result = evaluate(root, run, batch)
+                            # PROJECT is the default; only ARTICLE batches pass their type explicitly.
+                            kind_option = {} if kind == 'PROJECT' else dict(source_type=kind)
+                            result = evaluate(root, run, batch, **kind_option)
                             verified = module.verify_run(directory)
                             batch_states[directory.name]=verified
                             project_states(verified)
@@ -1274,11 +1438,11 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
                                         authorized_batches.add(batch_name(batch))
                                     else:
                                         reviews.append(result['review'])
-                                pending.append(batch)
+                                pending.append((batch,kind))
                         if reviews:
                             return progress('REVIEW_REQUIRED', reviews=reviews,
                                 message='Leer los reviews; reanudar con --authorize-llm para autorizar el proveedor registrado en el run')
-                        for batch in pending:
+                        for batch,kind in pending:
                             if approval:verify_execution_approval(root,approval)
                             if (run_file(run, 'stop.request.json')).exists():
                                 partial=export(root,run)
@@ -1289,7 +1453,8 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
                                     scope_sha256=approval['scope_sha256'],authorization=str(run/'estado/run.authorization.json'),
                                     authorization_sha256=sha(run/'estado/run.authorization.json'),
                                     plan_sha256=sha(directory/'plan.json'),review_sha256=sha(directory/'review.txt')))
-                            evaluate(root, run, batch, authorize=authorize or batch_name(batch) in authorized_batches, execute=True)
+                            evaluate(root, run, batch, authorize=authorize or batch_name(batch) in authorized_batches, execute=True,
+                                **({} if kind == 'PROJECT' else dict(source_type=kind)))
                             verified = module.verify_run(module.BASE / batch_name(batch))
                             batch_states[batch_name(batch)]=verified
                             project_states(verified)
@@ -1299,7 +1464,7 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
                             completed_indicators+=sum(len(p.get('rows',[])) for p in verified['projects'])
                             if notify:
                                 progress('EVALUATION_PROGRESS',projects_in_batch=len(batch),
-                                    projects_evaluated=completed_projects,total_projects=len(eligible),
+                                    projects_evaluated=completed_projects,total_projects=len(eligible)+len(eligible_articles),
                                     projects_processed=processed_projects,projects_completed=completed_projects,
                                     indicators_completed=completed_indicators)
                             if verified.get('blocking_errors',verified['errors']):
@@ -1308,13 +1473,15 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
                                 raise ValueError('Lote incompleto/bloqueado; consultar status antes de reanudar')
                         projects_view=[p for batch in batch_states.values() for p in batch['projects']]
                         decisions=[r['decision'] for p in projects_view for r in p['rows']]
-                        evaluation_report=dict(selected_projects=len(selected),processed_projects=processed_projects,
+                        evaluation_report=dict(selected_projects=len(selected),selected_articles=len(articles),
+                            blocked_articles=sorted(blocked_articles),processed_projects=processed_projects,
                             completed_projects=completed_projects,expected_assessments=sum(len(p.get('selected',p['rows'])) for p in projects_view),
                             valid_assessments=len(decisions),supported=decisions.count('SUPPORTED'),
                             insufficient_evidence=decisions.count('INSUFFICIENT_EVIDENCE'),not_supported=decisions.count('NOT_SUPPORTED'),
                             blocked_assessments=sum(len(set(p.get('blocked_indicators',{}))|set(p.get('context_limits',{}))) for p in projects_view),
                             pending_assessments=sum(len(p.get('pending_indicators',[])) for p in projects_view),
-                            processing_complete=processed_projects==len(selected),results_available=bool(decisions))
+                            processing_complete=processed_projects==len(selected)+len(articles),
+                            results_available=bool(decisions))
                         if target=='evaluation' and evaluation_partial:
                             return progress('PARTIAL',**evaluation_report,
                                 message='Procesamiento finalizado con cobertura parcial; las evaluaciones validas se conservan.')
@@ -1341,7 +1508,7 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
             return progress('COMPLETE', through=target, results=str(evaluation_dir(run)),
                             excel=str(run_file(run, 'resultado_indicadores.xlsx')) if target == 'export' else None,
                             **(dict(result=result) if target=='export' else evaluation_report),
-                            limitations=['Evaluacion PROJECT; ARTICLE pendiente. Exportacion sin puente territorial nuevo verificado.'])
+                            limitations=['Proyectos y articulos se evaluan por separado con V5; los articulos solo citan su resumen y no reciben contexto relacional. Exportacion sin puente territorial nuevo verificado.'])
         except KeyboardInterrupt:
             if any(evaluation_dir(run).glob('batch_*')):
                 try:export(root,run)
@@ -1354,7 +1521,8 @@ def execute_pipeline(root, *, config_path='config/pipeline_manual.json', source=
             if model_binding['llm']['provider']=='openai' and any(evaluation_dir(run).glob('batch_*')):
                 try:
                     partial_result=export(root,run)
-                    if 'API_BUDGET' in str(exc):return progress('PARTIAL',result=partial_result,reason='API_BUDGET')
+                    stop=next((code for code in ('API_BUDGET','API_BALANCE') if code in str(exc)),None)
+                    if stop:return progress('PARTIAL',result=partial_result,reason=stop)
                 except Exception:write(run/'partial_export.pending.json',dict(reason='Reintentar export explicito; comprobar recibos'))
             progress('FAILED_OR_BLOCKED', error=str(exc), error_type=type(exc).__name__)
             raise

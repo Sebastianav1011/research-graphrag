@@ -29,12 +29,17 @@ def binding(root,run,base,*,evaluation=None):
         from layer4_evaluation.indicators.openai_provider import defaults
         api=defaults(root)
         budget=requested.get('budget_usd')
-        if budget is None:
-            import sys
-            if not sys.stdin.isatty():raise ValueError('OpenAI requiere --budget-usd explicito (recomendado: 15)')
-            budget=float(input('Presupuesto operativo maximo USD (15 recomendado; reserva externa prevista 5 de 20): '))
-        if not math.isfinite(budget) or budget<=0:raise ValueError('Presupuesto positivo requerido')
-        api['budget_usd']=budget
+        if requested.get('unlimited_budget'):
+            # Explicit choice: no internal limit; the OpenAI account limit/balance applies.
+            if budget is not None:raise ValueError('Elegir presupuesto o sin limite, no ambos')
+            api.pop('budget_usd',None)
+        else:
+            if budget is None:
+                import sys
+                if not sys.stdin.isatty():raise ValueError('OpenAI requiere --budget-usd o --sin-limite explicitos')
+                budget=float(input('Presupuesto operativo maximo USD: '))
+            if not math.isfinite(budget) or budget<=0:raise ValueError('Presupuesto positivo requerido')
+            api['budget_usd']=budget
         settings=dict(provider='openai',model='gpt-6.1-terra',api=api)
         if (evaluation or {}).get('context_mode')=='BASE_RETRIEVED_GRAPH_V1':
             # The 8000-token evidence cap applies only to the local model. The API

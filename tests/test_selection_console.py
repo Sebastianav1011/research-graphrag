@@ -6,6 +6,31 @@ from project_menu import select_projects, SelectionCancelled
 from layer2_processing.preprocessing.project_selection import sample_projects
 
 
+@pytest.mark.parametrize('answer,expected', [('si', True), ('sí', True), ('N', False), ('', False)])
+def test_fingerprint_warning_changes_only_text(monkeypatch, capsys, answer, expected):
+    prompts = []
+    monkeypatch.setattr(console.sys.stdin, 'isatty', lambda: True)
+    def respond(prompt):
+        prompts.append(prompt)
+        return answer
+    monkeypatch.setattr('builtins.input', respond)
+    assert console.confirm_action('knowledge_rebuild', {
+        'message': 'No hay conocimiento compatible: Fingerprint mismatch: synthetic.py'}) is expected
+    assert capsys.readouterr().out == (
+        '\nADVERTENCIA: KNOWLEDGE EXISTENTE INCOMPATIBLE\n\n'
+        'El Knowledge guardado no coincide con la configuración actual.\n\n'
+        'Motivo: Fingerprint mismatch.\n\n'
+        'El conocimiento existente no puede reutilizarse de forma segura.\n\n')
+    assert prompts == ['¿Deseas reconstruir el Knowledge para continuar? (s/N): ']
+
+
+def test_other_rebuild_warning_and_noninteractive_behavior_unchanged(monkeypatch, capsys):
+    monkeypatch.setattr(console.sys.stdin, 'isatty', lambda: False)
+    monkeypatch.setattr('builtins.input', lambda _: pytest.fail('Noninteractive input'))
+    assert console.confirm_action('knowledge_rebuild', {'message': 'No hay version activa'}) is False
+    assert capsys.readouterr().out == 'No hay version activa\n'
+
+
 @pytest.mark.parametrize('count',[3,100])
 @pytest.mark.parametrize('knowledge',['reuse','rebuild'])
 def test_menu_count_reaches_existing_stratified_sampler(count,knowledge,monkeypatch,capsys,tmp_path):
@@ -28,7 +53,8 @@ def test_menu_count_reaches_existing_stratified_sampler(count,knowledge,monkeypa
         find_run=lambda root,runs,name:runs/name))
     monkeypatch.setattr(console.sys.stdin,'isatty',lambda:True)
     monkeypatch.setattr(console,'ROOT',tmp_path)
-    answers=iter(['1','2','1',str(count),'' if knowledge=='reuse' else '2','S','0'])
+    # 'N': the V5 question '¿Desea procesar también artículos?' follows the knowledge choice.
+    answers=iter(['1','2','1',str(count),'' if knowledge=='reuse' else '2','N','S','0'])
     monkeypatch.setattr('builtins.input',lambda prompt:next(answers))
     assert console.main([])==0 and len(calls)==1
     output=capsys.readouterr().out

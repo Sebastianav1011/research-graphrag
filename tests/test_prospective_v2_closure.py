@@ -16,7 +16,7 @@ from tests.test_prospective_v2 import prospective, case, make_na
 def transport_case(x, revision=None):
     request = cb.make_request(dict(project_id='P', fields=x['fields']), x['profile'], x['rubric'], x['fields'],
         evidence_references=True, assessment_version=p2.VERSION, evaluation_mode=p2.MODE,
-        prompt_version=revision or p2.PROMPT)
+        prompt_version=revision or p2.PROMPT_CONCISE_V4)
     a = deepcopy(x['assessment'])
     a.pop('coverage_policy'); a.pop('evidence')
     for c in [*a['criterion_assessments'], a['strength_rubric'], a['applicability']]:

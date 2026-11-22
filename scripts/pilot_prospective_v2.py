@@ -90,7 +90,7 @@ def prepare_closure(output_dir):
         evidence_references=True,
         evidence_units=[dict(field=f['field'], text=f['text']) for f in old['payload']['project']['fragments']],
         assessment_version=p2.VERSION, evaluation_mode=p2.MODE, context_mode=v3.RETRIEVED_CONTEXT,
-        prompt_version=p2.PROMPT)
+        prompt_version=p2.PROMPT_CONCISE_V4)
     request['payload']['relational_context'] = deepcopy(old['payload']['relational_context'])
     request['prompt'] = request['prompt'].split('INPUT_JSON:\n', 1)[0] + cb.RELATIONAL_INSTRUCTIONS + 'INPUT_JSON:\n' + cb.compact(request['payload'])
     if request['payload'] != old['payload']:
@@ -179,7 +179,7 @@ def prepare(output_dir):
         units = [{'field': f['field'], 'text': f['text']} for f in old['payload']['project']['fragments']]
         request = cb.make_request(project, source['profiles'][iid], rubrics[iid], project['fields'],
             evidence_references=True, evidence_units=units, assessment_version=p2.VERSION,
-            evaluation_mode=p2.MODE, context_mode=v3.RETRIEVED_CONTEXT, prompt_version=p2.PROMPT)
+            evaluation_mode=p2.MODE, context_mode=v3.RETRIEVED_CONTEXT, prompt_version=p2.PROMPT_CONCISE_V4)
         if request['payload']['project']['fragments'] != old['payload']['project']['fragments']:
             raise ValueError('El transporte ha cambiado los fragmentos originales; revisar antes de inferir.')
         request['payload']['relational_context'] = deepcopy(relation)

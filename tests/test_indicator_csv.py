@@ -58,11 +58,17 @@ def test_multiple_indicators_territories_and_csv_consistency(tmp_path, resolver)
     export.write_results(tmp_path, COLUMNS, records+records[:1], codes)
     columns, normal = read(tmp_path/'resultados/indicadores.csv')
     territory_columns, territorial = read(tmp_path/'resultados/indicadores_territorios.csv')
-    assert columns == COLUMNS[:-1] and territory_columns == columns+['codigo_dane']
+    assert columns == COLUMNS[:-1] and territory_columns == export.TERRITORIAL_COLUMNS
     assert len(normal) == 3 and len(territorial) == 3
-    assert {r['codigo_dane'] for r in territorial} == {'05', '05001', '05088'}
-    assert all({k: r[k] for k in columns} in normal for r in territorial)
-    assert len({(r['siap_id'], r['indicador_id'], r['codigo_dane']) for r in territorial}) == 3
+    assert territorial[0]['codigo_dane'] == '05' and territorial[0]['municipio'] == ''
+    assert territorial[0]['codigo_municipio_dane'] == ''
+    assert territorial[1]['departamento'] == 'Antioquia' and territorial[1]['municipio'] == ''
+    assert territorial[2]['departamento'] == territorial[2]['municipio'] == ''
+    assert all(r['parrafo_evidencia'] == normal[0]['parrafo_evidencia'] for r in territorial)
+    assert len({(r['proyecto/articulo_siap_id'], r['indicador_id']) for r in territorial}) == 3
+    _, bridge = read(tmp_path/'resultados/indicadores_territorios_relaciones.csv')
+    assert {r['codigo_dane'] for r in bridge} == {'05'}
+    assert {r['codigo_municipio_dane'] for r in bridge} == {'', '001', '088'}
     assert all(r['siap_id'] == '0007' and r['investigador_id'] == '00012' for r in normal)
     assert all(p.read_bytes() == b'untouched measurement' for p in performance.iterdir())
 
@@ -92,22 +98,21 @@ def test_empty_results_and_researcher_grain(tmp_path):
     columns = ['siap_id', 'investigador_id', 'indicador_id']
     records = [dict(zip(columns, ['0007', person, 'I'])) for person in ['001', '002']]
     result = export.write_results(tmp_path, columns, records, {('0007', 'I'): ['05001', '05001']})
-    assert result['indicator_rows'] == result['territory_rows'] == 2
+    assert result['indicator_rows'] == 2 and result['territory_rows'] == 1
     result = export.write_results(tmp_path, columns, [], {})
     assert result['indicator_rows'] == result['territory_rows'] == 0
-    assert read(tmp_path/'resultados/indicadores_territorios.csv') == (columns+['codigo_dane'], [])
+    assert read(tmp_path/'resultados/indicadores_territorios.csv') == (export.TERRITORIAL_COLUMNS, [])
 
 
-def test_missing_reference_does_not_invent_codes(tmp_path):
-    assert export.TerritoryCodes(tmp_path)(*case('Talleres en Medellín.')) == []
+def test_primary_excel_reference_works_without_historical_outputs(tmp_path):
+    assert export.TerritoryCodes(tmp_path)(*case('Talleres en Medellín.')) == ['05001']
 
 
-def test_installed_corrupt_reference_is_not_silently_ignored(tmp_path):
+def test_obsolete_generated_reference_cannot_override_primary_excel(tmp_path):
     directory = tmp_path/'outputs/layer2/reference'
     directory.mkdir(parents=True)
     (directory/'dane_reference_manifest.json').write_text('{}', encoding='utf-8')
-    with pytest.raises(ValueError, match='DANE reference manifest'):
-        export.TerritoryCodes(tmp_path)(*case('Talleres en Medellín.'))
+    assert export.TerritoryCodes(tmp_path)(*case('Talleres en Medellín.')) == ['05001']
 
 
 def test_title_location_alone_does_not_assign_indicator(resolver):
@@ -133,7 +138,10 @@ def test_autonomous_export_integration(tmp_path, monkeypatch):
             valid_assessments=1,supported=1,insufficient_evidence=0,not_supported=0,
             blocked_assessments=0,pending_assessments=0,processing_complete=True,results_available=True)
     monkeypatch.setattr(final, 'project_records', project_records)
-    result = final.export(tmp_path, run)
+    result = final.export(tmp_path, run, output_contract=final.ALL_CONTRACT)
     assert result['csv']['indicator_rows'] == result['csv']['territory_rows'] == 1
     assert 'territorio' not in read(run/'resultados/indicadores.csv')[0]
     assert result['path'].endswith('resultado_indicadores.xlsx')
+    fields, territorial = read(run/'resultados/indicadores_territorios.csv')
+    assert fields == export.TERRITORIAL_COLUMNS
+    assert territorial[0]['codigo_dane']=='05' and territorial[0]['codigo_municipio_dane']=='001'

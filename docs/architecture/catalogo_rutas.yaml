@@ -1,0 +1,544 @@
+# Catálogo de rutas de GraphRag: clasificación documental, comprobada el 2026-11-20.
+#
+# NO es una fuente de resolución de rutas. Ningún código lee este archivo.
+# La resolución sigue a cargo de layer2_processing.checkpoints.registry()/resolve(), que combina:
+#   outputs/layer4/auditoria/rutas.json
+#   docs/architecture/auditoria_consolidacion/relocations.json   (local, excluido de Git; opcional)
+#   config/sad_relocations.json            (prefixes, file_aliases, runtime_bindings)
+#   outputs/runs/.relocations.json         (localizadores de runs, src/run_paths.py)
+# No se copian aquí sus alias. Todo outputs/ es privado y está excluido de Git.
+# Antecedente local, no versionado (docs/status/ está excluido de Git): la auditoría de solo lectura
+# docs/status/auditoria_outputs_layer234.md, con su inventario CSV por archivo de outputs/layer2-4.
+#
+# Campos:
+#   categoria: ACTUAL | COMPARTIDO | HISTORICO | EXPERIMENTAL
+#   run_nuevo: escribe | lee | lee_si_rebuild | lee_export_autonomo | no
+#   fijada_por: manifiestos, verificadores o sellos que dependen de bytes o de la ruta
+#   autorizada_por: regla que solo autoriza la ubicación de un directorio de primer nivel de outputs/
+#                   (OUTPUT_DIRECTORIES); no fija bytes ni hashes
+#   regenerable: si | no | solo_con_inferencia | solo_con_build (con coste)
+#   conservar_ubicacion: true si mover la ruta rompería un consumidor, un manifiesto o un verificador
+#   estado: resultado de la comprobación de solo lectura del 2026-11-20
+#
+# Validación del layout (2026-11-20, tras registrar audits y pilotos en OUTPUT_DIRECTORIES):
+#   tests/test_output_layout.py + tests/layer5_experiment/test_layout_relocation.py: 9/9 pasan.
+#   Selección de consumidores (test_prospective_v2_closure, test_prospective_v2_decisions,
+#   test_semantic_correction_v2, test_claude_recommendations, test_output_layout): 89/89 pasan.
+#   Línea base histórica sin cambios: 42/1.854 diferencias del verificador V2 (protected_inputs)
+#   y 32 errores de verify_layout. El plan V3.3 sigue con sus 13 recursos íntegros.
+version: 1
+comprobado: '2026-11-20'
+entrypoint: run.py -> scripts/pipeline_coordinator.py (execute_pipeline) | src/autonomous_execution/cli.py
+
+# Directorios de primer nivel de outputs/ autorizados por tests/test_output_layout.py (OUTPUT_DIRECTORIES).
+# Autorizar una ubicación no equivale a fijarla por hash; las fijaciones reales están en fijada_por de cada ruta.
+directorios_autorizados:
+  fuente: tests/test_output_layout.py OUTPUT_DIRECTORIES
+  obligatorios: [layer2, layer3, layer4, runs]
+  permitidos: [layer2, layer3, layer4, runs, shared, historico, reviews, audits, pilotos]
+
+rutas:
+
+  # ------------------------------------------------------------------ ACTUAL
+  - ruta: run.py
+    categoria: ACTUAL
+    capa: orquestacion
+    productor: repositorio
+    consumidores: [usuario]
+    run_nuevo: lee
+    fijada_por: [runtime_bindings (config/sad_relocations.json)]
+    regenerable: no
+    conservar_ubicacion: true
+    estado: OK (import verificado)
+
+  - ruta: scripts/pipeline_coordinator.py
+    categoria: ACTUAL
+    capa: orquestacion
+    productor: repositorio
+    consumidores: [run.py, src/autonomous_execution/*, src/run_storage.py, src/run_retention.py]
+    run_nuevo: lee
+    fijada_por: [code_hashes de cada run (src/layer2_processing/pipeline.py:10)]
+    regenerable: no
+    conservar_ubicacion: true
+    estado: OK
+
+  - ruta: src/
+    categoria: ACTUAL
+    capa: todas
+    productor: repositorio
+    consumidores: [run.py]
+    run_nuevo: lee
+    fijada_por: ['code_hashes (todos los *.py) de cada run', 'identidad de Knowledge BASE (layer2_processing/{preprocessing,knowledge}, layer3_graphrag)']
+    regenerable: no
+    conservar_ubicacion: true
+    estado: OK (12 módulos de entrada importan)
+
+  - ruta: config/pipeline_manual.json
+    categoria: ACTUAL
+    capa: orquestacion
+    productor: repositorio
+    consumidores: [scripts/pipeline_coordinator.py (config por defecto)]
+    run_nuevo: lee
+    fijada_por: [execution.json/run.json de cada run (configuración congelada)]
+    regenerable: no
+    conservar_ubicacion: true
+    estado: OK
+
+  - ruta: config/
+    categoria: ACTUAL
+    capa: todas
+    productor: repositorio
+    consumidores: [coordinador, layer2_processing, layer3_graphrag, knowledge_store._verification_inputs]
+    run_nuevo: lee
+    fijada_por: [code_hashes (layer1-3.yaml, sources.example.yaml), identidad de Knowledge BASE (prefijo config/)]
+    regenerable: no
+    conservar_ubicacion: true
+    estado: OK
+    nota: Un archivo nuevo o modificado aquí puede volver incompatible la versión BASE y forzar un rebuild con embeddings.
+
+  - ruta: data/layer1_sources/
+    categoria: COMPARTIDO
+    capa: 1
+    productor: custodio de datos (canal privado)
+    consumidores: [preprocessing (raw_base), knowledge_store.identity, territories.catalog (DANE), catálogo de indicadores]
+    run_nuevo: lee
+    fijada_por: [manifiestos/raw_manifest.json de cada run, identidad de versiones BASE, dane_reference_manifest.source_sha256]
+    regenerable: no
+    conservar_ubicacion: true
+    estado: OK (SHA de la fuente DANE coincide)
+
+  - ruta: data/templates/plantilla_resultado_tesis.xlsx
+    categoria: ACTUAL
+    capa: 5
+    productor: repositorio
+    consumidores: [layer4_evaluation.thesis_output (TEMPLATE)]
+    run_nuevo: lee
+    fijada_por: [export.json template_sha256 de cada run]
+    regenerable: no
+    conservar_ubicacion: true
+    estado: OK
+
+  - ruta: outputs/runs/<local|api>/<run_id>/
+    categoria: ACTUAL
+    capa: 5
+    productor: scripts/pipeline_coordinator.py, src/run_paths.py
+    consumidores: [status/resume/export/stop de run.py, run_storage, run_retention]
+    run_nuevo: escribe
+    fijada_por: [manifiestos/prepared_hashes.json, run.json code_hashes, estado/execution.json]
+    regenerable: solo_con_inferencia
+    conservar_ubicacion: true
+    estado: OK
+    nota: "Subcarpetas: estado/, manifiestos/, grafo/, logs/, evaluation/, resultados/. local=Ollama, api=OpenAI, anteriores=proveedor no identificable."
+
+  - ruta: outputs/historico/<local|api>/<run_id>/
+    categoria: ACTUAL
+    capa: 5
+    productor: src/run_storage.py (archive_export)
+    consumidores: [usuario, run.py cleanup (comprobación de snapshot)]
+    run_nuevo: escribe
+    fijada_por: [metadata.json, latest.json, revisiones/<hash>]
+    regenerable: no
+    conservar_ubicacion: true
+    estado: OK
+
+  # ------------------------------------------------------------------ COMPARTIDO
+  - ruta: outputs/shared/base/active.json
+    categoria: COMPARTIDO
+    capa: 2-3
+    productor: src/knowledge_store.py (activate)
+    consumidores: [knowledge_store.compatible, reuse_global_base]
+    run_nuevo: lee
+    fijada_por: [manifest_sha256 de la versión activa]
+    regenerable: no
+    conservar_ubicacion: true
+    estado: OK (d778bfa52b4c1c69-c64d8652; sha del manifiesto coincide)
+
+  - ruta: outputs/shared/base/versions/<version_id>/
+    categoria: COMPARTIDO
+    capa: 2-3
+    productor: layer2_processing.pipeline.prepare (rebuild) + knowledge_store
+    consumidores: [todos los runs con knowledge_ref]
+    run_nuevo: lee
+    fijada_por: [knowledge_ref (version_id + manifest_sha256) en cada run, artifact_inventory_sha256]
+    regenerable: solo_con_build
+    conservar_ubicacion: true
+    estado: OK (ubicación y publicación de la versión activa presentes)
+    nota: Las versiones anteriores siguen siendo necesarias para los runs que las referencian.
+
+  - ruta: outputs/shared/base/staging/
+    categoria: COMPARTIDO
+    capa: 2-3
+    productor: layer2_processing.pipeline.prepare (rebuild)
+    consumidores: [promoción a versions/]
+    run_nuevo: lee_si_rebuild
+    fijada_por: [promotion.json]
+    regenerable: solo_con_build
+    conservar_ubicacion: true
+    estado: NO_REVISADO (build-bce867… sin promotion.json; posible build interrumpido)
+
+  - ruta: outputs/layer3/models/bge-m3/5617a9f61b028005a4858fdac845db406aefb181/
+    categoria: COMPARTIDO
+    capa: 3
+    productor: src/layer3_graphrag/model_setup.py (descarga original)
+    consumidores: [layer3_graphrag.embeddings (raíz del código), config/layer3.yaml, config de cada versión BASE]
+    run_nuevo: lee_si_rebuild
+    fijada_por: [config/layer3.yaml weights_sha256, embedding_config_hash de publicaciones]
+    regenerable: 'no (allow_model_download: false)'
+    conservar_ubicacion: true
+    estado: OK (weights_sha256 coincide)
+
+  - ruta: outputs/layer3/tokenizers/qwen3.5/tokenizer.json
+    categoria: COMPARTIDO
+    capa: 4
+    productor: scripts/prepare_qwen_tokenizer.py
+    consumidores: [autonomous_execution.lifecycle:333, token_budget]
+    run_nuevo: lee
+    fijada_por: [config/qwen_tokenizer.json (path + sha256)]
+    regenerable: no
+    conservar_ubicacion: true
+    estado: OK
+
+  - ruta: outputs/layer4/pruebas/validacion_v3_3/cierre_homogeneo_v3_3/closure.plan.json
+    categoria: COMPARTIDO
+    capa: 4
+    productor: scripts/run_layer4_definitive_v3_3.py
+    consumidores: [layer4_evaluation.live_execution (FROZEN), pipeline_coordinator.evaluation_settings, autonomous_execution.preparation_integrity]
+    run_nuevo: lee
+    fijada_por: [closure.manifest.json plan_sha256]
+    regenerable: no
+    conservar_ubicacion: true
+    estado: OK
+    nota: Sus 13 recursos no .py se verifican en cada run nuevo (ver recursos_plan_v33).
+
+  - ruta: outputs/layer4/indicator_profiles/
+    categoria: COMPARTIDO
+    capa: 4
+    productor: scripts/build_indicator_assessment_profiles.py
+    consumidores: [preparation_integrity.pin, global_discovery, experiment_inputs, preliminary]
+    run_nuevo: lee
+    fijada_por: [indicator_assessment_profiles_manifest.json, closure.plan.json]
+    regenerable: no
+    conservar_ubicacion: true
+    estado: OK
+    nota: indicator_assessment_versions/ es HISTORICO (protected_before V2).
+
+  - ruta: outputs/layer4/auditoria/rutas.json
+    categoria: COMPARTIDO
+    capa: todas
+    productor: reubicación de Capa 4 (registro)
+    consumidores: [checkpoints.registry/resolve, knowledge_store._verification_inputs, verify_layer4_layout.py]
+    run_nuevo: lee
+    fijada_por: [entrada observada en la verificación de Knowledge BASE]
+    regenerable: no
+    conservar_ubicacion: true
+    estado: OK
+
+  - ruta: config/sad_relocations.json
+    categoria: COMPARTIDO
+    capa: todas
+    productor: migración SAD 2026-10-30
+    consumidores: [checkpoints.registry, layer2_processing.pipeline (se copia a cada workspace)]
+    run_nuevo: lee
+    fijada_por: [copias en 21 workspaces de runs y versiones BASE]
+    regenerable: no
+    conservar_ubicacion: true
+    estado: OK (81 prefixes, 467 file_aliases, 475 runtime_bindings combinados)
+
+  - ruta: outputs/layer4/auditoria/codigo_original/
+    categoria: COMPARTIDO
+    capa: 4
+    productor: reubicación de Capa 4
+    consumidores: [checkpoints.verify_expected (runtime_bindings), verify_layer4_layout.py, territorial_consumption]
+    run_nuevo: no
+    fijada_por: [runtime_bindings.snapshot/before_sha256]
+    regenerable: no
+    conservar_ubicacion: true
+    estado: OK (45 snapshots presentes)
+
+  - ruta: outputs/layer2/reference/
+    categoria: COMPARTIDO
+    capa: 2
+    productor: scripts/build_dane_reference.py
+    consumidores: [autonomous_execution.final_output:81 (hashea todo el directorio), export_layer4_powerbi.py, tests/layer5_territories]
+    run_nuevo: lee_export_autonomo
+    fijada_por: [dane_reference_manifest.json, territory_manifest.reference_id, V2 protected_inputs]
+    regenerable: no
+    conservar_ubicacion: true
+    estado: OK
+    nota: El export estándar de run.py resuelve los territorios desde data/layer1_sources/reference/Codigos Dane (territories/catalog.py:18).
+
+  - ruta: outputs/layer3/query_cache/
+    categoria: COMPARTIDO
+    capa: 3
+    productor: layer3_graphrag (evaluación de la publicación raíz)
+    consumidores: [layer3_graphrag.indicator_retrieval (raíz del snapshot)]
+    run_nuevo: 'no (los runs BASE usan la query_cache de su versión)'
+    fijada_por: [política de retención: nunca se retira]
+    regenerable: solo_con_build
+    conservar_ubicacion: true
+    estado: OK
+
+  # ------------------------------------------------------------------ HISTORICO
+  - ruta: outputs/layer4/final/resultado_capa4.xlsx
+    categoria: HISTORICO
+    capa: 4
+    productor: scripts/run_layer4_closure.py finalize (cierre V2)
+    consumidores: [Power BI, closure.plan.json source_hashes (cada run nuevo), verify_layer4_layout.py]
+    run_nuevo: lee
+    fijada_por: [closure.plan.json, cierre_v2/final_manifest.json, verify_layer4_layout (sha fc6f8764…)]
+    regenerable: no
+    conservar_ubicacion: true
+    estado: OK
+    nota: Publicación oficial vigente de Capa 4 (V2). También es recurso del plan V3.3.
+
+  - ruta: outputs/layer4/auditoria/cierre_v2/
+    categoria: HISTORICO
+    capa: 4
+    productor: closure_export / closure_audit
+    consumidores: [run_layer4_closure.py verify-final, closure.plan.json (final_manifest.json)]
+    run_nuevo: 'lee (solo final_manifest.json)'
+    fijada_por: [final_manifest.json protected_inputs (1.854 rutas)]
+    regenerable: no
+    conservar_ubicacion: true
+    estado: 'DIFERENCIA_PREVIA: 42/1854 protected_inputs fallan (41 deriva de código/config/tests + METADATA.png)'
+
+  - ruta: outputs/layer4/pruebas/validacion_v3_3/
+    categoria: HISTORICO
+    capa: 4
+    productor: scripts/run_layer4_pilot_discovery_v3_3.py, run_layer4_definitive_v3_3.py, run_layer4_coverage_v3.py
+    consumidores: [plan congelado (13 recursos), preparation_integrity (rubrics), estado_reanudacion_v3_3.json]
+    run_nuevo: lee
+    fijada_por: [closure.plan.json source_hashes]
+    regenerable: solo_con_inferencia
+    conservar_ubicacion: true
+    estado: OK
+
+  - ruta: outputs/layer4/pruebas/piloto_v2/
+    categoria: HISTORICO
+    capa: 4
+    productor: scripts/run_layer4_closure.py, run_layer4_experiment.py
+    consumidores: [closure.plan.json (cierre_20/plan.json), V2 protected_inputs, inventory_before.json]
+    run_nuevo: 'lee (solo cierre_20/plan.json)'
+    fijada_por: [closure.plan.json, final_manifest.json, inventory_before.json]
+    regenerable: solo_con_inferencia
+    conservar_ubicacion: true
+    estado: 'OK; entrega_aceptada/ INDETERMINADO (ACL deniega lectura)'
+
+  - ruta: outputs/layer4/territorios/publicacion/
+    categoria: HISTORICO
+    capa: 4B
+    productor: scripts/run_territories.py (layer4_evaluation.territories.pipeline)
+    consumidores: [export_layer4_powerbi.py, export_layer4_pilot.py, territorial_consumption (V3.3), verify_territories.py, 'config/layer4_{experiment,final}.yaml']
+    run_nuevo: no
+    fijada_por: [territory_manifest.json, V2 protected_inputs, inventory_before.json]
+    regenerable: 'no (determinista, pero versionado y aceptado)'
+    conservar_ubicacion: true
+    estado: 'DIFERENCIA_PREVIA: falta qa/METADATA.png (BLOCKED_MISSING_ORIGINAL_METADATA_PNG)'
+
+  - ruta: outputs/layer4/territorios/versiones/
+    categoria: HISTORICO
+    capa: 4B
+    productor: territories.pipeline (archivo de la publicación anterior)
+    consumidores: [rollback 4B, territorial_png_recovery.json]
+    run_nuevo: no
+    fijada_por: [inventory_before.json (130 archivos)]
+    regenerable: no
+    conservar_ubicacion: true
+    estado: OK
+
+  - ruta: outputs/layer4/territorios/aceptacion/
+    categoria: HISTORICO
+    capa: 4B
+    productor: aceptación 4B (pytest --basetemp histórico, territory_integrity.py)
+    consumidores: [V2 protected_inputs (incluye *-test-temp), experiment_inputs.protected_snapshot]
+    run_nuevo: no
+    fijada_por: [final_manifest.json protected_inputs (1.148 archivos test-temp)]
+    regenerable: no
+    conservar_ubicacion: true
+    estado: OK (contiene 118 enlaces simbólicos rotos de pytest, no fijados)
+
+  - ruta: outputs/layer4/auditoria/historicos/
+    categoria: HISTORICO
+    capa: 4
+    productor: experimentos 20/50, preliminar, entregas iniciales
+    consumidores: [closure_audit (experimento_50/experiment_manifest.json), export_layer4_powerbi.py (preliminar_20, powerbi_preliminar_20), protected_snapshot]
+    run_nuevo: no
+    fijada_por: [V2 protected_inputs, protected_before.json, inventory_before.json]
+    regenerable: solo_con_inferencia
+    conservar_ubicacion: true
+    estado: OK
+
+  - ruta: outputs/layer4/auditoria/PROJ_*/
+    categoria: HISTORICO
+    capa: 4
+    productor: extensión demo 30 (auditoria/demo_30_*.py, plan auditoria/closure.plan.json)
+    consumidores: [final/candidatos/resultado_capa4_demo_30_ampliado.xlsx (evidencia)]
+    run_nuevo: no
+    fijada_por: [inventory_before.json]
+    regenerable: solo_con_inferencia
+    conservar_ubicacion: true
+    estado: OK
+
+  - ruta: outputs/layer4/auditoria/pendiente_revision/
+    categoria: HISTORICO
+    capa: 4
+    productor: pruebas sintéticas históricas
+    consumidores: [verify_layer4_layout.py (inventory_restricted.json)]
+    run_nuevo: no
+    fijada_por: [inventory_restricted.json (287 archivos)]
+    regenerable: 'si (sintético), pero romperia el verificador'
+    conservar_ubicacion: true
+    estado: OK
+
+  - ruta: outputs/layer4/performance/
+    categoria: HISTORICO
+    capa: 4
+    productor: performance_report (cierre V2)
+    consumidores: [rutas.json (prefijo closure/performance)]
+    run_nuevo: no
+    fijada_por: [inventory_before.json]
+    regenerable: no
+    conservar_ubicacion: true
+    estado: OK
+
+  - ruta: outputs/layer4/final/candidatos/
+    categoria: HISTORICO
+    capa: 4
+    productor: demo 30 y demo en vivo (2026-10-26)
+    consumidores: ['live_execution.BASE por defecto (demo_en_vivo/)', auditoria/verify_live_demo_local.py]
+    run_nuevo: 'no (el coordinador reasigna BASE al run)'
+    fijada_por: []
+    regenerable: solo_con_inferencia
+    conservar_ubicacion: true
+    estado: 'OK; README_DEMO cita scripts/run_layer4_live_demo.py, que no existe'
+
+  - ruta: outputs/layer3/publication/
+    categoria: HISTORICO
+    capa: 3
+    productor: scripts/run_layer3.py (layer3_2026-10-14T094639_959121+0000_eca9000e)
+    consumidores: [experiment_inputs, global_discovery, preparation, preliminary, verify_layer4_preparation, run_retention (protección)]
+    run_nuevo: 'no (los runs BASE usan la publicación de su versión)'
+    fijada_por: [_manifest.json output_hashes (19), V2 protected_inputs (alias data/graphrag)]
+    regenerable: solo_con_build
+    conservar_ubicacion: true
+    estado: OK (19/19)
+    nota: El duplicado source_embeddings.npy = source/vectors.npy (177 MiB) es contractual.
+
+  - ruta: outputs/layer3/{manifests,reports,quality}/
+    categoria: HISTORICO
+    capa: 3
+    productor: scripts/run_layer3.py
+    consumidores: [config/layer3.yaml (reports/technical_queries.json), tests/layer4_graphrag/test_integration_pending.py, RUNBOOK]
+    run_nuevo: no
+    fijada_por: [aceptación de Capa 3]
+    regenerable: solo_con_build
+    conservar_ubicacion: true
+    estado: OK
+
+  - ruta: outputs/layer2/{canonical,knowledge}/
+    categoria: HISTORICO
+    capa: 2
+    productor: scripts/run_layer1.py, run_layer2.py (corridas 2026-10-05)
+    consumidores: [publicación Capa 3 raíz (layer2_manifest_hash), model_setup, final_output.researchers (fallback de runs sin knowledge_ref), run_retention (referencia oficial)]
+    run_nuevo: 'no (run BASE)'
+    fijada_por: [_manifest.json, V2 protected_inputs (alias data/canonical, data/knowledge)]
+    regenerable: solo_con_build
+    conservar_ubicacion: true
+    estado: OK (7/7 y 8/8 hashes)
+
+  - ruta: outputs/layer2/{staging,preprocessing,knowledge_artifacts,audit}/
+    categoria: HISTORICO
+    capa: 2
+    productor: ETL Capa 2 (2026-10-05)
+    consumidores: [linaje del canonical (staging/*/run_20261005_194411_225750), centinelas de publicación (knowledge_artifacts)]
+    run_nuevo: 'no (layer3 validate_inputs y territories.inputs comprueban que no existan .publish.lock/publication_pending.json)'
+    fijada_por: [canonical/_manifest.json output_files, file_aliases data/staging]
+    regenerable: no
+    conservar_ubicacion: true
+    estado: OK (sin centinelas)
+
+  - ruta: outputs/historico/compactados/
+    categoria: HISTORICO
+    capa: 5
+    productor: scripts/manage_run_retention.py
+    consumidores: [manage_run_retention --verify/--extract-run]
+    run_nuevo: no
+    fijada_por: [SHA-256 del ZIP e index.json]
+    regenerable: no
+    conservar_ubicacion: true
+    estado: NO_REVISADO
+
+  - ruta: outputs/runs/anteriores/
+    categoria: HISTORICO
+    capa: 2-3
+    productor: migración de runs
+    consumidores: [run_retention (referencias oficiales Layers 1-3)]
+    run_nuevo: no
+    fijada_por: [outputs/runs/.relocations.json]
+    regenerable: no
+    conservar_ubicacion: true
+    estado: NO_REVISADO
+
+  # ------------------------------------------------------------------ EXPERIMENTAL
+  - ruta: outputs/audits/
+    categoria: EXPERIMENTAL
+    capa: diagnostico
+    productor: [scripts/benchmark_scoped_retrieval.py (optimizacion_v5_recuperacion), tests/semantic_validation/harness.py (validacion_semantica_graphrag), informes por tarea de agentes]
+    consumidores: [tests/test_semantic_correction_v2.py, tests/test_claude_recommendations.py (validacion_real_corregida_v1), tests/semantic_validation/harness.py (run_20261116_094429_222507_precision), tests/real_runs/run_v5_openai.py (ejecucion_openai_v5_20261119/manifiesto_muestra.json)]
+    run_nuevo: no
+    fijada_por: []
+    autorizada_por: tests/test_output_layout.py OUTPUT_DIRECTORIES
+    regenerable: 'no (contiene respuestas LLM originales)'
+    conservar_ubicacion: 'true (consumidores en tests y scripts; ningún manifiesto sellado la cita)'
+    estado: 'OK: autorizada en OUTPUT_DIRECTORIES; contenido no movido ni modificado'
+
+  - ruta: outputs/pilotos/
+    categoria: EXPERIMENTAL
+    capa: 4
+    productor: scripts/pilot_prospective_v2.py
+    consumidores: [scripts/pilot_prospective_v2.py (exige esta raíz; lee prospective_v2_tec04_r2), tests/test_prospective_v2_closure.py, tests/test_prospective_v2_decisions.py (prospective_v2_tec04_r2, prospective_v2_tec04_cierre)]
+    run_nuevo: no
+    fijada_por: []
+    autorizada_por: tests/test_output_layout.py OUTPUT_DIRECTORIES
+    regenerable: solo_con_inferencia
+    conservar_ubicacion: 'true (scripts/pilot_prospective_v2.py exige esta raíz; consumidores en tests; ningún manifiesto sellado la cita)'
+    estado: 'OK: autorizada en OUTPUT_DIRECTORIES; contenido no movido ni modificado'
+
+  - ruta: outputs/reviews/
+    categoria: EXPERIMENTAL
+    capa: revision humana
+    productor: manual
+    consumidores: []
+    run_nuevo: no
+    fijada_por: []
+    autorizada_por: tests/test_output_layout.py OUTPUT_DIRECTORIES
+    regenerable: no
+    conservar_ubicacion: true
+    estado: OK (documentada en OUTPUT_DIRECTORIES)
+
+  - ruta: outputs/runs/source_evaluation/
+    categoria: EXPERIMENTAL
+    capa: 4
+    productor: scripts/evaluate_source.py
+    consumidores: []
+    run_nuevo: no
+    fijada_por: []
+    regenerable: solo_con_inferencia
+    conservar_ubicacion: true
+    estado: NO_REVISADO
+
+recursos_plan_v33:
+  # Verificados por pipeline_coordinator.evaluation_settings() en cada run nuevo. Clave original -> ruta resuelta.
+  outputs/layer4/pruebas/cierre_v2_20_definitivo/plan.json: outputs/layer4/pruebas/piloto_v2/cierre_20/plan.json
+  outputs/layer4/pruebas/mejora_cobertura_v3/continuacion_prompt_v3_1/plan.json: outputs/layer4/pruebas/validacion_v3_3/continuacion_prompt_v3_1/plan.json
+  outputs/layer4/pruebas/mejora_cobertura_v3/continuacion_prompt_v3_1/rubrics.json: outputs/layer4/pruebas/validacion_v3_3/continuacion_prompt_v3_1/rubrics.json
+  outputs/layer4/pruebas/mejora_cobertura_v3/pilot_five.assessment_results.jsonl: outputs/layer4/pruebas/validacion_v3_3/pilot_five.assessment_results.jsonl
+  outputs/layer4/pruebas/mejora_cobertura_v3/pilot_five.verification.json: outputs/layer4/pruebas/validacion_v3_3/pilot_five.verification.json
+  outputs/layer4/pruebas/mejora_cobertura_v3/auditoria_rubricas_v3_4.propuesta.json: outputs/layer4/pruebas/validacion_v3_3/auditoria_rubricas_v3_4.propuesta.json
+  outputs/layer4/final/resultado_capa4.xlsx: outputs/layer4/final/resultado_capa4.xlsx
+  outputs/layer4/closure/final_manifest.json: outputs/layer4/auditoria/cierre_v2/final_manifest.json
+  outputs/layer4/pruebas/validacion_v3_3/control_positivo_v3_3_PROJ_20022.response.json: (misma ruta)
+  outputs/layer4/pruebas/validacion_v3_3/prueba_controlada_v3_3_PROJ_22027/discovery/codex_runs/PROJ_22027/attempt_1/response.json: (misma ruta)
+  outputs/layer4/pruebas/validacion_v3_3/continuacion_prompt_v3_1/discovery/codex_runs/PROJ_20899/attempt_2/response.json: (misma ruta)
+  outputs/layer4/pruebas/validacion_v3_3/cierre_homogeneo_v3_3/PROJ_20456/discovery/codex_runs/PROJ_20456/attempt_1/response.json: (misma ruta)
+  outputs/layer4/pruebas/validacion_v3_3/cierre_homogeneo_v3_3/PROJ_21299/discovery/codex_runs/PROJ_21299/attempt_1/response.json: (misma ruta)

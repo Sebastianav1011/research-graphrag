@@ -17,11 +17,14 @@ builders are prepared under shared staging and published by atomic rename only
 after verification; their manifests point directly to the final shared location.
 """
 from datetime import datetime, timezone
+from contextlib import contextmanager
 import hashlib
 import json
+import logging
 import os
 from pathlib import Path
 import re
+import tempfile
 
 SHARED = 'outputs/shared/base'
 VERSION_SCHEMA = 'SHARED_BASE_KNOWLEDGE_V1'
@@ -63,9 +66,56 @@ def _atomic_write(path, value):
     """Write a complete file next to its target, then replace it in one step."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(path.name + '.tmp')
-    temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True), encoding='utf-8')
-    os.replace(temporary, path)
+    # Independent writers must never share a temporary filename.
+    with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=path.parent,
+                                     prefix=path.name + '.', suffix='.tmp', delete=False) as stream:
+        temporary = Path(stream.name)
+        try:
+            stream.write(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True))
+            stream.flush()
+            os.fsync(stream.fileno())
+        except BaseException:
+            stream.close()
+            temporary.unlink(missing_ok=True)
+            raise
+    try:
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+@contextmanager
+def _publication_lock(root):
+    """Serialize publishers; the OS releases the lock even if a process exits.
+
+    Keep the lock file in place: deleting it would let waiters lock different files.
+    Fail immediately rather than holding a campaign indefinitely.
+    """
+    path = shared_root(root) / '.publication.lock'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open('a+b') as stream:
+        if path.stat().st_size == 0:
+            stream.write(b'0')
+            stream.flush()
+        stream.seek(0)
+        if os.name == 'nt':
+            import msvcrt
+            acquire = lambda: msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+            release = lambda: msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            acquire = lambda: fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            release = lambda: fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+        try:
+            acquire()
+        except OSError as exc:
+            raise KnowledgeUnavailable(f'Publicacion ocupada o bloqueo inaccesible: {path}; '
+                                       f'errno={exc.errno}; winerror={getattr(exc, "winerror", None)}') from exc
+        try:
+            yield
+        finally:
+            stream.seek(0)
+            release()
 
 
 def shared_root(root):
@@ -191,6 +241,11 @@ def _verification_inputs(root, manifest):
 def verify(root, manifest, *, deep=True):
     """Reuse only an unchanged, deeply verified sealed version in this execution."""
     from knowledge_verification import receipts, snapshot, supports_read_leases
+    # Staging must be movable. Windows FILE_SHARE_READ leases deny renames of
+    # the containing directory. Validate it fully without retaining handles;
+    # verify again and acquire immutable leases at the final location.
+    if _stage(root, location(root, manifest)):
+        return _verify(root, manifest, deep=True)
     cache = receipts.get()
     if cache is None or manifest.get('storage') != 'SHARED_SEALED_CHECKPOINT':
         return _verify(root, manifest, deep=deep)
@@ -297,8 +352,21 @@ def _publish_staged(root, builder, *, when=None):
             raise KnowledgeUnavailable('Destino compartido redirigido')
         if target.exists():
             raise KnowledgeUnavailable('Destino compartido existente; conservar ambos checkpoints')
+        if manifest_path(root, manifest['version_id']).exists():
+            raise KnowledgeUnavailable('La version ya existe; no sobrescribir ni relocalizar')
         target.parent.mkdir(parents=True, exist_ok=True)
-        os.replace(builder, target)
+        try:
+            # rename is no-clobber on Windows, unlike replace. On POSIX the
+            # publication lock serializes cooperating publishers.
+            os.rename(builder, target)
+        except OSError as exc:
+            detail = (f'Publicacion fallida: operation=rename; source={builder}; target={target}; '
+                      f'journal={journal}; errno={exc.errno}; winerror={getattr(exc, "winerror", None)}; '
+                      f'source_exists={builder.exists()}; target_exists={target.exists()}. '
+                      'Se conservan staging y recibo; comprobar permisos y manejadores externos.')
+            exc.add_note(detail)
+            logging.getLogger(__name__).exception(detail)
+            raise
     verify(root, manifest)
     path = manifest_path(root, manifest['version_id'])
     if path.exists():
@@ -312,7 +380,8 @@ def _publish_staged(root, builder, *, when=None):
 def register(root, builder, *, activate=False, when=None):
     """Register legacy in place; publish only new shared staging builders."""
     if _stage(root, builder):
-        manifest = _publish_staged(root, builder, when=when)
+        with _publication_lock(root):
+            manifest = _publish_staged(root, builder, when=when)
     else:
         manifest = describe(root, builder)
         target = manifest_path(root, manifest['version_id'])

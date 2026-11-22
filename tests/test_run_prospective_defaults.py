@@ -50,8 +50,9 @@ def test_no_argument_entrypoint_passes_defaults_without_methodology_menu(monkeyp
         return dict(status='CANCELLED')
     monkeypatch.setattr(console,'ROOT',tmp_path)
     monkeypatch.setattr(console,'coordinator',lambda:SimpleNamespace(execute_pipeline=execute))
-    # Existing menus: execute, BASE, select count, count, reuse knowledge, exit.
-    answers=iter(['1','2','1','1','','0'])
+    # Existing menus: execute, BASE, select count, count, reuse knowledge,
+    # no articles (V5 question after the projects), exit.
+    answers=iter(['1','2','1','1','','N','0'])
     monkeypatch.setattr('builtins.input',lambda _:next(answers))
     monkeypatch.setattr(console.sys,'argv',['run.py'])
     assert console.main()==0 and len(calls)==1
